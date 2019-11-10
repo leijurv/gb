@@ -7,6 +7,11 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+
+	"github.com/leijurv/gb/backup"
+	"github.com/leijurv/gb/crypto"
+	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/storage"
 )
 
 func cat(hash []byte, tx *sql.Tx) io.Reader {
@@ -28,7 +33,7 @@ func cat(hash []byte, tx *sql.Tx) io.Reader {
 				blob_entries.final_size,
 				blob_entries.compression_alg,
 				blobs.encryption_key,
-				blob_storage.full_path,
+				blob_storage.path,
 				storage.storage_id,
 				storage.type,
 				storage.identifier,
@@ -42,14 +47,14 @@ func cat(hash []byte, tx *sql.Tx) io.Reader {
 	if err != nil {
 		panic(err)
 	}
-	storage := StorageDataToStorage(storageID, kind, identifier, rootPath)
-	reader := storage.DownloadSection(blobID, offset, length)
-	decrypted := DecryptBlobEntry(reader, offset, key)
+	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
+	reader := storageR.DownloadSection(blobID, offset, length)
+	decrypted := crypto.DecryptBlobEntry(reader, offset, key)
 	return decrypted
 }
 
 func downloadOne(hash []byte) {
-	tx, err := db.Begin()
+	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
 	}
@@ -69,7 +74,7 @@ func downloadOne(hash []byte) {
 }
 
 func testAll() {
-	tx, err := db.Begin()
+	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
 	}
@@ -92,7 +97,7 @@ func testAll() {
 		}
 		log.Println("Testing fetching hash", hex.EncodeToString(hash))
 		reader := cat(hash, tx)
-		h := NewSHA256HasherSizer()
+		h := backup.NewSHA256HasherSizer()
 		if _, err := io.Copy(&h, reader); err != nil {
 			panic(err)
 		}

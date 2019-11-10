@@ -1,12 +1,14 @@
-package main
+package s3
 
 import (
-	"crypto/md5"
+	"bytes"
 	"encoding/hex"
 	"io"
 	"log"
 	"strconv"
 	"strings"
+
+	"github.com/leijurv/gb/storage_base"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -19,9 +21,9 @@ var AWSSession = session.Must(session.NewSession(&aws.Config{Region: aws.String(
 const s3PartSize = 5 * 1024 * 1024
 
 type S3 struct {
-	storageID []byte
-	bucket    string
-	rootPath  string
+	StorageID []byte
+	Bucket    string
+	RootPath  string
 }
 
 type s3Result struct {
@@ -30,24 +32,19 @@ type s3Result struct {
 }
 
 type s3Upload struct {
-	calc   *ETagCalculator
+	calc   *eTagCalculator
 	writer *io.PipeWriter
 	result chan s3Result
 	path   string
 	s3     *S3
 }
 
-type ETagCalculator struct {
-	writer *io.PipeWriter
-	result chan string
-}
-
 func (remote *S3) GetID() []byte {
-	return remote.storageID
+	return remote.StorageID
 }
 
 func (remote *S3) niceRootPath() string {
-	path := remote.rootPath
+	path := remote.RootPath
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
@@ -62,7 +59,7 @@ func formatPath(blobID []byte) string {
 	return h[:2] + "/" + h[2:4] + "/" + h
 }
 
-func (remote *S3) BeginBlobUpload(blobID []byte) StorageUpload {
+func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 	path := remote.niceRootPath() + formatPath(blobID)
 	log.Println("Path is", path)
 	pipeR, pipeW := io.Pipe()
@@ -72,7 +69,7 @@ func (remote *S3) BeginBlobUpload(blobID []byte) StorageUpload {
 	resultCh := make(chan s3Result)
 	go func() {
 		result, err := uploader.Upload(&s3manager.UploadInput{
-			Bucket: aws.String(remote.bucket),
+			Bucket: aws.String(remote.Bucket),
 			Key:    aws.String(path),
 			Body:   pipeR,
 		})
@@ -83,7 +80,7 @@ func (remote *S3) BeginBlobUpload(blobID []byte) StorageUpload {
 		resultCh <- s3Result{result, err}
 	}()
 	return &s3Upload{
-		calc:   CreateETagCalculator(),
+		calc:   createETagCalculator(),
 		writer: pipeW,
 		result: resultCh,
 		path:   path,
@@ -92,12 +89,15 @@ func (remote *S3) BeginBlobUpload(blobID []byte) StorageUpload {
 }
 
 func (remote *S3) DownloadSection(blobID []byte, offset int64, length int64) io.Reader {
+	if length == 0 {
+		return bytes.NewBuffer(nil)
+	}
 	path := remote.niceRootPath() + formatPath(blobID)
 	log.Println("S3 key is", path)
 	rangeStr := "bytes=" + strconv.FormatInt(offset, 10) + "-" + strconv.FormatInt(offset+length-1, 10)
 	log.Println("S3 range is", rangeStr)
 	result, err := s3.New(AWSSession).GetObject(&s3.GetObjectInput{
-		Bucket: aws.String(remote.bucket),
+		Bucket: aws.String(remote.Bucket),
 		Key:    aws.String(path),
 		Range:  aws.String(rangeStr),
 	})
@@ -111,7 +111,7 @@ func (up *s3Upload) Begin() io.Writer {
 	return io.MultiWriter(up.calc.writer, up.writer)
 }
 
-func (up *s3Upload) End() CompletedUpload {
+func (up *s3Upload) End() storage_base.CompletedUpload {
 	up.writer.Close()
 	up.calc.writer.Close()
 	result := <-up.result
@@ -121,18 +121,18 @@ func (up *s3Upload) End() CompletedUpload {
 	log.Println("Upload output", result.result.Location)
 	etag := <-up.calc.result
 	log.Println("Expecting etag", etag)
-	real := checkETag(up.s3.bucket, up.path)
+	real := fetchETag(up.s3.Bucket, up.path)
 	log.Println("Real etag was", real)
 	if etag != real {
 		panic("aws broke the etag lmao")
 	}
-	return CompletedUpload{
-		path:     up.path,
-		checksum: etag,
+	return storage_base.CompletedUpload{
+		Path:     up.path,
+		Checksum: etag,
 	}
 }
 
-func checkETag(bucket string, path string) string {
+func fetchETag(bucket string, path string) string {
 	result, err := s3.New(AWSSession).HeadObject(&s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(path),
@@ -142,43 +142,4 @@ func checkETag(bucket string, path string) string {
 	}
 	ret := *result.ETag
 	return ret[1 : len(ret)-1] // aws puts double quotes around the etag lol
-}
-
-func CreateETagCalculator() *ETagCalculator {
-	reader, writer := io.Pipe()
-	result := make(chan string)
-	calc := &ETagCalculator{
-		writer: writer,
-		result: result,
-	}
-	go func() {
-		numParts := 0
-		var allSums []byte
-		for {
-			lr := io.LimitReader(reader, s3PartSize)
-			h := md5.New()
-			n, err := io.Copy(h, lr)
-			if err != nil {
-				panic(err) // literally impossible
-			}
-			if n == 0 {
-				break
-			}
-			allSums = append(allSums, h.Sum(nil)...)
-			numParts++
-		}
-		if numParts == 1 {
-			result <- hex.EncodeToString(allSums)
-		} else {
-			h := md5.New()
-			_, err := h.Write(allSums)
-			if err != nil {
-				panic(err) // lmao?
-			}
-			result <- hex.EncodeToString(h.Sum(nil)) + "-" + strconv.Itoa(numParts)
-		}
-		close(result)
-		reader.Close()
-	}()
-	return calc
 }

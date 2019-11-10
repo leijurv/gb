@@ -1,4 +1,4 @@
-package main
+package crypto
 
 import (
 	"crypto/aes"
@@ -9,7 +9,7 @@ import (
 )
 
 func EncryptBlob(out io.Writer) (io.Writer, []byte) {
-	key := randBytes(16)
+	key := RandBytes(16)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		panic(err)
@@ -28,7 +28,7 @@ func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
 
 	// while encrypting, by the time it got to this location we know that
 	// the IV will have incremented in a big endian manner up until floor(seekOffset/16)
-	iv := new(big.Int).SetInt64(seekOffset / 16).Bytes()
+	iv := new(big.Int).SetInt64(seekOffset / 16).Bytes() // if this were C I would just cast &seekOffset to a uint8_t* lol
 
 	// big.Int.Bytes() will only be as long as it needs to be, so we need to:
 	iv = append(make([]byte, 16-len(iv)), iv...) // pad with leading zero bytes to be proper length
@@ -41,7 +41,7 @@ func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
 	return &cipher.StreamReader{S: stream, R: in}
 }
 
-func randBytes(length int) []byte {
+func RandBytes(length int) []byte {
 	result := make([]byte, length)
 	_, err := io.ReadFull(rand.Reader, result)
 	if err != nil {

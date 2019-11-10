@@ -11,8 +11,14 @@ var HomeDir = os.Getenv("HOME")
 var ConfigLocation = HomeDir + "/.gb.conf"
 
 type ConfigData struct {
-	MinBlobSize      int64  `json:"min_blob_size"`
-	DatabaseLocation string `json:"database_location"`
+	MinBlobSize        int64   `json:"min_blob_size"`
+	DatabaseLocation   string  `json:"database_location"`
+	PaddingMinBytes    int64   `json:"padding_min_bytes"`
+	PaddingMaxBytes    int64   `json:"padding_max_bytes"`
+	PaddingMinPercent  float64 `json:"padding_min_percent"`
+	PaddingMaxPercent  float64 `json:"padding_max_percent"`
+	NumHasherThreads   int     `json:"num_hasher_threads"`
+	NumUploaderThreads int     `json:"num_uploader_threads"`
 }
 
 func Config() ConfigData {
@@ -20,8 +26,14 @@ func Config() ConfigData {
 }
 
 var config = ConfigData{
-	MinBlobSize:      16000000,
-	DatabaseLocation: HomeDir + "/.gb.db",
+	MinBlobSize:        64000000,
+	DatabaseLocation:   HomeDir + "/.gb.db",
+	PaddingMinBytes:    5021,
+	PaddingMaxBytes:    12345,
+	PaddingMinPercent:  0.05,
+	PaddingMaxPercent:  0.1, // percent means percent. this is 0.1% not 10%!!
+	NumHasherThreads:   4,
+	NumUploaderThreads: 4,
 }
 
 func init() {
@@ -44,6 +56,22 @@ func init() {
 	if err != nil {
 		log.Println("Error while loading config file!")
 		panic(err)
+	}
+	sanity()
+}
+
+func sanity() {
+	if config.PaddingMinBytes > config.PaddingMaxBytes {
+		panic("PaddingMinBytes must be less than or equal to PaddingMaxBytes")
+	}
+	if config.PaddingMinPercent > config.PaddingMaxPercent {
+		panic("PaddingMinPercent must be less than or equal to PaddingMaxPercent")
+	}
+	if config.NumHasherThreads < 1 {
+		panic("NumHasherThreads must be at least 1")
+	}
+	if config.NumUploaderThreads < 1 {
+		panic("NumUploaderThreads must be at least 1")
 	}
 }
 

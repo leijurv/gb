@@ -66,7 +66,7 @@ func (s *Stats) Total() int64 {
 	defer s.lock.Unlock()
 	var sum int64
 	for _, hs := range s.inProgress {
-		sum += (*hs).Size
+		sum += hs.Size()
 	}
 	return sum
 }

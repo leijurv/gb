@@ -71,7 +71,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 
 	for _, planned := range plan {
 		log.Println("Adding", planned.File)
-		startOffset := preEncInfo.Size
+		startOffset := preEncInfo.Size()
 		verify := utils.NewSHA256HasherSizer()
 		tmpOut := out // TODO compressor(out)
 		f, err := os.Open(planned.path)
@@ -105,7 +105,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 		if len(planned.hash) > 0 && !bytes.Equal(realHash, planned.hash) {
 			log.Println("File copied successfully, but hash was", hex.EncodeToString(realHash), "when we expected", hex.EncodeToString(planned.hash))
 		}
-		end := preEncInfo.Size
+		end := preEncInfo.Size()
 		length := end - startOffset
 		log.Println("File length was", realSize, "but was compressed to", length)
 		entries = append(entries, BlobEntry{
@@ -117,7 +117,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 			compression:         nil,
 		})
 	}
-	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
+	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	log.Println("All bytes written")
 	completeds := make([]storage_base.CompletedUpload, 0)
 	for _, upload := range uploads {

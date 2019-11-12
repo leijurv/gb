@@ -25,6 +25,9 @@ func main() {
 				if path == "" {
 					return errors.New("Must give me a path to backup. Use \".\" for current directory.")
 				}
+				if len(storage.GetAll()) == 0 {
+					return errors.New("make a storage first")
+				}
 				backup.BackupADirectoryRecursively(path)
 				return nil
 			},
@@ -32,6 +35,9 @@ func main() {
 		{
 			Name: "paranoia",
 			Action: func(c *cli.Context) error {
+				if len(storage.GetAll()) == 0 {
+					return errors.New("make a storage first")
+				}
 				testAll()
 				return nil
 			},

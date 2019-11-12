@@ -16,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-var AWSSession = session.Must(session.NewSession(&aws.Config{Region: aws.String("us-west-1")}))
+var AWSSession = session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")}))
 
 const s3PartSize = 5 * 1024 * 1024
 

@@ -6,7 +6,7 @@ import (
 
 type Storage interface {
 	BeginBlobUpload(blobID []byte) StorageUpload
-	DownloadSection(blobID []byte, offset int64, length int64) io.Reader
+	DownloadSection(path string, offset int64, length int64) io.ReadCloser
 	GetID() []byte
 }
 type CompletedUpload struct {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/utils"
 )
 
 func uploaderThread() {
@@ -55,21 +56,23 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 
 	out := io.MultiWriter(writers...)
 
-	postEncInfo := NewSHA256HasherSizer()
+	postEncInfo := utils.NewSHA256HasherSizer()
 	out = io.MultiWriter(out, &postEncInfo)
 
 	var key []byte
 	out, key = crypto.EncryptBlob(out)
 
-	preEncInfo := NewSHA256HasherSizer()
+	preEncInfo := utils.NewSHA256HasherSizer()
 	out = io.MultiWriter(out, &preEncInfo)
+
+	stats.Add(&preEncInfo)
 
 	entries := make([]BlobEntry, 0)
 
 	for _, planned := range plan {
 		log.Println("Adding", planned.File)
-		startOffset := preEncInfo.size
-		verify := NewSHA256HasherSizer()
+		startOffset := preEncInfo.Size
+		verify := utils.NewSHA256HasherSizer()
 		tmpOut := out // TODO compressor(out)
 		f, err := os.Open(planned.path)
 		if err != nil {
@@ -102,7 +105,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 		if len(planned.hash) > 0 && !bytes.Equal(realHash, planned.hash) {
 			log.Println("File copied successfully, but hash was", hex.EncodeToString(realHash), "when we expected", hex.EncodeToString(planned.hash))
 		}
-		end := preEncInfo.size
+		end := preEncInfo.Size
 		length := end - startOffset
 		log.Println("File length was", realSize, "but was compressed to", length)
 		entries = append(entries, BlobEntry{
@@ -114,7 +117,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 			compression:         nil,
 		})
 	}
-	out.Write(make([]byte, samplePaddingLength(postEncInfo.size))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
+	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	log.Println("All bytes written")
 	completeds := make([]storage_base.CompletedUpload, 0)
 	for _, upload := range uploads {
@@ -163,7 +166,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 		}
 		if bytes.Equal(entry.originalPlan.hash, entry.hash) {
 			// fetch ALL the files that hashed to this hash
-			files := hashLateMap[sliceToArr(entry.hash)]
+			files := hashLateMap[utils.SliceToArr(entry.hash)]
 			// time to add ALL of them to the files table, now that this hash is backed up :D
 			if files[0] != entry.originalPlan.File {
 				panic("something is profoundly broken")
@@ -199,7 +202,7 @@ func uploadFailure(planned Planned) {
 	if plannedHash == nil {
 		return
 	}
-	expected := sliceToArr(plannedHash)
+	expected := utils.SliceToArr(plannedHash)
 	late := hashLateMap[expected]
 	if late[0] != planned.File {
 		panic("somehow something isn't being synchronized :(")

@@ -1,7 +1,6 @@
 package s3
 
 import (
-	"bytes"
 	"encoding/hex"
 	"io"
 	"log"
@@ -9,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -45,7 +45,7 @@ func (remote *S3) GetID() []byte {
 
 func (remote *S3) niceRootPath() string {
 	path := remote.RootPath
-	if !strings.HasSuffix(path, "/") {
+	if path != "" && !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
 	return path
@@ -68,6 +68,7 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 	})
 	resultCh := make(chan s3Result)
 	go func() {
+		defer pipeR.Close()
 		result, err := uploader.Upload(&s3manager.UploadInput{
 			Bucket: aws.String(remote.Bucket),
 			Key:    aws.String(path),
@@ -76,7 +77,6 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 		if err != nil {
 			log.Println("s3 error", err)
 		}
-		pipeR.Close()
 		resultCh <- s3Result{result, err}
 	}()
 	return &s3Upload{
@@ -88,11 +88,11 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 	}
 }
 
-func (remote *S3) DownloadSection(blobID []byte, offset int64, length int64) io.Reader {
+func (remote *S3) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
 	if length == 0 {
-		return bytes.NewBuffer(nil)
+		// a range of length 0 is invalid! we get a 400 instead of an empty 200!
+		return &utils.EmptyReadCloser{}
 	}
-	path := remote.niceRootPath() + formatPath(blobID)
 	log.Println("S3 key is", path)
 	rangeStr := "bytes=" + strconv.FormatInt(offset, 10) + "-" + strconv.FormatInt(offset+length-1, 10)
 	log.Println("S3 range is", rangeStr)

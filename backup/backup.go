@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/leijurv/gb/config"
 )
@@ -41,5 +42,11 @@ func BackupADirectoryRecursively(path string) {
 	for i := 0; i < config.Config().NumUploaderThreads; i++ {
 		go uploaderThread()
 	}
+	go func() {
+		for {
+			log.Println("Bytes written:", stats.Total())
+			time.Sleep(5 * time.Second)
+		}
+	}()
 	wg.Wait()
 }

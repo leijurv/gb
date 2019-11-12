@@ -8,10 +8,10 @@ import (
 	"io/ioutil"
 	"log"
 
-	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
+	"github.com/leijurv/gb/utils"
 )
 
 func cat(hash []byte, tx *sql.Tx) io.Reader {
@@ -20,12 +20,11 @@ func cat(hash []byte, tx *sql.Tx) io.Reader {
 	var length int64
 	var compression *string
 	var key []byte
-	var fullPath string
+	var path string
 	var storageID []byte
 	var kind string
 	var identifier string
 	var rootPath string
-	// TODO this could return more than one row if the same blob was backed up to more than one destination
 	err := tx.QueryRow(`
 			SELECT
 				blob_entries.blob_id,
@@ -43,12 +42,15 @@ func cat(hash []byte, tx *sql.Tx) io.Reader {
 				INNER JOIN blob_storage ON blob_storage.blob_id = blobs.blob_id
 				INNER JOIN storage ON storage.storage_id = blob_storage.storage_id
 			WHERE blob_entries.hash = ?
-		`, hash).Scan(&blobID, &offset, &length, &compression, &key, &fullPath, &storageID, &kind, &identifier, &rootPath)
+
+
+			ORDER BY storage.readable_label DESC /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
+		`, hash).Scan(&blobID, &offset, &length, &compression, &key, &path, &storageID, &kind, &identifier, &rootPath)
 	if err != nil {
 		panic(err)
 	}
 	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
-	reader := storageR.DownloadSection(blobID, offset, length)
+	reader := storageR.DownloadSection(path, offset, length)
 	decrypted := crypto.DecryptBlobEntry(reader, offset, key)
 	return decrypted
 }
@@ -97,7 +99,7 @@ func testAll() {
 		}
 		log.Println("Testing fetching hash", hex.EncodeToString(hash))
 		reader := cat(hash, tx)
-		h := backup.NewSHA256HasherSizer()
+		h := utils.NewSHA256HasherSizer()
 		if _, err := io.Copy(&h, reader); err != nil {
 			panic(err)
 		}

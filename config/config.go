@@ -32,8 +32,8 @@ var config = ConfigData{
 	PaddingMaxBytes:    12345,
 	PaddingMinPercent:  0.05,
 	PaddingMaxPercent:  0.1, // percent means percent. this is 0.1% not 10%!!
-	NumHasherThreads:   4,
-	NumUploaderThreads: 4,
+	NumHasherThreads:   2,
+	NumUploaderThreads: 8,
 }
 
 func init() {

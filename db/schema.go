@@ -41,9 +41,9 @@ func createTables() error {
 
 		path        TEXT    NOT NULL, /* path on disk to the file */
 		hash        BLOB    NOT NULL, /* sha256 of contents */
-		start       INTEGER NOT NULL, /* timestamp of the first time this file existed with these contents */
-		end         INTEGER,          /* timestamp of when this file started not existing with these contents */
-		fs_modified INTEGER NOT NULL, /* a filesystem timestamp. NOT NECESSARILY unix time. could be millis or nano time. who knows. depends on your filesystem! */
+		start       INTEGER NOT NULL, /* timestamp of the first time this file existed with these contents (unix seconds) */
+		end         INTEGER,          /* timestamp of when this file started not existing with these contents (unix seconds) */
+		fs_modified INTEGER NOT NULL, /* a filesystem timestamp (unix seconds) */
 		permissions INTEGER NOT NULL, /* the 9 least significant bits of the os stat filemode, describing the standard rwxrwxrwx permissions */
 
 		UNIQUE(path, start), /* a path only appears once in a given backup */
@@ -111,7 +111,7 @@ func createTables() error {
 		storage_id     BLOB NOT NULL PRIMARY KEY, /* identifier for this location in which we are  */
 		readable_label TEXT NOT NULL, /* a label you can choose for this storage */
 		type           TEXT NOT NULL, /* what kind of storage? e.g. disk, s3, gdrive */
-		identifier     TEXT NOT NULL, /* could be a hard drive UUID, could be a s3 bucket name, could be a google drive account, idk */
+		identifier     TEXT NOT NULL, /* any arbitrary data the storage needs to identify itself. could be a hard drive UUID, could be a s3 bucket name, could be an entire google drive oauth key, idk */
 		root_path      TEXT NOT NULL, /* a folder that gb will save in */
 
 		UNIQUE(readable_label),
@@ -131,10 +131,11 @@ func createTables() error {
 		storage_id   BLOB    NOT NULL, /* what is this being stored on */
 		path         TEXT    NOT NULL, /* where in that is this. ideally, path would be a /path/to/file, but it doesn't have to be. on gdrive it will probably be a file id? idk */
 		checksum     TEXT,             /* checksum in whatever format this provider uses (e.g. chunked md5 for s3, md5 for gdrive) */
-		timestamp    INTEGER NOT NULL, /* when did we do this */
+		timestamp    INTEGER NOT NULL, /* when was this completed and inserted into the database (unix seconds) */
 
 		UNIQUE(storage_id, path),
 		CHECK(checksum IS NULL OR LENGTH(checksum) > 0),
+		CHECK(LENGTH(path) > 0),
 		CHECK(timestamp > 0),
 
 		FOREIGN KEY(blob_id)    REFERENCES blobs(blob_id)      ON UPDATE CASCADE ON DELETE RESTRICT,

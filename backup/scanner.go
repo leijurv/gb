@@ -49,9 +49,7 @@ func scannerThread(path string) {
 			return nil
 		}
 		filesMap[path] = info
-		log.Println(path, "start")
 		scanOneFile(File{path, info}, tx)
-		log.Println(path, "end")
 		return nil
 	})
 	if err != nil {

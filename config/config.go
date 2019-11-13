@@ -19,6 +19,7 @@ type ConfigData struct {
 	PaddingMaxPercent  float64 `json:"padding_max_percent"`
 	NumHasherThreads   int     `json:"num_hasher_threads"`
 	NumUploaderThreads int     `json:"num_uploader_threads"`
+	TryRepairS3ETag    bool    `json:"try_repair_s3_etag"`
 }
 
 func Config() ConfigData {
@@ -34,6 +35,7 @@ var config = ConfigData{
 	PaddingMaxPercent:  0.1, // percent means percent. this is 0.1% not 10%!!
 	NumHasherThreads:   2,
 	NumUploaderThreads: 8,
+	TryRepairS3ETag:    false, // see paranoia/repair.go
 }
 
 func init() {

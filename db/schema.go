@@ -129,12 +129,12 @@ func createTables() error {
 
 		blob_id      BLOB    NOT NULL, /* blob this is storing, not unique since one blob can be backed up to multiple providers, thats allowed */
 		storage_id   BLOB    NOT NULL, /* what is this being stored on */
-		path         TEXT    NOT NULL, /* where in that is this. ideally, path would be a /path/to/file, but it doesn't have to be. on gdrive it will probably be a file id? idk */
+		path         TEXT    NOT NULL, /* where in that is this. a path on s3, a file id on gdrive (for instant retrieval) */
 		checksum     TEXT,             /* checksum in whatever format this provider uses (e.g. chunked md5 for s3, md5 for gdrive) */
 		timestamp    INTEGER NOT NULL, /* when was this completed and inserted into the database (unix seconds) */
 
 		UNIQUE(storage_id, path),
-		CHECK(checksum IS NULL OR LENGTH(checksum) > 0),
+		CHECK(checksum IS NULL OR LENGTH(checksum) > 0), /* just a check stating that if you have no checksum, you should put in NULL, not an empty string */
 		CHECK(LENGTH(path) > 0),
 		CHECK(timestamp > 0),
 

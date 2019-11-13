@@ -10,12 +10,16 @@ import (
 
 func EncryptBlob(out io.Writer) (io.Writer, []byte) {
 	key := RandBytes(16)
+	return EncryptBlobWithKey(out, key), key
+}
+
+func EncryptBlobWithKey(out io.Writer, key []byte) io.Writer {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		panic(err)
 	}
 	stream := cipher.NewCTR(block, make([]byte, 16))
-	return &cipher.StreamWriter{S: stream, W: out}, key
+	return &cipher.StreamWriter{S: stream, W: out}
 }
 
 // take advantage of AES-CTR by seeking

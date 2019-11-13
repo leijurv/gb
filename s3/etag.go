@@ -7,17 +7,17 @@ import (
 	"strconv"
 )
 
-type eTagCalculator struct {
-	writer *io.PipeWriter
-	result chan string
+type ETagCalculator struct {
+	Writer *io.PipeWriter
+	Result chan string
 }
 
-func createETagCalculator() *eTagCalculator {
+func CreateETagCalculator() *ETagCalculator {
 	reader, writer := io.Pipe()
 	result := make(chan string)
-	calc := &eTagCalculator{
-		writer: writer,
-		result: result,
+	calc := &ETagCalculator{
+		Writer: writer,
+		Result: result,
 	}
 	go func() {
 		numParts := 0
@@ -25,7 +25,8 @@ func createETagCalculator() *eTagCalculator {
 		for {
 			lr := io.LimitReader(reader, s3PartSize)
 			h := md5.New()
-			n, err := io.Copy(h, lr)
+			// io.Copy's source code actually detects that the src is a LimitReader, BUT it doesn't help since the default size is actually SMALLER than our limit :(
+			n, err := io.CopyBuffer(h, lr, make([]byte, s3PartSize))
 			if err != nil {
 				panic(err) // literally impossible
 			}

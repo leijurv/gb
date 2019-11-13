@@ -51,7 +51,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 	}
 	writers := make([]io.Writer, 0)
 	for _, upload := range uploads {
-		writers = append(writers, upload.Begin())
+		writers = append(writers, upload.Writer())
 	}
 
 	out := io.MultiWriter(writers...)
@@ -74,16 +74,25 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 		startOffset := preEncInfo.Size()
 		verify := utils.NewSHA256HasherSizer()
 		tmpOut := out // TODO compressor(out)
+
+		var reasonableBufSize int64 = 1024 * 1024 // we're working with huge files, 1MB buffer is more reasonable than 32KB default
+		if planned.info.Size() < reasonableBufSize {
+			reasonableBufSize = planned.info.Size() // file smaller than 1MB -> make the buffer that size
+		}
 		f, err := os.Open(planned.path)
 		if err != nil {
 			log.Println("I can no longer read from it to back it up???", err, planned.path)
 			// call this here since we will NOT be adding an entry to entries, so it won't be called later on lol
-			uploadFailure(planned)
+			func() {
+				hashLateMapLock.Lock()
+				defer hashLateMapLock.Unlock()
+				uploadFailure(planned)
+			}()
 			continue
 		}
 		err = func() error {
 			defer f.Close() // yeah its kinda paranoid but i prefer to always defer in a closure than put a Close/Unlock manually afterwards
-			_, err := io.Copy(io.MultiWriter(tmpOut, &verify), f)
+			_, err := io.CopyBuffer(io.MultiWriter(tmpOut, &verify), f, make([]byte, reasonableBufSize))
 			return err
 		}()
 		realHash, realSize := verify.HashAndSize()
@@ -119,7 +128,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 	}
 	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	log.Println("All bytes written")
-	completeds := make([]storage_base.CompletedUpload, 0)
+	completeds := make([]storage_base.UploadedBlob, 0)
 	for _, upload := range uploads {
 		completeds = append(completeds, upload.End())
 	}

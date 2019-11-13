@@ -4,16 +4,34 @@ import (
 	"io"
 )
 
+// a place where blobs can be stored
 type Storage interface {
 	BeginBlobUpload(blobID []byte) StorageUpload
 	DownloadSection(path string, offset int64, length int64) io.ReadCloser
+
+	// it is like always faster to get a large list of path, checksum, size than to do it one file at a time
+	ListAll() []UploadedBlob
+
 	GetID() []byte
+
+	String() string
 }
-type CompletedUpload struct {
+
+// metadata about a blob that has been successfully uploaded
+// can be either immediately after an upload, or later on while listing
+// therefore: should not rely on data that is only provided on a completed upload
+type UploadedBlob struct {
+	BlobID   []byte // nil if fetched from a list operation, has data if fetched from database
 	Path     string
 	Checksum string
+	Size     int64
 }
+
+// an upload in progress
 type StorageUpload interface {
-	Begin() io.Writer
-	End() CompletedUpload
+	// simply calling BeginBlobUpload has already created the writer, this simply retrieves it
+	Writer() io.Writer
+
+	// flush and close the upload, **verify integrity by comparing the checksum**, then return the data
+	End() UploadedBlob
 }

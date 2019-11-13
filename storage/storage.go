@@ -43,6 +43,12 @@ func GetAll() []storage_base.Storage {
 	return storages
 }
 
+func GetByID(id []byte) storage_base.Storage {
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	return cache[utils.SliceToArr(id)]
+}
+
 func StorageDataToStorage(storageID []byte, kind string, identifier string, rootPath string) storage_base.Storage {
 	cacheLock.Lock()
 	defer cacheLock.Unlock()
@@ -74,6 +80,7 @@ func NewGDriveStorage(label string) {
 
 func NewS3Storage(label string, bucket string, root string) {
 	for strings.HasPrefix(root, "/") {
+		log.Println("S3 keys shouldn't begin with \"/\" so I'm removing it, edit the database if you're absolutely sure you want that (hint: you don't).")
 		root = root[1:]
 	}
 	if root == "" {

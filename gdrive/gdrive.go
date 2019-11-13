@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
-	"strconv"
 
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
@@ -46,8 +45,9 @@ func (gds *gDriveStorage) BeginBlobUpload(blobID []byte) storage_base.StorageUpl
 			Name:     hex.EncodeToString(blobID),
 			Parents:  []string{gds.root},
 		}
-		file, err := gds.srv.Files.Create(f).Fields("id,md5Checksum,size").Media(pipeR).Do()
+		file, err := gds.srv.Files.Create(f).Fields("id, md5Checksum, size").Media(pipeR).Do()
 		if err != nil {
+			pipeR.CloseWithError(err)
 			log.Println("gdrive error", err)
 		}
 		resultCh <- gDriveResult{file, err}
@@ -58,6 +58,7 @@ func (gds *gDriveStorage) BeginBlobUpload(blobID []byte) storage_base.StorageUpl
 		hasher: &hs,
 		result: resultCh,
 		gds:    gds,
+		blobID: blobID,
 	}
 }
 
@@ -67,7 +68,7 @@ func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int6
 		return &utils.EmptyReadCloser{}
 	}
 	log.Println("GDrive key is", path)
-	rangeStr := "bytes=" + strconv.FormatInt(offset, 10) + "-" + strconv.FormatInt(offset+length-1, 10)
+	rangeStr := utils.FormatHTTPRange(offset, length)
 	log.Println("GDrive range is", rangeStr)
 	getCall := gds.srv.Files.Get(path)
 	getCall.Header().Set("Range", rangeStr)
@@ -78,11 +79,44 @@ func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int6
 	return resp.Body
 }
 
-func (up *gDriveUpload) Begin() io.Writer {
+func (gds *gDriveStorage) ListAll() []storage_base.UploadedBlob {
+	log.Println("Listing files in Google Drive. ")
+	// increasing pagesize made this *slower*
+	// also 100 gives enough progress that people will realize it's working
+	query := gds.srv.Files.List().PageSize(100).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents").Fields("nextPageToken, files(id, md5Checksum, size)")
+	files := make([]storage_base.UploadedBlob, 0)
+	for {
+		r, err := query.Do()
+		if err != nil {
+			panic(err)
+		}
+		for _, i := range r.Files {
+			files = append(files, storage_base.UploadedBlob{
+				Path:     i.Id,
+				Checksum: i.Md5Checksum,
+				Size:     i.Size,
+			})
+		}
+		if r.NextPageToken == "" {
+			break
+		} else {
+			query.PageToken(r.NextPageToken)
+		}
+		log.Println("Fetched page from Google Drive. Have", len(files), "files so far")
+	}
+	log.Println("Listed", len(files), "files in Google Drive")
+	return files
+}
+
+func (gds *gDriveStorage) String() string {
+	return "Google Drive"
+}
+
+func (up *gDriveUpload) Writer() io.Writer {
 	return io.MultiWriter(up.writer, up.hasher)
 }
 
-func (up *gDriveUpload) End() storage_base.CompletedUpload {
+func (up *gDriveUpload) End() storage_base.UploadedBlob {
 	up.writer.Close()
 	result := <-up.result
 	if result.err != nil {
@@ -103,9 +137,11 @@ func (up *gDriveUpload) End() storage_base.CompletedUpload {
 		panic("gdrive broke the etag lmao")
 	}
 
-	return storage_base.CompletedUpload{
+	return storage_base.UploadedBlob{
 		Path:     file.Id,
 		Checksum: etag,
+		Size:     file.Size,
+		BlobID:   up.blobID,
 	}
 }
 
@@ -119,6 +155,7 @@ type gDriveUpload struct {
 	result chan gDriveResult
 	hasher *utils.HasherSizer
 	gds    *gDriveStorage
+	blobID []byte
 }
 
 type identifierInDB struct {
@@ -142,15 +179,13 @@ func CreateNewGDriveStorage() (identifier, rootPath string) {
 	}
 	log.Println("Authentication complete. Identifier blob is ", string(id))
 	srv := driveServiceFromIdentifier(string(id))
-	dir, err := createDir(srv, "gb", "root")
+	dir := createDir(srv, "gb", "root")
 
-	if err != nil {
-		panic(fmt.Sprintf("Could not create dir: %v\n", err))
-	}
 	log.Println("I have created a folder called \"gb\" in the root of this Google Drive account")
-	log.Println("Since I will remember it by its ID, not by its name, you can rename it or move it wherever you want!")
+	log.Println("Since I will remember it by its ID, not by its name, you can rename it or move it wherever you want, without breaking anything!")
+	log.Println("This means that, UNLIKE in rclone, you CAN'T \"transplant\" the files into a new folder and call that one gb. (well, you can, but you'd have to modify the storage table in the database lol)")
 	log.Println("The ID is", dir.Id)
-
+	log.Println("Furthermore, the name of each file also doesn't matter at all. You can furthermore furthermore move the files anywhere (even out of the gb folder), BUT that will cause the \"paranoia storage\" command to fail, since it just lists files in your gb folder. If you don't plan to use that command, everything else (like retrieval) will work fine.")
 	return string(id), dir.Id
 }
 
@@ -164,7 +199,8 @@ func driveServiceFromIdentifier(identifier string) *drive.Service {
 	client := config.Client(context.Background(), ident.Token)
 	srv, err := drive.New(client)
 	if err != nil {
-		log.Fatalf("Unable to retrieve Drive client: %v", err)
+		log.Println("Unable to retrieve Drive client")
+		panic(err)
 	}
 	return srv
 }
@@ -176,17 +212,19 @@ func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
 
 	var authCode string
 	if _, err := fmt.Scan(&authCode); err != nil {
-		log.Fatalf("Unable to read authorization code %v", err)
+		log.Println("Unable to read authorization code")
+		panic(err)
 	}
 
 	tok, err := config.Exchange(context.TODO(), authCode)
 	if err != nil {
-		log.Fatalf("Unable to retrieve token from web %v", err)
+		log.Println("Unable to retrieve token from web")
+		panic(err)
 	}
 	return tok
 }
 
-func createDir(service *drive.Service, name string, parentId string) (*drive.File, error) {
+func createDir(service *drive.Service, name string, parentId string) *drive.File {
 	dir := &drive.File{
 		Name:     name,
 		MimeType: "application/vnd.google-apps.folder",
@@ -194,10 +232,10 @@ func createDir(service *drive.Service, name string, parentId string) (*drive.Fil
 	}
 	file, err := service.Files.Create(dir).Do()
 	if err != nil {
-		log.Println("Could not create dir: " + err.Error())
-		return nil, err
+		log.Println("Could not create dir")
+		panic(err)
 	}
-	return file, nil
+	return file
 }
 
 func parseCredentials(b []byte) *oauth2.Config {

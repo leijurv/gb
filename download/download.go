@@ -1,9 +1,7 @@
-package main
+package download
 
 import (
-	"bytes"
 	"database/sql"
-	"encoding/hex"
 	"io"
 	"io/ioutil"
 	"log"
@@ -14,7 +12,7 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func cat(hash []byte, tx *sql.Tx) io.Reader {
+func Cat(hash []byte, tx *sql.Tx) io.Reader {
 	var blobID []byte
 	var offset int64
 	var length int64
@@ -44,14 +42,48 @@ func cat(hash []byte, tx *sql.Tx) io.Reader {
 			WHERE blob_entries.hash = ?
 
 
-			ORDER BY storage.readable_label DESC /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
+			ORDER BY storage.readable_label /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
 		`, hash).Scan(&blobID, &offset, &length, &compression, &key, &path, &storageID, &kind, &identifier, &rootPath)
 	if err != nil {
 		panic(err)
 	}
 	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
-	reader := storageR.DownloadSection(path, offset, length)
+	reader := utils.ReadCloserToReader(storageR.DownloadSection(path, offset, length))
 	decrypted := crypto.DecryptBlobEntry(reader, offset, key)
+	return decrypted
+}
+
+func CatBlob(blobID []byte) io.Reader {
+	var size int64
+	var key []byte
+	var path string
+	var storageID []byte
+	var kind string
+	var identifier string
+	var rootPath string
+	err := db.DB.QueryRow(`
+			SELECT
+				blobs.size,
+				blobs.encryption_key,
+				blob_storage.path,
+				storage.storage_id,
+				storage.type,
+				storage.identifier,
+				storage.root_path
+			FROM blobs
+				INNER JOIN blob_storage ON blob_storage.blob_id = blobs.blob_id
+				INNER JOIN storage ON storage.storage_id = blob_storage.storage_id
+			WHERE blobs.blob_id = ?
+
+
+			ORDER BY storage.readable_label /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
+		`, blobID).Scan(&size, &key, &path, &storageID, &kind, &identifier, &rootPath)
+	if err != nil {
+		panic(err)
+	}
+	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
+	reader := utils.ReadCloserToReader(storageR.DownloadSection(path, 0, size))
+	decrypted := crypto.DecryptBlobEntry(reader, 0, key)
 	return decrypted
 }
 
@@ -67,51 +99,10 @@ func downloadOne(hash []byte) {
 		}
 	}()
 
-	reader := cat(hash, tx)
+	reader := Cat(hash, tx)
 	data, err := ioutil.ReadAll(reader)
 	if err != nil {
 		panic(err)
 	}
 	log.Println(string(data))
-}
-
-func testAll() {
-	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-	}()
-	rows, err := tx.Query(`SELECT DISTINCT hash FROM files`)
-	if err != nil {
-		panic(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var hash []byte
-		err := rows.Scan(&hash)
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Testing fetching hash", hex.EncodeToString(hash))
-		reader := cat(hash, tx)
-		h := utils.NewSHA256HasherSizer()
-		if _, err := io.Copy(&h, reader); err != nil {
-			panic(err)
-		}
-		realHash, realSize := h.HashAndSize()
-		log.Println("Size is", realSize, "and hash is", hex.EncodeToString(realHash))
-		if !bytes.Equal(realHash, hash) {
-			panic(":(")
-		}
-		log.Println("Hash is equal!")
-	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
 }

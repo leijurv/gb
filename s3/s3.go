@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"io"
 	"log"
-	"strconv"
 	"strings"
 
 	"github.com/leijurv/gb/storage_base"
@@ -16,9 +15,17 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-var AWSSession = session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")}))
+// you should change this to wherever your bucket is
+const AWSRegion = "us-east-1"
 
-const s3PartSize = 5 * 1024 * 1024
+var AWSSession = session.Must(session.NewSession(&aws.Config{Region: aws.String(AWSRegion)}))
+
+// DANGER DANGER DANGER
+// EVEN THOUGH the default and RECOMMENDED part size is 5MB, you SHOULD NOT use that
+// B E C A U S E when you transition to Glacier Deep Archive, they will REPACK and RECALCULATE the ETag with a chunk size of 16777216
+// seriously, try it. upload a file of >16mb to s3 standard, then transition to deep archive. notice the etag changes
+// im mad
+const s3PartSize = 1 << 24 // this is 16777216
 
 type S3 struct {
 	StorageID []byte
@@ -32,10 +39,11 @@ type s3Result struct {
 }
 
 type s3Upload struct {
-	calc   *eTagCalculator
+	calc   *ETagCalculator
 	writer *io.PipeWriter
 	result chan s3Result
 	path   string
+	blobID []byte
 	s3     *S3
 }
 
@@ -76,11 +84,12 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 		})
 		if err != nil {
 			log.Println("s3 error", err)
+			pipeR.CloseWithError(err)
 		}
 		resultCh <- s3Result{result, err}
 	}()
 	return &s3Upload{
-		calc:   createETagCalculator(),
+		calc:   CreateETagCalculator(),
 		writer: pipeW,
 		result: resultCh,
 		path:   path,
@@ -94,7 +103,7 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 		return &utils.EmptyReadCloser{}
 	}
 	log.Println("S3 key is", path)
-	rangeStr := "bytes=" + strconv.FormatInt(offset, 10) + "-" + strconv.FormatInt(offset+length-1, 10)
+	rangeStr := utils.FormatHTTPRange(offset, length)
 	log.Println("S3 range is", rangeStr)
 	result, err := s3.New(AWSSession).GetObject(&s3.GetObjectInput{
 		Bucket: aws.String(remote.Bucket),
@@ -107,32 +116,66 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 	return result.Body
 }
 
-func (up *s3Upload) Begin() io.Writer {
-	return io.MultiWriter(up.calc.writer, up.writer)
+func (remote *S3) ListAll() []storage_base.UploadedBlob {
+	log.Println("Listing files in S3")
+	files := make([]storage_base.UploadedBlob, 0)
+	err := s3.New(AWSSession).ListObjectsPages(&s3.ListObjectsInput{
+		Bucket: aws.String(remote.Bucket),
+		Prefix: aws.String(remote.niceRootPath()),
+	},
+		func(page *s3.ListObjectsOutput, lastPage bool) bool {
+			for _, obj := range page.Contents {
+				etag := *obj.ETag
+				etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
+				files = append(files, storage_base.UploadedBlob{
+					Path:     *obj.Key,
+					Checksum: etag,
+					Size:     *obj.Size,
+				})
+			}
+			if !lastPage {
+				log.Println("Fetched page from S3. Have", len(files), "files so far")
+			}
+			return true
+		})
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Listed", len(files), "files in S3")
+	return files
 }
 
-func (up *s3Upload) End() storage_base.CompletedUpload {
+func (remote *S3) String() string {
+	return "S3 bucket " + remote.Bucket + " at path " + remote.RootPath
+}
+
+func (up *s3Upload) Writer() io.Writer {
+	return io.MultiWriter(up.calc.Writer, up.writer)
+}
+
+func (up *s3Upload) End() storage_base.UploadedBlob {
 	up.writer.Close()
-	up.calc.writer.Close()
+	up.calc.Writer.Close()
 	result := <-up.result
 	if result.err != nil {
 		panic(result.err)
 	}
 	log.Println("Upload output", result.result.Location)
-	etag := <-up.calc.result
+	etag := <-up.calc.Result
 	log.Println("Expecting etag", etag)
-	real := fetchETag(up.s3.Bucket, up.path)
-	log.Println("Real etag was", real)
-	if etag != real {
+	realEtag, realSize := fetchETagAndSize(up.s3.Bucket, up.path)
+	log.Println("Real etag was", realEtag)
+	if etag != realEtag {
 		panic("aws broke the etag lmao")
 	}
-	return storage_base.CompletedUpload{
+	return storage_base.UploadedBlob{
 		Path:     up.path,
 		Checksum: etag,
+		Size:     realSize,
 	}
 }
 
-func fetchETag(bucket string, path string) string {
+func fetchETagAndSize(bucket string, path string) (string, int64) {
 	result, err := s3.New(AWSSession).HeadObject(&s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(path),
@@ -140,6 +183,7 @@ func fetchETag(bucket string, path string) string {
 	if err != nil {
 		panic(err)
 	}
-	ret := *result.ETag
-	return ret[1 : len(ret)-1] // aws puts double quotes around the etag lol
+	etag := *result.ETag
+	etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
+	return etag, *result.ContentLength
 }

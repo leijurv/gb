@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"hash"
 	"io"
+	"strconv"
 	"sync/atomic"
 )
 
@@ -51,4 +52,19 @@ func (erc *EmptyReadCloser) Close() error {
 }
 func (erc *EmptyReadCloser) Read(p []byte) (int, error) {
 	return 0, io.EOF
+}
+
+// do you find it annoying to have to close your readers? this function is for you
+func ReadCloserToReader(in io.ReadCloser) io.Reader {
+	pipeR, pipeW := io.Pipe()
+	go func() {
+		defer in.Close()
+		_, err := io.CopyBuffer(pipeW, in, make([]byte, 1024*1024)) // we're working with huge files, 1MB buffer is more reasonable than 32KB default
+		pipeW.CloseWithError(err)                                   // nil is nil, error is error. this works properly
+	}()
+	return pipeR
+}
+
+func FormatHTTPRange(offset int64, length int64) string {
+	return "bytes=" + strconv.FormatInt(offset, 10) + "-" + strconv.FormatInt(offset+length-1, 10)
 }

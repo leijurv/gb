@@ -1,13 +1,13 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	"errors"
 
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/storage"
 	"github.com/urfave/cli"
 )
@@ -15,7 +15,6 @@ import (
 func main() {
 	db.SetupDatabase()
 	defer db.ShutdownDatabase()
-
 	app := cli.NewApp()
 	app.Commands = []cli.Command{
 		{
@@ -34,12 +33,28 @@ func main() {
 		},
 		{
 			Name: "paranoia",
-			Action: func(c *cli.Context) error {
-				if len(storage.GetAll()) == 0 {
-					return errors.New("make a storage first")
-				}
-				testAll()
-				return nil
+			Subcommands: []cli.Command{
+				{
+					Name: "files",
+					Action: func(c *cli.Context) error {
+						if len(storage.GetAll()) == 0 {
+							return errors.New("make a storage first")
+						}
+						paranoia.TestAllFiles()
+						return nil
+					},
+				},
+				{
+					Name:  "storage",
+					Usage: "fetch all metadata (aka: list all blobs) in storage and ensure their size and checksum is what we expect",
+					Action: func(c *cli.Context) error {
+						if len(storage.GetAll()) == 0 {
+							return errors.New("make a storage first")
+						}
+						paranoia.StorageParanoia()
+						return nil
+					},
+				},
 			},
 		},
 		{
@@ -101,6 +116,6 @@ func main() {
 	}
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 }

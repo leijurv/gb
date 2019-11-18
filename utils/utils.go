@@ -64,18 +64,37 @@ func ReadCloserToReader(in io.ReadCloser) io.Reader {
 	if ok {
 		return frc.r
 	}
-	pipeR, pipeW := io.Pipe()
-	go func() {
-		defer in.Close()
-		_, err := io.CopyBuffer(pipeW, in, make([]byte, 1024*1024)) // we're working with huge files, 1MB buffer is more reasonable than 32KB default
-		pipeW.CloseWithError(err)                                   // nil is nil, error is error. this works properly
-	}()
-	return pipeR
+	return &fakeReader{in, nil}
+}
+
+type fakeReader struct {
+	rc    io.ReadCloser
+	pipeR *io.PipeReader
+}
+
+func (fr *fakeReader) Read(data []byte) (int, error) {
+	if fr.pipeR == nil {
+		pipeR, pipeW := io.Pipe()
+		go func() {
+			defer fr.rc.Close()
+			_, err := io.CopyBuffer(pipeW, fr.rc, make([]byte, 1024*1024)) // we're working with huge files, 1MB buffer is more reasonable than 32KB default
+			pipeW.CloseWithError(err)                                      // nil is nil, error is error. this works properly
+		}()
+		fr.pipeR = pipeR
+	}
+	return fr.pipeR.Read(data)
 }
 
 func ReaderToReadCloser(in io.Reader) io.ReadCloser {
+	fr, ok := in.(*fakeReader)
+	if ok && fr.pipeR == nil {
+		// this is really a ReadCloser in disguise, wrapped in a fakeReader
+		// AND, it hasn't been copied into a pipe yet
+		return fr.rc
+	}
 	rc, ok := in.(io.ReadCloser)
 	if ok {
+		// oh you poor thing. how did this happen??
 		return rc
 	}
 	return &fakeReadCloser{in}
@@ -98,7 +117,9 @@ func FormatHTTPRange(offset int64, length int64) string {
 }
 
 func Copy(out io.Writer, in io.Reader) {
-	_, err := io.CopyBuffer(out, in, make([]byte, 1024*1024))
+	rc := ReaderToReadCloser(in)
+	defer rc.Close() // if this really is a readcloser, we should close it
+	_, err := io.CopyBuffer(out, rc, make([]byte, 1024*1024))
 	if err != nil {
 		panic(err)
 	}

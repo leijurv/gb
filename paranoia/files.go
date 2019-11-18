@@ -3,7 +3,6 @@ package paranoia
 import (
 	"bytes"
 	"encoding/hex"
-	"io"
 	"log"
 
 	"github.com/leijurv/gb/db"
@@ -25,6 +24,7 @@ func TestAllFiles() {
 	}()
 	// TODO some other ordering idk? this is just the most recent files you uploaded, which is reasonable i think?
 	rows, err := tx.Query(`SELECT DISTINCT hash FROM files ORDER BY start DESC`)
+	// SELECT DISTINCT hash FROM blob_entries WHERE compression_alg = "lepton"
 	if err != nil {
 		panic(err)
 	}
@@ -38,9 +38,7 @@ func TestAllFiles() {
 		log.Println("Testing fetching hash", hex.EncodeToString(hash))
 		reader := download.Cat(hash, tx)
 		h := utils.NewSHA256HasherSizer()
-		if _, err := io.Copy(&h, reader); err != nil {
-			panic(err)
-		}
+		utils.Copy(&h, reader)
 		realHash, realSize := h.HashAndSize()
 		log.Println("Size is", realSize, "and hash is", hex.EncodeToString(realHash))
 		if !bytes.Equal(realHash, hash) {

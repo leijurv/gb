@@ -29,8 +29,9 @@ func BeginLeptonProcess(in io.Reader) (*exec.Cmd, io.ReadCloser) {
 
 func (n *LeptonCompression) Compress(out io.Writer, in io.Reader) error {
 	cmd, lOut := BeginLeptonProcess(in)
-	_, err := io.Copy(out, lOut)
+	_, err := io.CopyBuffer(out, lOut, make([]byte, 1024*1024))
 	if err != nil {
+		// don't panic here (i.e. don't call utils.Copy), because if lepton exits with nonzero, this error is non-nil, and we want to return that for fallback compression, not panic
 		return err
 	}
 	return cmd.Wait() // only needed to check the exit code, the process has already ended since io.Copy returned, meaning it must have hit EOF

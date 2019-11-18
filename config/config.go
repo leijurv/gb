@@ -122,8 +122,8 @@ class
 */
 
 func init() {
-	log.Println("Assuming your home directory is " + HomeDir)
-	log.Println("Therefore I'm going to assume my config file should be at " + ConfigLocation)
+	//log.Println("Assuming your home directory is " + HomeDir)
+	//log.Println("Therefore I'm going to assume my config file should be at " + ConfigLocation)
 	data, err := ioutil.ReadFile(ConfigLocation)
 	if err != nil {
 		log.Println("No config file in " + ConfigLocation)

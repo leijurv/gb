@@ -5,13 +5,14 @@ import (
 
 	"encoding/hex"
 	"errors"
-	"io"
 
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
+	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/storage"
+	"github.com/leijurv/gb/utils"
 	"github.com/urfave/cli"
 )
 
@@ -45,8 +46,8 @@ func main() {
 				if len(data) != 32 {
 					return errors.New("wrong length")
 				}
-				_, err = io.Copy(os.Stdout, download.CatEz(data))
-				return err
+				utils.Copy(os.Stdout, download.CatEz(data))
+				return nil
 			},
 		},
 		{
@@ -139,6 +140,22 @@ func main() {
 						},
 					},
 				},
+			},
+		},
+		{
+			Name:  "history",
+			Usage: "give revision history of a specific file (not a directory)",
+			Action: func(c *cli.Context) error {
+				history.FileHistory(c.Args().First())
+				return nil
+			},
+		},
+		{
+			Name:  "ls",
+			Usage: "list backup info about files in a directory",
+			Action: func(c *cli.Context) error {
+				history.DirHistory(c.Args().First())
+				return nil
 			},
 		},
 	}

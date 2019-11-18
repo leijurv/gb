@@ -71,7 +71,6 @@ func CatEz(hash []byte) io.Reader {
 	return Cat(hash, tx)
 }
 
-
 func CatBlob(blobID []byte) io.Reader {
 	var size int64
 	var key []byte
@@ -105,4 +104,3 @@ func CatBlob(blobID []byte) io.Reader {
 	decrypted := crypto.DecryptBlobEntry(reader, 0, key)
 	return decrypted
 }
-

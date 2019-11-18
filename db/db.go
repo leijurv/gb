@@ -2,7 +2,7 @@ package db
 
 import (
 	"database/sql"
-	"log"
+	//"log"
 
 	"github.com/leijurv/gb/config"
 
@@ -27,13 +27,13 @@ func SetupDatabaseTestMode() {
 }
 
 func setupDatabase(fullPath string) {
-	log.Println("Opening database file", fullPath)
+	//log.Println("Opening database file", fullPath)
 	var err error
 	DB, err = sql.Open("sqlite3", fullPath)
 	if err != nil {
 		panic(err)
 	}
-	log.Println("Database connection created")
+	//log.Println("Database connection created")
 	//DB.SetMaxOpenConns(1) // 100x better to block for a few hundred ms than to panic with SQLITE_BUSY!!!!
 	// commenting out until i actually hit a sqlite_busy
 	initialSetup()

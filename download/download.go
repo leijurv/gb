@@ -11,7 +11,7 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func Cat(hash []byte, tx *sql.Tx) io.Reader {
+func CatCloser(hash []byte, tx *sql.Tx) io.ReadCloser {
 	var blobID []byte
 	var offset int64
 	var length int64
@@ -49,8 +49,28 @@ func Cat(hash []byte, tx *sql.Tx) io.Reader {
 	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
 	reader := utils.ReadCloserToReader(storageR.DownloadSection(path, offset, length))
 	decrypted := crypto.DecryptBlobEntry(reader, offset, key)
-	return utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(decrypted))
+	return compression.ByAlgName(compressionAlg).Decompress(decrypted)
 }
+
+func Cat(hash []byte, sql *sql.Tx) io.Reader {
+	return utils.ReadCloserToReader(CatCloser(hash, sql))
+}
+
+func CatEz(hash []byte) io.Reader {
+	tx, err := db.DB.Begin()
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		err = tx.Commit()
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	return Cat(hash, tx)
+}
+
 
 func CatBlob(blobID []byte) io.Reader {
 	var size int64
@@ -86,17 +106,3 @@ func CatBlob(blobID []byte) io.Reader {
 	return decrypted
 }
 
-func CatEz(hash []byte) io.Reader {
-	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	return Cat(hash, tx)
-}

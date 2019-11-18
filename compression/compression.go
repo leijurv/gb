@@ -87,6 +87,10 @@ func Compress(path string, out io.Writer, in io.Reader, hs *utils.HasherSizer) s
 				log.Println(verify.Hash(), verify.Size(), hs.Hash(), hs.Size())
 				panic("compression CLAIMED it succeeded but decompressed to DIFFERENT DATA this is VERY BAD")
 			}
+			if len(outData) > len(inData) {
+				log.Println("Falling back to next compression option. Compression", c.AlgName(), "actually made the file LARGER, from", len(inData), "bytes to", len(outData), "bytes")
+				continue
+			}
 			// success!
 			utils.Copy(out, bytes.NewReader(outData))
 			return c.AlgName()

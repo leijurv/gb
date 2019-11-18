@@ -16,7 +16,7 @@ import (
 )
 
 // you should change this to wherever your bucket is
-const AWSRegion = "us-west-1"
+const AWSRegion = "us-east-1"
 
 var AWSSession = session.Must(session.NewSession(&aws.Config{Region: aws.String(AWSRegion)}))
 

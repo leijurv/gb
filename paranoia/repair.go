@@ -17,6 +17,15 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
+// this was legacy literally as soon as i committed it.
+// you may find a use for it, but it's not likely lmao
+//
+//
+//
+//
+//
+//
+
 // attempt to repair a s3 etag, by recalculating it locally
 
 // this is safe: the s3 etag depends on how many "parts" you split the file into, so there any many possible valid etags for the same data, depending on part size
@@ -141,10 +150,7 @@ func handleIncorrectMetadata(actual storage_base.UploadedBlob, expected storage_
 
 	if !done {
 		log.Println("Falling back to fetch from storage")
-		_, err = io.CopyBuffer(out, download.CatBlob(expected.BlobID), make([]byte, 1024*1024)) // technically, this fallback results in a decrypt then encrypt. but who cares.
-		if err != nil {
-			panic(err)
-		}
+		utils.Copy(out, download.CatBlob(expected.BlobID)) // technically, this fallback results in a decrypt then encrypt. but who cares.
 	}
 
 	out.Write(make([]byte, size-hs.Size()))

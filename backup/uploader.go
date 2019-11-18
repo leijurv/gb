@@ -8,16 +8,19 @@ import (
 	"os"
 	"time"
 
-	"github.com/leijurv/gb/storage"
-	"github.com/leijurv/gb/storage_base"
-
+	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/storage"
+	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
 
 func uploaderThread() {
 	storage := storage.GetAll()
+	if len(storage) == 0 {
+		panic("no storage")
+	}
 	for plan := range uploaderCh {
 		executeOrder66(plan, storage)
 	}
@@ -29,7 +32,7 @@ type BlobEntry struct {
 	offset              int64
 	postCompressionSize int64
 	preCompressionSize  int64
-	compression         *string
+	compression         string
 }
 
 func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
@@ -73,12 +76,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 		log.Println("Adding", planned.File)
 		startOffset := preEncInfo.Size()
 		verify := utils.NewSHA256HasherSizer()
-		tmpOut := out // TODO compressor(out)
 
-		var reasonableBufSize int64 = 1024 * 1024 // we're working with huge files, 1MB buffer is more reasonable than 32KB default
-		if planned.info.Size() < reasonableBufSize {
-			reasonableBufSize = planned.info.Size() // file smaller than 1MB -> make the buffer that size
-		}
 		f, err := os.Open(planned.path)
 		if err != nil {
 			log.Println("I can no longer read from it to back it up???", err, planned.path)
@@ -90,23 +88,11 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 			}()
 			continue
 		}
-		err = func() error {
+		compAlg := func() string {
 			defer f.Close() // yeah its kinda paranoid but i prefer to always defer in a closure than put a Close/Unlock manually afterwards
-			_, err := io.CopyBuffer(io.MultiWriter(tmpOut, &verify), f, make([]byte, reasonableBufSize))
-			return err
+			return compression.Compress(planned.path, out, io.TeeReader(f, &verify), &verify)
 		}()
 		realHash, realSize := verify.HashAndSize()
-		if err != nil {
-			// TODO perhaps there could be some optimization, like, if we wrote 0 bytes, then it's no different from if we failed to open the file
-			// however, that's tricky because I can imagine some compression algorithms that will "compress" 0 bytes into more than 0
-			// so idk
-
-			// it's tricky what to do here tbh
-			// sadly i think we need to abandon the upload entirely?
-
-			// idk
-			panic("lol idk what to do")
-		}
 		// not sure what the error should be regarding confirmed size vs staked claims, or if there even should be an error.....
 		/*if realSize != planned.size {
 			log.Println("File copied successfully, but bytes read was", realSize, "when we expected", planned.size)
@@ -123,7 +109,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 			offset:              startOffset,
 			preCompressionSize:  realSize,
 			postCompressionSize: length,
-			compression:         nil,
+			compression:         compAlg,
 		})
 	}
 	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 )
 
@@ -46,6 +47,10 @@ func scannerThread(path string) {
 		}
 		if info.Mode()&os.ModeType != 0 { // **THIS IS WHAT SKIPS DIRECTORIES**
 			// skip Weird Things such as directories, symlinks, pipes, sockets, block devices, etc
+			return nil
+		}
+		if config.ExcludeFromBackup(path) {
+			log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
 			return nil
 		}
 		filesMap[path] = info

@@ -5,21 +5,25 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 )
 
 var HomeDir = os.Getenv("HOME")
 var ConfigLocation = HomeDir + "/.gb.conf"
 
 type ConfigData struct {
-	MinBlobSize        int64   `json:"min_blob_size"`
-	DatabaseLocation   string  `json:"database_location"`
-	PaddingMinBytes    int64   `json:"padding_min_bytes"`
-	PaddingMaxBytes    int64   `json:"padding_max_bytes"`
-	PaddingMinPercent  float64 `json:"padding_min_percent"`
-	PaddingMaxPercent  float64 `json:"padding_max_percent"`
-	NumHasherThreads   int     `json:"num_hasher_threads"`
-	NumUploaderThreads int     `json:"num_uploader_threads"`
-	TryRepairS3ETag    bool    `json:"try_repair_s3_etag"`
+	MinBlobSize        int64    `json:"min_blob_size"`
+	DatabaseLocation   string   `json:"database_location"`
+	PaddingMinBytes    int64    `json:"padding_min_bytes"`
+	PaddingMaxBytes    int64    `json:"padding_max_bytes"`
+	PaddingMinPercent  float64  `json:"padding_min_percent"`
+	PaddingMaxPercent  float64  `json:"padding_max_percent"`
+	NumHasherThreads   int      `json:"num_hasher_threads"`
+	NumUploaderThreads int      `json:"num_uploader_threads"`
+	TryRepairS3ETag    bool     `json:"try_repair_s3_etag"`
+	NoCompressionExts  []string `json:"no_compression_exts"`
+	ExcludeSuffixes    []string `json:"exclude_suffixes"`
+	ExcludePrefixes    []string `json:"exclude_prefixes"`
 }
 
 func Config() ConfigData {
@@ -36,7 +40,86 @@ var config = ConfigData{
 	NumHasherThreads:   2,
 	NumUploaderThreads: 8,
 	TryRepairS3ETag:    false, // see paranoia/repair.go
+	NoCompressionExts: []string{
+		"mp4",
+		"mkv",
+		"png",
+		"avi",
+		"mov",
+		"m4v",
+		"mp3",
+		"zip",
+		"flac",
+		"tiff",
+		"tif",
+		"m4a",
+		"7z",
+		"gz",
+		"tgz",
+		"jar",
+		"torrent",
+		"arw",
+		"webm",
+		"smi",
+		"mpg",
+		"m4p",
+		"itlp",
+		"aifc",
+		"heic",
+		"heif",
+		"avif",
+		"bz2",
+		"bzp2",
+		"bzip2",
+		"xz",
+		"aes",
+		"gpg",
+		"aac",
+		"opus",
+		"ogg",
+		"wmv",
+		"rar",
+		"dmg",
+	},
+	ExcludeSuffixes: []string{
+		".part",
+	},
+	ExcludePrefixes: []string{
+		// e.g.
+		// "/path/to/dir/to/exclude/",
+		// you REALLY SHOULD include the trailing /
+		// this really is just a starts with / ends with check on the path!
+	},
 }
+
+/*
+extensions that i thought about marking as no compress but decided against (these will be compressed):
+exe
+iso
+pdf
+docx
+xlsx
+pptx
+wav
+aif
+aiff
+idx
+sub
+srt
+ass
+sldprt
+epub
+tar
+ico
+log
+itl
+cue
+ipa
+m3u
+m3u8
+zim
+class
+*/
 
 func init() {
 	log.Println("Assuming your home directory is " + HomeDir)
@@ -75,6 +158,7 @@ func sanity() {
 	if config.NumUploaderThreads < 1 {
 		panic("NumUploaderThreads must be at least 1")
 	}
+	// TODO maybe panic if nocompressionexts / excludeprefixes / excludesuffixes are not all lower case? idk
 }
 
 func saveConfig() {
@@ -88,4 +172,19 @@ func saveConfig() {
 		log.Println("Error while writing config file!")
 		panic(err)
 	}
+}
+
+func ExcludeFromBackup(path string) bool {
+	path = strings.ToLower(path)
+	for _, suffix := range config.ExcludeSuffixes {
+		if strings.HasSuffix(path, suffix) {
+			return true
+		}
+	}
+	for _, prefix := range config.ExcludePrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }

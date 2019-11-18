@@ -33,6 +33,10 @@ func (hs *HasherSizer) HashAndSize() ([]byte, int64) {
 	return hs.hasher.Sum(nil), hs.Size()
 }
 
+func (hs *HasherSizer) Hash() []byte {
+	return hs.hasher.Sum(nil)
+}
+
 func (hs *HasherSizer) Size() int64 {
 	return atomic.LoadInt64(&hs.size)
 }
@@ -56,6 +60,10 @@ func (erc *EmptyReadCloser) Read(p []byte) (int, error) {
 
 // do you find it annoying to have to close your readers? this function is for you
 func ReadCloserToReader(in io.ReadCloser) io.Reader {
+	frc, ok := in.(*fakeReadCloser)
+	if ok {
+		return frc.r
+	}
 	pipeR, pipeW := io.Pipe()
 	go func() {
 		defer in.Close()
@@ -65,6 +73,33 @@ func ReadCloserToReader(in io.ReadCloser) io.Reader {
 	return pipeR
 }
 
+func ReaderToReadCloser(in io.Reader) io.ReadCloser {
+	rc, ok := in.(io.ReadCloser)
+	if ok {
+		return rc
+	}
+	return &fakeReadCloser{in}
+}
+
+type fakeReadCloser struct {
+	r io.Reader
+}
+
+func (frc *fakeReadCloser) Read(data []byte) (int, error) {
+	return frc.r.Read(data)
+}
+
+func (frc *fakeReadCloser) Close() error {
+	return nil
+}
+
 func FormatHTTPRange(offset int64, length int64) string {
 	return "bytes=" + strconv.FormatInt(offset, 10) + "-" + strconv.FormatInt(offset+length-1, 10)
+}
+
+func Copy(out io.Writer, in io.Reader) {
+	_, err := io.CopyBuffer(out, in, make([]byte, 1024*1024))
+	if err != nil {
+		panic(err)
+	}
 }

@@ -3,10 +3,13 @@ package main
 import (
 	"os"
 
+	"encoding/hex"
 	"errors"
+	"io"
 
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/storage"
 	"github.com/urfave/cli"
@@ -32,10 +35,27 @@ func main() {
 			},
 		},
 		{
-			Name: "paranoia",
+			Name:  "cat",
+			Usage: "dump a file to stdout by its sha256. always fetches from storage, never uses your filesystem",
+			Action: func(c *cli.Context) error {
+				data, err := hex.DecodeString(c.Args().First())
+				if err != nil {
+					return err
+				}
+				if len(data) != 32 {
+					return errors.New("wrong length")
+				}
+				_, err = io.Copy(os.Stdout, download.CatEz(data))
+				return err
+			},
+		},
+		{
+			Name:  "paranoia",
+			Usage: "yeah you SAY you backed up the files but how do i KNOW",
 			Subcommands: []cli.Command{
 				{
-					Name: "files",
+					Name:  "files",
+					Usage: "download files and calculate their hashes",
 					Action: func(c *cli.Context) error {
 						if len(storage.GetAll()) == 0 {
 							return errors.New("make a storage first")
@@ -52,6 +72,14 @@ func main() {
 							return errors.New("make a storage first")
 						}
 						paranoia.StorageParanoia()
+						return nil
+					},
+				},
+				{
+					Name:  "db",
+					Usage: "make sure the db is internally consistent",
+					Action: func(c *cli.Context) error {
+						paranoia.DBParanoia()
 						return nil
 					},
 				},

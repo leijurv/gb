@@ -119,7 +119,7 @@ func hashAFile(path string) ([]byte, int64, error) {
 	}
 	defer f.Close()
 	hs := utils.NewSHA256HasherSizer()
-	if _, err := io.Copy(&hs, f); err != nil {
+	if _, err := io.CopyBuffer(&hs, f, make([]byte, 1024*1024)); err != nil {
 		return nil, 0, err
 	}
 	hash, size := hs.HashAndSize()

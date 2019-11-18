@@ -3,9 +3,8 @@ package download
 import (
 	"database/sql"
 	"io"
-	"io/ioutil"
-	"log"
 
+	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
@@ -16,7 +15,7 @@ func Cat(hash []byte, tx *sql.Tx) io.Reader {
 	var blobID []byte
 	var offset int64
 	var length int64
-	var compression *string
+	var compressionAlg string
 	var key []byte
 	var path string
 	var storageID []byte
@@ -43,14 +42,14 @@ func Cat(hash []byte, tx *sql.Tx) io.Reader {
 
 
 			ORDER BY storage.readable_label /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
-		`, hash).Scan(&blobID, &offset, &length, &compression, &key, &path, &storageID, &kind, &identifier, &rootPath)
+		`, hash).Scan(&blobID, &offset, &length, &compressionAlg, &key, &path, &storageID, &kind, &identifier, &rootPath)
 	if err != nil {
 		panic(err)
 	}
 	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
 	reader := utils.ReadCloserToReader(storageR.DownloadSection(path, offset, length))
 	decrypted := crypto.DecryptBlobEntry(reader, offset, key)
-	return decrypted
+	return utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(decrypted))
 }
 
 func CatBlob(blobID []byte) io.Reader {
@@ -87,7 +86,7 @@ func CatBlob(blobID []byte) io.Reader {
 	return decrypted
 }
 
-func downloadOne(hash []byte) {
+func CatEz(hash []byte) io.Reader {
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
@@ -99,10 +98,5 @@ func downloadOne(hash []byte) {
 		}
 	}()
 
-	reader := Cat(hash, tx)
-	data, err := ioutil.ReadAll(reader)
-	if err != nil {
-		panic(err)
-	}
-	log.Println(string(data))
+	return Cat(hash, tx)
 }

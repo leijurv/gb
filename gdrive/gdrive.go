@@ -83,7 +83,7 @@ func (gds *gDriveStorage) ListAll() []storage_base.UploadedBlob {
 	log.Println("Listing files in Google Drive. ")
 	// increasing pagesize made this *slower*
 	// also 100 gives enough progress that people will realize it's working
-	query := gds.srv.Files.List().PageSize(100).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents").Fields("nextPageToken, files(id, md5Checksum, size)")
+	query := gds.srv.Files.List().PageSize(100).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size)")
 	files := make([]storage_base.UploadedBlob, 0)
 	for {
 		r, err := query.Do()

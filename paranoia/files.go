@@ -23,7 +23,7 @@ func TestAllFiles() {
 			panic(err)
 		}
 	}()
-	// TODO some other ordering idk
+	// TODO some other ordering idk? this is just the most recent files you uploaded, which is reasonable i think?
 	rows, err := tx.Query(`SELECT DISTINCT hash FROM files ORDER BY start DESC`)
 	if err != nil {
 		panic(err)

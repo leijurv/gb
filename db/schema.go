@@ -93,6 +93,9 @@ func createTables() error {
 		offset          INTEGER NOT NULL, /* where in the blob does this start */
 		compression_alg TEXT,             /* what kind of compression was done */
 
+/* it was a mistake to not add NOT NULL to compression_alg :( */
+/* not the end of the world though */
+
 		CHECK(final_size >= 0),
 		CHECK(offset >= 0),
 

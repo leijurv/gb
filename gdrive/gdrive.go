@@ -1,20 +1,22 @@
 package gdrive
 
 import (
+	"bytes"
+	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"strings"
 
+	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
-
-	"github.com/leijurv/gb/storage_base"
-	"github.com/leijurv/gb/utils"
 )
 
 type gDriveStorage struct {
@@ -62,6 +64,25 @@ func (gds *gDriveStorage) BeginBlobUpload(blobID []byte) storage_base.StorageUpl
 	}
 }
 
+func (gds *gDriveStorage) UploadDatabaseBackup(encryptedDatabase []byte, name string) {
+	file, err := gds.srv.Files.Create(&drive.File{
+		MimeType: "application/x-binary",
+		Name:     name,
+		Parents:  []string{gds.root},
+	}).Fields("id, md5Checksum, size, name").Media(bytes.NewReader(encryptedDatabase)).Do()
+	if err != nil {
+		panic(err)
+	}
+	if file.Size != int64(len(encryptedDatabase)) {
+		panic("upload length failed")
+	}
+	hash := md5.Sum(encryptedDatabase)
+	if file.Md5Checksum != hex.EncodeToString(hash[:]) {
+		panic("upload hash failed")
+	}
+	log.Println("Database backed up to Google Drive. Name:", file.Name, "ID:", file.Id)
+}
+
 func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
 	if length == 0 {
 		// a range of length 0 is invalid! we get a 400 instead of an empty 200!
@@ -79,11 +100,11 @@ func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int6
 	return resp.Body
 }
 
-func (gds *gDriveStorage) ListAll() []storage_base.UploadedBlob {
-	log.Println("Listing files in Google Drive. ")
+func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
+	log.Println("Listing blobs in Google Drive")
 	// increasing pagesize made this *slower*
 	// also 100 gives enough progress that people will realize it's working
-	query := gds.srv.Files.List().PageSize(100).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size)")
+	query := gds.srv.Files.List().PageSize(100).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size, name)")
 	files := make([]storage_base.UploadedBlob, 0)
 	for {
 		r, err := query.Do()
@@ -91,6 +112,9 @@ func (gds *gDriveStorage) ListAll() []storage_base.UploadedBlob {
 			panic(err)
 		}
 		for _, i := range r.Files {
+			if strings.HasPrefix(i.Name, "db-backup-") {
+				continue // this is not a blob
+			}
 			files = append(files, storage_base.UploadedBlob{
 				Path:     i.Id,
 				Checksum: i.Md5Checksum,

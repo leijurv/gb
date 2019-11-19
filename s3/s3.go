@@ -1,18 +1,18 @@
 package s3
 
 import (
+	"bytes"
 	"encoding/hex"
 	"io"
 	"log"
 	"strings"
 
-	"github.com/leijurv/gb/storage_base"
-	"github.com/leijurv/gb/utils"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 )
 
 // you should change this to wherever your bucket is
@@ -67,17 +67,20 @@ func formatPath(blobID []byte) string {
 	return h[:2] + "/" + h[2:4] + "/" + h
 }
 
+func makeUploader() *s3manager.Uploader {
+	return s3manager.NewUploader(AWSSession, func(u *s3manager.Uploader) {
+		u.PartSize = s3PartSize
+	})
+}
+
 func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 	path := remote.niceRootPath() + formatPath(blobID)
 	log.Println("Path is", path)
 	pipeR, pipeW := io.Pipe()
-	uploader := s3manager.NewUploader(AWSSession, func(u *s3manager.Uploader) {
-		u.PartSize = s3PartSize
-	})
 	resultCh := make(chan s3Result)
 	go func() {
 		defer pipeR.Close()
-		result, err := uploader.Upload(&s3manager.UploadInput{
+		result, err := makeUploader().Upload(&s3manager.UploadInput{
 			Bucket: aws.String(remote.Bucket),
 			Key:    aws.String(path),
 			Body:   pipeR,
@@ -95,6 +98,30 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 		path:   path,
 		s3:     remote,
 	}
+}
+
+func (remote *S3) UploadDatabaseBackup(encryptedDatabase []byte, name string) {
+	path := remote.niceRootPath() + name
+	result, err := makeUploader().Upload(&s3manager.UploadInput{
+		Bucket: aws.String(remote.Bucket),
+		Key:    aws.String(path),
+		Body:   bytes.NewReader(encryptedDatabase),
+	})
+	if err != nil {
+		panic(err)
+	}
+	calc := CreateETagCalculator()
+	calc.Writer.Write(encryptedDatabase)
+	calc.Writer.Close()
+	etag := <-calc.Result
+	realEtag, realSize := fetchETagAndSize(remote.Bucket, path)
+	if realSize != int64(len(encryptedDatabase)) {
+		panic("upload length failed")
+	}
+	if realEtag != etag {
+		panic("upload hash failed")
+	}
+	log.Println("Database backed up to S3. Location:", result.Location)
 }
 
 func (remote *S3) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
@@ -116,8 +143,8 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 	return result.Body
 }
 
-func (remote *S3) ListAll() []storage_base.UploadedBlob {
-	log.Println("Listing files in S3")
+func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
+	log.Println("Listing blobs in S3")
 	files := make([]storage_base.UploadedBlob, 0)
 	err := s3.New(AWSSession).ListObjectsPages(&s3.ListObjectsInput{
 		Bucket: aws.String(remote.Bucket),
@@ -125,6 +152,9 @@ func (remote *S3) ListAll() []storage_base.UploadedBlob {
 	},
 		func(page *s3.ListObjectsOutput, lastPage bool) bool {
 			for _, obj := range page.Contents {
+				if strings.Contains(*obj.Key, "db-backup-") {
+					continue // this is not a blob
+				}
 				etag := *obj.ETag
 				etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
 				files = append(files, storage_base.UploadedBlob{

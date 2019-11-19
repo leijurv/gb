@@ -8,7 +8,7 @@ import (
 )
 
 func TestSeeking(t *testing.T) {
-	data := randBytes(1234)
+	data := RandBytes(1234)
 	var encBuf bytes.Buffer
 	w, key := EncryptBlob(&encBuf)
 	if _, err := io.Copy(w, bytes.NewBuffer(data)); err != nil {

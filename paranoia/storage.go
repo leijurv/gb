@@ -54,7 +54,7 @@ func fetchAllActual() map[storageAndPath]storage_base.UploadedBlob {
 	result := make(map[storageAndPath]storage_base.UploadedBlob)
 	for _, s := range storage.GetAll() {
 		id := utils.SliceToArr(s.GetID())
-		for _, file := range s.ListAll() {
+		for _, file := range s.ListBlobs() {
 			result[storageAndPath{id, file.Path}] = file
 		}
 	}
@@ -62,12 +62,13 @@ func fetchAllActual() map[storageAndPath]storage_base.UploadedBlob {
 }
 
 func fetchAllExpected() map[storageAndPath]storage_base.UploadedBlob {
-	rows, err := db.DB.Query(`SELECT
-			blob_storage.path,
-			blob_storage.checksum,
-			blobs.size,
-			blobs.blob_id,
-			blob_storage.storage_id
+	rows, err := db.DB.Query(`
+			SELECT
+				blob_storage.path,
+				blob_storage.checksum,
+				blobs.size,
+				blobs.blob_id,
+				blob_storage.storage_id
 			FROM blob_storage
 				INNER JOIN blobs ON blob_storage.blob_id = blobs.blob_id`)
 	if err != nil {

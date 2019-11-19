@@ -150,5 +150,18 @@ func createTables() error {
 		log.Println("Unable to create blob_storage table")
 		return err
 	}
+	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS db_key (
+
+		id  INTEGER NOT NULL PRIMARY KEY,
+		key BLOB    NOT NULL,
+
+		CHECK(id == 0), /* only one row allowed xD */
+		CHECK(LENGTH(key) == 16)
+	);
+	`)
+	if err != nil {
+		log.Println("Unable to create db_key table")
+		return err
+	}
 	return nil
 }

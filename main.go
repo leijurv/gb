@@ -19,10 +19,14 @@ import (
 func main() {
 	db.SetupDatabase()
 	defer db.ShutdownDatabase()
+
 	app := cli.NewApp()
+	app.Name = "gb"
+	app.Usage = "backup the files"
 	app.Commands = []cli.Command{
 		{
-			Name: "backup",
+			Name:  "backup",
+			Usage: "backup a directory",
 			Action: func(c *cli.Context) error {
 				path := c.Args().First()
 				if path == "" {
@@ -87,7 +91,8 @@ func main() {
 			},
 		},
 		{
-			Name: "storage",
+			Name:  "storage",
+			Usage: "where do i store the data",
 			Subcommands: []cli.Command{
 				{
 					Name: "add",
@@ -155,6 +160,14 @@ func main() {
 			Usage: "list backup info about files in a directory",
 			Action: func(c *cli.Context) error {
 				history.DirHistory(c.Args().First())
+				return nil
+			},
+		},
+		{
+			Name:  "mnemonic",
+			Usage: "print out database encryption key mnemonic",
+			Action: func(c *cli.Context) error {
+				backup.Mnemonic(backup.DBKey())
 				return nil
 			},
 		},

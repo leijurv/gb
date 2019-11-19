@@ -9,8 +9,10 @@ type Storage interface {
 	BeginBlobUpload(blobID []byte) StorageUpload
 	DownloadSection(path string, offset int64, length int64) io.ReadCloser
 
+	UploadDatabaseBackup(encryptedDatabase []byte, name string)
+
 	// it is like always faster to get a large list of path, checksum, size than to do it one file at a time
-	ListAll() []UploadedBlob
+	ListBlobs() []UploadedBlob
 
 	GetID() []byte
 

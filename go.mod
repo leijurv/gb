@@ -10,6 +10,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9 // indirect
 	github.com/hashicorp/golang-lru v0.5.3 // indirect
 	github.com/mattn/go-sqlite3 v1.11.0
+	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/urfave/cli v1.22.1
 	go.opencensus.io v0.22.2 // indirect
 	golang.org/x/net v0.0.0-20191116160921-f9c825593386

@@ -10,7 +10,6 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-// TODO implement other paranoia levels on a per file level
 func TestAllFiles() {
 	tx, err := db.DB.Begin()
 	if err != nil {
@@ -23,7 +22,7 @@ func TestAllFiles() {
 		}
 	}()
 	// TODO some other ordering idk? this is just the most recent files you uploaded, which is reasonable i think?
-	rows, err := tx.Query(`SELECT DISTINCT hash FROM files ORDER BY start DESC`)
+	rows, err := tx.Query(`SELECT d.hash FROM (SELECT DISTINCT hash FROM files WHERE end IS NULL) d INNER JOIN sizes ON sizes.hash = d.hash WHERE sizes.size < 100000000 ORDER BY sizes.hash`)
 	// SELECT DISTINCT hash FROM blob_entries WHERE compression_alg = "lepton"
 	if err != nil {
 		panic(err)

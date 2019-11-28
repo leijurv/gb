@@ -7,8 +7,10 @@ import (
 	"errors"
 
 	"github.com/leijurv/gb/backup"
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
+	"github.com/leijurv/gb/dupes"
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/storage"
@@ -17,12 +19,25 @@ import (
 )
 
 func main() {
-	db.SetupDatabase()
 	defer db.ShutdownDatabase()
 
 	app := cli.NewApp()
 	app.Name = "gb"
-	app.Usage = "backup the files"
+	app.Usage = "backup your files"
+	app.Flags = []cli.Flag{
+		&cli.StringFlag{
+			Name:        "config-file",
+			Value:       config.HomeDir + "/.gb.conf",
+			Usage:       "path to where you want your config file",
+			Destination: &config.ConfigLocation,
+		},
+	}
+	app.Before = func(c *cli.Context) error {
+		// we don't know where the database should be read from
+		// until after the config-file flag is parsed
+		db.SetupDatabase()
+		return nil
+	}
 	app.Commands = []cli.Command{
 		{
 			Name:  "backup",
@@ -56,7 +71,7 @@ func main() {
 		},
 		{
 			Name:  "paranoia",
-			Usage: "yeah you SAY you backed up the files but how do i KNOW",
+			Usage: "yeah you SAY you backed up the files but how do i KNOW (you can also directly put a path/to/file instead of files/storage/db)",
 			Subcommands: []cli.Command{
 				{
 					Name:  "files",
@@ -88,6 +103,14 @@ func main() {
 						return nil
 					},
 				},
+			},
+			Action: func(c *cli.Context) error {
+				path := c.Args().First()
+				if path == "" {
+					return errors.New("Must give me a path to paranoia. Use \".\" for current directory. You can also `paranoia db` or `paranoia storage` or `paranoia files`.")
+				}
+				paranoia.ParanoiaFile(path)
+				return nil
 			},
 		},
 		{
@@ -168,6 +191,14 @@ func main() {
 			Usage: "print out database encryption key mnemonic",
 			Action: func(c *cli.Context) error {
 				backup.Mnemonic(backup.DBKey())
+				return nil
+			},
+		},
+		{
+			Name:  "fdupes",
+			Usage: "print out duplicated file paths in fdupes format, for consumption by duperemove",
+			Action: func(c *cli.Context) error {
+				dupes.PrintDupes()
 				return nil
 			},
 		},

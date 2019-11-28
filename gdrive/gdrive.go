@@ -100,11 +100,19 @@ func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int6
 	return resp.Body
 }
 
+func (gds *gDriveStorage) Metadata(path string) (string, int64) {
+	file, err := gds.srv.Files.Get(path).Fields("md5Checksum, size").Do()
+	if err != nil {
+		panic(err)
+	}
+	return file.Md5Checksum, file.Size
+}
+
 func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
-	log.Println("Listing blobs in Google Drive")
+	log.Println("Listing blobs in Google Drive. Requesting pages of size 1000, which is the maximum. This can take 5 to 15 seconds per page.")
 	// increasing pagesize made this *slower*
 	// also 100 gives enough progress that people will realize it's working
-	query := gds.srv.Files.List().PageSize(100).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size, name)")
+	query := gds.srv.Files.List().PageSize(1000).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size, name)")
 	files := make([]storage_base.UploadedBlob, 0)
 	for {
 		r, err := query.Do()
@@ -126,9 +134,9 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 		} else {
 			query.PageToken(r.NextPageToken)
 		}
-		log.Println("Fetched page from Google Drive. Have", len(files), "files so far")
+		log.Println("Fetched page from Google Drive. Have", len(files), "blobs so far")
 	}
-	log.Println("Listed", len(files), "files in Google Drive")
+	log.Println("Listed", len(files), "blobs in Google Drive")
 	return files
 }
 

@@ -2,14 +2,12 @@ package db
 
 import (
 	"database/sql"
-	//"log"
+	"log"
 
 	"github.com/leijurv/gb/config"
 
 	_ "github.com/mattn/go-sqlite3"
 )
-
-var databaseFullPath = "file:" + config.Config().DatabaseLocation + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=5000"
 
 // the below is from the faq for go-sqlite3, but with the foreign key part added
 const databaseTestPath = "file::memory:?mode=memory&cache=shared&_foreign_keys=1"
@@ -19,7 +17,7 @@ var ErrNoRows = sql.ErrNoRows
 var DB *sql.DB
 
 func SetupDatabase() {
-	setupDatabase(databaseFullPath)
+	setupDatabase("file:" + config.Config().DatabaseLocation + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=5000")
 }
 
 func SetupDatabaseTestMode() {
@@ -40,5 +38,9 @@ func setupDatabase(fullPath string) {
 }
 
 func ShutdownDatabase() {
+	if DB == nil {
+		log.Println("Attempting to shutdown a database that has never been setup??")
+		return
+	}
 	DB.Close()
 }

@@ -14,6 +14,8 @@ type Storage interface {
 	// it is like always faster to get a large list of path, checksum, size than to do it one file at a time
 	ListBlobs() []UploadedBlob
 
+	Metadata(path string) (string, int64) // checksum (can be empty) and size
+
 	GetID() []byte
 
 	String() string

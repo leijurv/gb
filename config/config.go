@@ -9,7 +9,8 @@ import (
 )
 
 var HomeDir = os.Getenv("HOME")
-var ConfigLocation = HomeDir + "/.gb.conf"
+var ConfigLocation string
+var inited = false
 
 type ConfigData struct {
 	MinBlobSize        int64    `json:"min_blob_size"`
@@ -27,6 +28,7 @@ type ConfigData struct {
 }
 
 func Config() ConfigData {
+	begin()
 	return config
 }
 
@@ -121,7 +123,14 @@ zim
 class
 */
 
-func init() {
+func begin() {
+	if inited {
+		return
+	}
+	inited = true
+	if ConfigLocation == "" {
+		panic("you can't call config in an init (before we parse our cli args), sorry!")
+	}
 	//log.Println("Assuming your home directory is " + HomeDir)
 	//log.Println("Therefore I'm going to assume my config file should be at " + ConfigLocation)
 	data, err := ioutil.ReadFile(ConfigLocation)

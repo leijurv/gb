@@ -17,6 +17,8 @@ var queriesThatShouldHaveNoRows = []string{
 
 	"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL", // i really should have made this a NOT NULL. my mistake.
 
+	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND compression_alg != ''",
+
 	// these are already foreign key constraints, but some enterprising user who manually touches the database might screw em up
 	"SELECT files.hash FROM files LEFT OUTER JOIN sizes ON files.hash = sizes.hash WHERE sizes.hash IS NULL",
 	"SELECT blob_entries.hash FROM blob_entries LEFT OUTER JOIN sizes ON blob_entries.hash = sizes.hash WHERE sizes.hash IS NULL",

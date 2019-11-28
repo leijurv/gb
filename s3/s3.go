@@ -124,6 +124,10 @@ func (remote *S3) UploadDatabaseBackup(encryptedDatabase []byte, name string) {
 	log.Println("Database backed up to S3. Location:", result.Location)
 }
 
+func (remote *S3) Metadata(path string) (string, int64) {
+	return fetchETagAndSize(remote.Bucket, path)
+}
+
 func (remote *S3) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
 	if length == 0 {
 		// a range of length 0 is invalid! we get a 400 instead of an empty 200!
@@ -164,14 +168,14 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 				})
 			}
 			if !lastPage {
-				log.Println("Fetched page from S3. Have", len(files), "files so far")
+				log.Println("Fetched page from S3. Have", len(files), "blobs so far")
 			}
 			return true
 		})
 	if err != nil {
 		panic(err)
 	}
-	log.Println("Listed", len(files), "files in S3")
+	log.Println("Listed", len(files), "blobs in S3")
 	return files
 }
 

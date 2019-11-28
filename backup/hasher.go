@@ -72,22 +72,19 @@ func hashOneFile(plan HashPlan) {
 	r := func() *Planned {
 		hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
 		defer hashLateMapLock.Unlock()
-		var dbHash []byte
-		err = db.DB.QueryRow("SELECT hash FROM blob_entries WHERE hash = ?", hash).Scan(&dbHash)
-		if err == nil {
-			// tx CANNOT include previous query because ro to rw upgrade is fucky with sqlite multithreaded
-			tx, err := db.DB.Begin()
+		tx, err := db.DB.Begin()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			err = tx.Commit()
 			if err != nil {
 				panic(err)
 			}
-			defer func() {
-				log.Println("Hasher committing to database")
-				err = tx.Commit()
-				if err != nil {
-					panic(err)
-				}
-				log.Println("Committed")
-			}()
+		}()
+		var dbHash []byte
+		err = tx.QueryRow("SELECT hash FROM blob_entries WHERE hash = ?", hash).Scan(&dbHash)
+		if err == nil {
 			// yeah so we already have this hash backed up, so the train stops here. we just need to add this to files table, and we done!
 			fileHasKnownData(tx, path, info, hash)
 			return nil // done, no need to upload

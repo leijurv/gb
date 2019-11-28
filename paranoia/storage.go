@@ -16,8 +16,8 @@ type storageAndPath struct { // can be used as a map key
 }
 
 func StorageParanoia() {
-	actual := fetchAllActual()
 	expected := fetchAllExpected()
+	actual := fetchAllActual()
 	log.Println("Comparing expected against actual")
 	for k, v := range expected {
 		realBlob, ok := actual[k]

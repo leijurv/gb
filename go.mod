@@ -6,6 +6,7 @@ require (
 	cloud.google.com/go v0.48.0 // indirect
 	github.com/DataDog/zstd v1.4.4
 	github.com/aws/aws-sdk-go v1.25.36
+	github.com/cespare/diff v0.0.0-20150524045016-c6e4a33d5a81
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9 // indirect
 	github.com/hashicorp/golang-lru v0.5.3 // indirect

@@ -37,6 +37,7 @@ func DirHistory(path string) {
 		if err != nil {
 			panic(err)
 		}
+		// TODO use % formatting :(
 		line := path
 		line += ": "
 		line += time.Unix(firstBackup, 0).Format(time.RFC3339)

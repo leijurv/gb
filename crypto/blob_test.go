@@ -16,7 +16,7 @@ func TestSeeking(t *testing.T) {
 	}
 	enc := encBuf.Bytes()
 
-	for offset := 0; offset < len(data); offset++ {
+	for offset := 0; offset <= len(data); offset++ {
 		r := DecryptBlobEntry(bytes.NewBuffer(enc[offset:]), int64(offset), key)
 		dec, err := ioutil.ReadAll(r)
 		if err != nil {

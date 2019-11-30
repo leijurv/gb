@@ -17,7 +17,7 @@ var ErrNoRows = sql.ErrNoRows
 var DB *sql.DB
 
 func SetupDatabase() {
-	setupDatabase("file:" + config.Config().DatabaseLocation + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=5000")
+	setupDatabase("file:" + config.Config().DatabaseLocation + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=20000")
 }
 
 func SetupDatabaseTestMode() {

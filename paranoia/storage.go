@@ -3,7 +3,6 @@ package paranoia
 import (
 	"log"
 
-	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
@@ -33,10 +32,6 @@ func StorageParanoia() {
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Actual:", realBlob)
 			log.Println("Expected: ", v)
-			if config.Config().TryRepairS3ETag {
-				log.Println("Attempting to repair ETag by recalculating from local data... (config setting TryRepairS3ETag is enabled)")
-				handleIncorrectMetadata(realBlob, v, storage.GetByID(k.storageID[:]))
-			}
 		}
 	}
 	for k, v := range actual {

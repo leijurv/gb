@@ -16,11 +16,11 @@ func hasherThread() {
 	for hashPlan := range hasherCh {
 		hashOneFile(hashPlan)
 	}
-	log.Println("hasherCh closed")
+	log.Println("Hasher thread exiting")
 }
 
 func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
-	// important to use the same "now" for both of these queries, so that the file's history is presented without "gaps" (that would be present if we called time.Now() twice in a row)
+	// important to use the same "now" for both of these queries, so that the file's history is presented without "gaps" (that could be present if we called time.Now() twice in a row)
 	_, err := tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", now, path)
 	if err != nil {
 		panic(err)
@@ -40,10 +40,10 @@ func hashOneFile(plan HashPlan) {
 
 	hash, size, err := hashAFile(path)
 	if err != nil {
-		for i := 0; i < 100; i++ {
-			log.Println("not going to back up because i literally couldnt read it", path, err)
-		}
-		return
+		// thought about this, and well
+		// honestly I'd rather have the whole thing throw a big error when a file fails to be backed up
+		// insetad of just continuing...
+		panic(err)
 	}
 	if size != info.Size() {
 		// wtf
@@ -69,7 +69,7 @@ func hashOneFile(plan HashPlan) {
 		log.Println(path, "hash has changed from", hex.EncodeToString(expectedHash), "to", hex.EncodeToString(hash))
 	}
 
-	r := func() *Planned {
+	bucketWithKnownHash := func() *Planned {
 		hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
 		defer hashLateMapLock.Unlock()
 		tx, err := db.DB.Begin()
@@ -85,7 +85,7 @@ func hashOneFile(plan HashPlan) {
 		var dbHash []byte
 		err = tx.QueryRow("SELECT hash FROM blob_entries WHERE hash = ?", hash).Scan(&dbHash)
 		if err == nil {
-			// yeah so we already have this hash backed up, so the train stops here. we just need to add this to files table, and we done!
+			// yeah so we already have this hash backed up, so the train stops here. we just need to add this to files table, and we're done!
 			fileHasKnownData(tx, path, info, hash)
 			return nil // done, no need to upload
 		}
@@ -106,29 +106,37 @@ func hashOneFile(plan HashPlan) {
 		}
 		// wow! we are the FIRST! how exciting! how exciting!
 		hashLateMap[hashArr] = []File{plan.File}
-		// we **cannot** write to bucketerCh here, since we're still holding hashLateMapLock and that would cause deadlock
-		// so we return and let the other thing deal with it lmao!
+		// even though we want to, we **cannot** write to bucketerCh here, since we're still holding hashLateMapLock and that would cause deadlock
+		// so we return and let the caller do it it lmao!
 		return &Planned{plan.File, hash, &size, nil}
 	}
 
-	w := func() {
-		plan := r()
+	// split this up into two functions so that as above ^, we write the result after the defer unlock
+	nextStepWrapper := func() {
+		plan := bucketWithKnownHash()
 		if plan != nil {
 			bucketerCh <- *plan
 		} else {
-			wg.Done() // decrement the false increment from earlier
+			// waitgroup should only be incremented for a real write to bucketerCh
+			// so decrement if we aren't actually going to do that now
+			wg.Done()
 		}
 	}
 
-	lock, ok := fetchContentionMutex(size)
+	// given that this can start a new goroutine and block on a size claim, we should add to the in progress wait group now, so that we don't forget about it
+	// > this wouldn't be necessary if we always blockingly wrote to bucketerCh (i.e. called nextStepWrapper directly, not through a new goroutine)
+	// >> reason being that wg can only be completed once all hasher threads exit, which couldn't happen if one of said threads was blocking on a channel write
 	wg.Add(1)
+	// we also can't do this only in the case where there is a preexisting size claim in contention, because it's entirely possible (downright likely, even) that the staked size claim may have actually been the same hash as this file, resulting in us not actually needing to write anything to bucketerCh.
+
+	lock, ok := fetchContentionMutex(size)
 	if ok {
 		go func() {
-			lock.Lock()   // this will block for a LONG time - until unstakeClaim is called, which is once the file upload is complete
+			lock.Lock()   // this will block for a LONG time – until unstakeClaim is called, which is once the file upload in the other thread is complete
 			lock.Unlock() // we aren't staking a claim since that's no longer sensical (the file of that length is already uploaded), so instantly unlock once we've confirmed the first claim is over
-			w()
+			nextStepWrapper()
 		}()
 	} else {
-		w()
+		nextStepWrapper()
 	}
 }

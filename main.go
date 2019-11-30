@@ -33,24 +33,20 @@ func main() {
 		},
 	}
 	app.Before = func(c *cli.Context) error {
-		// we don't know where the database should be read from
-		// until after the config-file flag is parsed
+		// we don't know where the database should be read from until after the "config-file" flag is parsed
 		db.SetupDatabase()
 		return nil
 	}
 	app.Commands = []cli.Command{
 		{
 			Name:  "backup",
-			Usage: "backup a directory",
+			Usage: "backup a directory (or file)",
 			Action: func(c *cli.Context) error {
 				path := c.Args().First()
-				if path == "" {
-					return errors.New("Must give me a path to backup. Use \".\" for current directory.")
-				}
 				if len(storage.GetAll()) == 0 {
 					return errors.New("make a storage first")
 				}
-				backup.BackupADirectoryRecursively(path)
+				backup.Backup(path)
 				return nil
 			},
 		},

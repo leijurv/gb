@@ -10,38 +10,48 @@ import (
 	"github.com/leijurv/gb/config"
 )
 
-func BackupADirectoryRecursively(path string) {
-	log.Println("Going to back up this folder:", path)
+func Backup(path string) {
+	log.Println("Going to back up this path:", path)
 	var err error
 	path, err = filepath.Abs(path)
 	if err != nil {
 		panic(err)
 	}
 	log.Println("Converted to absolute:", path)
+
 	stat, err := os.Stat(path)
 	if err != nil {
 		log.Println("Path doesn't exist?")
 		return
 	}
-	if !stat.IsDir() {
-		log.Println("This is not a directory btw wtf single files are BaD and i wont deal with them owned")
-		return
+
+	if stat.IsDir() {
+		log.Println("This is a directory, good!")
+		if !strings.HasSuffix(path, "/") {
+			path += "/"
+		}
+		log.Println("Normalized to ensure trailing slash:", path)
+	} else {
+		if !NormalFile(stat) {
+			panic("This file is not normal. Perhaps a symlink or something? Not supported sorry!")
+		}
+		log.Println("This is a single file...?")
 	}
-	log.Println("Good this is a directory")
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-	log.Println("Normalized to ensure trailing slash:", path)
+
 	wg.Add(1)
-	go scannerThread(path)
+	go scannerThread(path, stat)
+
 	for i := 0; i < config.Config().NumHasherThreads; i++ {
 		wg.Add(1)
 		go hasherThread()
 	}
+
 	go bucketerThread()
+
 	for i := 0; i < config.Config().NumUploaderThreads; i++ {
 		go uploaderThread()
 	}
+
 	go func() {
 		for {
 			log.Println("Bytes written:", formatCommas(stats.Total()))

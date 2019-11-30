@@ -5,6 +5,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"sync"
@@ -136,4 +137,37 @@ func formatCommas(num int64) string {
 		str = re.ReplaceAllString(str, "$1,$2")
 	}
 	return str
+}
+
+// walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
+func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
+	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Println("While traversing those files, I got this error:")
+			log.Println(err)
+			log.Println("while looking at this path:")
+			log.Println(path)
+			return err
+		}
+		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
+			return nil
+		}
+		if config.ExcludeFromBackup(path) {
+			log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
+			return nil
+		}
+		fn(path, info)
+		return nil
+	})
+	if err != nil {
+		// permission error while traversing
+		// we should *not* continue, because that would mark all further files as "deleted"
+		// aka, do not continue with a partially complete traversal of the directory lmao
+		panic(err)
+	}
+}
+
+// return true if and only if the provided FileInfo represents a completely normal file, and nothing weird like a directory, symlink, pipe, socket, block device, etc
+func NormalFile(info os.FileInfo) bool {
+	return info.Mode()&os.ModeType == 0
 }

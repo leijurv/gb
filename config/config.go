@@ -21,7 +21,6 @@ type ConfigData struct {
 	PaddingMaxPercent  float64  `json:"padding_max_percent"`
 	NumHasherThreads   int      `json:"num_hasher_threads"`
 	NumUploaderThreads int      `json:"num_uploader_threads"`
-	TryRepairS3ETag    bool     `json:"try_repair_s3_etag"`
 	NoCompressionExts  []string `json:"no_compression_exts"`
 	ExcludeSuffixes    []string `json:"exclude_suffixes"`
 	ExcludePrefixes    []string `json:"exclude_prefixes"`
@@ -41,7 +40,6 @@ var config = ConfigData{
 	PaddingMaxPercent:  0.1, // percent means percent. this is 0.1% not 10%!!
 	NumHasherThreads:   2,
 	NumUploaderThreads: 8,
-	TryRepairS3ETag:    false, // see paranoia/repair.go
 	NoCompressionExts: []string{
 		"mp4",
 		"mkv",

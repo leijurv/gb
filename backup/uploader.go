@@ -22,7 +22,7 @@ func uploaderThread() {
 		panic("no storage")
 	}
 	for plan := range uploaderCh {
-		executeOrder66(plan, storage)
+		executeBlobUploadPlan(plan, storage)
 	}
 }
 
@@ -35,10 +35,10 @@ type BlobEntry struct {
 	compression         string
 }
 
-func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
+func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 	log.Println("Executing upload plan", plan)
 	for _, f := range plan {
-		defer wg.Done() // there's a wg.Add(1) for each entry in the plan
+		defer wg.Done() // there's a wg.Add(1) for each and every entry in the plan
 		if f.stakedClaim != nil {
 			sz := *f.stakedClaim
 			defer releaseAndUnstakeSizeClaim(sz)
@@ -62,8 +62,7 @@ func executeOrder66(plan BlobPlan, storageDests []storage_base.Storage) {
 	postEncInfo := utils.NewSHA256HasherSizer()
 	out = io.MultiWriter(out, &postEncInfo)
 
-	var key []byte
-	out, key = crypto.EncryptBlob(out)
+	out, key := crypto.EncryptBlob(out)
 
 	preEncInfo := utils.NewSHA256HasherSizer()
 	out = io.MultiWriter(out, &preEncInfo)
@@ -202,12 +201,13 @@ func uploadFailure(planned Planned) {
 	if late[0] != planned.File {
 		panic("somehow something isn't being synchronized :(")
 	}
-	late = late[1:]
+	late = late[1:] // we failed :(
 	if len(late) > 0 {
 		hashLateMap[expected] = late
 		// confirmed, another file was relying on this
 		wg.Add(1)
 		go func() {
+			// obviously, only write ONE of the other files we know to have this hash, not all
 			bucketerCh <- Planned{late[0], plannedHash, planned.confirmedSize, nil}
 		}() // we will upload the next file on the list with the same hash so they don't get left stranded (hashed, planned, but not actually uploaded)
 	} else {

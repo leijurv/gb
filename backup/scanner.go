@@ -4,15 +4,14 @@ import (
 	"database/sql"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/utils"
 )
 
-func scannerThread(path string) {
+func scannerThread(path string, info os.FileInfo) {
 	defer close(hasherCh)
 	defer wg.Done()
 	defer func() {
@@ -28,47 +27,32 @@ func scannerThread(path string) {
 		panic(err)
 	}
 	defer func() {
-		log.Println("Scanner committing to database (even though it's read only)")
+		log.Println("Scanner committing")
 		err = tx.Commit()
 		if err != nil {
 			panic(err)
 		}
-		log.Println("Committed")
+		log.Println("Scanner committed")
 	}()
-	filesMap := make(map[string]os.FileInfo)
-	log.Println("Beginning scan now!")
-	err = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			log.Println("While traversing those files, I got this error:")
-			log.Println(err)
-			log.Println("while looking at this path:")
-			log.Println(path)
-			return err
-		}
-		if info.Mode()&os.ModeType != 0 { // **THIS IS WHAT SKIPS DIRECTORIES**
-			// skip Weird Things such as directories, symlinks, pipes, sockets, block devices, etc
-			return nil
-		}
-		if config.ExcludeFromBackup(path) {
-			log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
-			return nil
-		}
-		filesMap[path] = info
-		scanOneFile(File{path, info}, tx)
-		return nil
-	})
-	if err != nil {
-		// permission error while traversing
-		// we should *not* continue, because that would mark all further files as "deleted"
-		// aka, do not continue with a partially complete traversal of the directory lmao
-		panic(err)
+
+	if info.IsDir() {
+		scanDirectory(path, tx)
+	} else {
+		scanFile(File{path, info}, tx)
 	}
-	log.Println("Finally, handling deleted files!")
-	// anything that was in this directory but is no longer can be deleted
-	pruneDeletedFiles(path, filesMap)
 }
 
-func scanOneFile(file File, tx *sql.Tx) {
+func scanDirectory(path string, tx *sql.Tx) {
+	filesMap := make(map[string]os.FileInfo)
+	log.Println("Beginning scan now!")
+	utils.WalkFiles(path, func(path string, info os.FileInfo) {
+		filesMap[path] = info
+		scanFile(File{path, info}, tx)
+	})
+	pruneDeletedFiles(path, filesMap, tx)
+}
+
+func scanFile(file File, tx *sql.Tx) {
 	var expectedLastModifiedTime int64
 	var expectedHash []byte
 	var expectedSize int64
@@ -79,7 +63,7 @@ func scanOneFile(file File, tx *sql.Tx) {
 			log.Println("UNMODIFIED:", file.path, "ModTime is still", expectedLastModifiedTime, "and size is still", expectedSize)
 			return
 		}
-		log.Println("MODIFIED:", file.path, "Was previously stored, but I'm updating it since the last modified time has changed from", expectedLastModifiedTime, "to", file.info.ModTime().Unix(), "or the size has changed from", expectedSize, "to", size)
+		log.Println("MODIFIED:", file.path, "was previously stored, but I'm updating it since the last modified time has changed from", expectedLastModifiedTime, "to", file.info.ModTime().Unix(), "and/or the size has changed from", expectedSize, "to", size)
 	} else {
 		if err != db.ErrNoRows {
 			panic(err) // unexpected error, maybe sql syntax error?
@@ -95,7 +79,7 @@ func scanOneFile(file File, tx *sql.Tx) {
 			panic(err) // unexpected error, maybe sql syntax error?
 		}
 		// ErrNoRows = no existing files of this size stored in the db! we can do the bypass!
-		if stakeSizeClaim(size) {
+		if stakeSizeClaim(size) { // no files of this size in the database yet... but check if there is already one in progress Right Now?
 			// UwU we CAN do the bypass YAY
 			log.Println("Staked size claim", size, "skipping hasher directly to bucketer epic style", file.path)
 			wg.Add(1)
@@ -105,30 +89,20 @@ func scanOneFile(file File, tx *sql.Tx) {
 		}
 	}
 	// no bypass :(
-	log.Println("hasherCh write", file.path)
+	// we know of a file with the exact same size (either in db, or currently being uploaded)
+	// so we do actually need to check the hash of this file to determine if it's unique or not
 	hasherCh <- HashPlan{file, nil}
-	log.Println("wrote", file.path)
 }
 
 // find files in the database for this path, that no longer exist on disk (i.e. they're DELETED LOL)
-func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
+func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo, tx *sql.Tx) {
 	if !strings.HasSuffix(backupPath, "/") {
 		panic(backupPath) // sanity check, should have already been completed
 	}
-	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		log.Println("Pruner committing to database")
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Committed")
-	}()
-	like := backupPath + "*"
-	rows, err := tx.Query("SELECT path FROM files WHERE path GLOB ? AND end IS NULL", like)
+	log.Println("Finally, handling deleted files!")
+	// anything that was in this directory but is no longer can be deleted
+	pattern := backupPath + "*"
+	rows, err := tx.Query("SELECT path FROM files WHERE path GLOB ? AND end IS NULL", pattern)
 	if err != nil {
 		panic(err)
 	}

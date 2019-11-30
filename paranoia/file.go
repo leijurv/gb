@@ -11,14 +11,12 @@ import (
 	"time"
 
 	"github.com/cespare/diff"
-	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
 )
 
-// TODO implement other paranoia levels on a per file level
 func ParanoiaFile(path string) {
 	log.Println("Path is:", path)
 	var err error
@@ -55,40 +53,21 @@ func ParanoiaFile(path string) {
 			log.Println("Ok")
 		} else {
 			log.Println("Petulantly downgrading your paranoia level to 3")
+			time.Sleep(1500 * time.Millisecond)
 			level--
 		}
 	}
 	if stat.IsDir() {
-		err = filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-			// <pasted from scanner>
-			if err != nil {
-				log.Println("While traversing those files, I got this error:")
-				log.Println(err)
-				log.Println("while looking at this path:")
-				log.Println(path)
-				return err
-			}
-			if info.Mode()&os.ModeType != 0 { // **THIS IS WHAT SKIPS DIRECTORIES**
-				// skip Weird Things such as directories, symlinks, pipes, sockets, block devices, etc
-				return nil
-			}
-			if config.ExcludeFromBackup(path) {
-				log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
-				return nil
-			}
-			// </pasted from scanner>
+		utils.WalkFiles(path, func(path string, info os.FileInfo) {
 			paranoia(path, info, level)
-			return nil
 		})
-		if err != nil {
-			panic(err)
-		}
 	} else {
 		paranoia(path, stat, level)
 	}
 }
 
 func paranoia(path string, info os.FileInfo, level int) {
+	log.Println("Running paranoia on", path)
 	var dbmodified int64
 	var dbsize int64
 	err := db.DB.QueryRow("SELECT files.fs_modified, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE files.path = ? AND files.end IS NULL", path).Scan(&dbmodified, &dbsize)
@@ -116,6 +95,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 	if level == 0 {
 		return
 	}
+	count := 0
 	rows, err := db.DB.Query(`
 			SELECT
 				files.hash,
@@ -162,7 +142,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 			panic(err)
 		}
 		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", path, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decrypting using", compressionAlg)
-
+		count++
 		if level > 1 {
 			log.Println("Fetching the metadata of the blob containing this file to verify that it's what we expect...")
 			storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
@@ -212,5 +192,8 @@ func paranoia(path string, info os.FileInfo, level int) {
 	err = rows.Err()
 	if err != nil {
 		panic(err)
+	}
+	if count == 0 {
+		panic("this blob is not stored anywhere?!")
 	}
 }

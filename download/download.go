@@ -70,37 +70,3 @@ func CatEz(hash []byte) io.Reader {
 
 	return Cat(hash, tx)
 }
-
-func CatBlob(blobID []byte) io.Reader {
-	var size int64
-	var key []byte
-	var path string
-	var storageID []byte
-	var kind string
-	var identifier string
-	var rootPath string
-	err := db.DB.QueryRow(`
-			SELECT
-				blobs.size,
-				blobs.encryption_key,
-				blob_storage.path,
-				storage.storage_id,
-				storage.type,
-				storage.identifier,
-				storage.root_path
-			FROM blobs
-				INNER JOIN blob_storage ON blob_storage.blob_id = blobs.blob_id
-				INNER JOIN storage ON storage.storage_id = blob_storage.storage_id
-			WHERE blobs.blob_id = ?
-
-
-			ORDER BY storage.readable_label /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
-		`, blobID).Scan(&size, &key, &path, &storageID, &kind, &identifier, &rootPath)
-	if err != nil {
-		panic(err)
-	}
-	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
-	reader := utils.ReadCloserToReader(storageR.DownloadSection(path, 0, size))
-	decrypted := crypto.DecryptBlobEntry(reader, 0, key)
-	return decrypted
-}

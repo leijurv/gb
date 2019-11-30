@@ -35,7 +35,8 @@ func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
 	iv := new(big.Int).SetInt64(seekOffset / 16).Bytes() // if this were C I would just cast &seekOffset to a uint8_t* lol
 
 	// big.Int.Bytes() will only be as long as it needs to be, so we need to:
-	iv = append(make([]byte, 16-len(iv)), iv...) // pad with leading zero bytes to be proper length
+	padding := make([]byte, 16-len(iv))
+	iv = append(padding, iv...) // pad with leading zero bytes to be proper length
 
 	stream := cipher.NewCTR(block, iv)
 	// no guarantee that the files are aligned to multiples of 16 in length...

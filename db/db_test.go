@@ -26,7 +26,7 @@ func TestInitialSetup(t *testing.T) {
 
 func TestConstraints(t *testing.T) {
 	WithTestingDatabase(t, func() {
-		_, err := DB.Exec("INSERT INTO hashes (hash, size) VALUES (?, ?)", make([]byte, 5), 0)
+		_, err := DB.Exec("INSERT INTO sizes (hash, size) VALUES (?, ?)", make([]byte, 5), 0)
 		if err == nil {
 			t.Errorf("should not be allowed ")
 		}
@@ -36,12 +36,12 @@ func TestConstraints(t *testing.T) {
 func TestBlobFetch(t *testing.T) {
 	WithTestingDatabase(t, func() {
 		meme := sha256.Sum256([]byte("meme"))
-		_, err := DB.Exec("INSERT INTO hashes (hash, size) VALUES (?, ?)", meme[:], 5021)
+		_, err := DB.Exec("INSERT INTO sizes (hash, size) VALUES (?, ?)", meme[:], 5021)
 		if err != nil {
 			t.Error(err)
 		}
 		var resp []byte
-		err = DB.QueryRow("SELECT hash FROM hashes WHERE size = ?", 5021).Scan(&resp)
+		err = DB.QueryRow("SELECT hash FROM sizes WHERE size = ?", 5021).Scan(&resp)
 		if err != nil {
 			t.Error(err)
 		}

@@ -22,7 +22,8 @@ func createTables() error {
 			panic(err)
 		}
 	}()
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS sizes (
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS sizes (
 
 		hash BLOB    NOT NULL PRIMARY KEY, /* sha256 of contents */
 		size INTEGER NOT NULL,             /* timestamp of the first time this file existed with these contents */
@@ -37,7 +38,8 @@ func createTables() error {
 		return err
 	}
 
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS files (
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS files (
 
 		path        TEXT    NOT NULL, /* path on disk to the file */
 		hash        BLOB    NOT NULL, /* sha256 of contents */
@@ -65,7 +67,9 @@ func createTables() error {
 		log.Println("Unable to create files table")
 		return err
 	}
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS blobs (
+
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS blobs (
 
 		blob_id        BLOB    NOT NULL PRIMARY KEY, /* random bytes */
 		encryption_key BLOB    NOT NULL, /* random bytes */
@@ -85,7 +89,9 @@ func createTables() error {
 		log.Println("Unable to create blobs table")
 		return err
 	}
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS blob_entries (
+
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS blob_entries (
 
 		hash            BLOB    NOT NULL, /* hash of what this is storing */
 		blob_id         BLOB    NOT NULL, /* blob this is in */
@@ -109,7 +115,9 @@ func createTables() error {
 		log.Println("Unable to create blob_entries table")
 		return err
 	}
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS storage (
+
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS storage (
 
 		storage_id     BLOB NOT NULL PRIMARY KEY, /* identifier for this location in which we are  */
 		readable_label TEXT NOT NULL, /* a label you can choose for this storage */
@@ -128,7 +136,9 @@ func createTables() error {
 		log.Println("Unable to create storage table")
 		return err
 	}
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS blob_storage (
+
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS blob_storage (
 
 		blob_id      BLOB    NOT NULL, /* blob this is storing, not unique since one blob can be backed up to multiple providers, thats allowed */
 		storage_id   BLOB    NOT NULL, /* what is this being stored on */
@@ -150,7 +160,9 @@ func createTables() error {
 		log.Println("Unable to create blob_storage table")
 		return err
 	}
-	_, err = tx.Exec(`CREATE TABLE IF NOT EXISTS db_key (
+
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS db_key (
 
 		id  INTEGER NOT NULL PRIMARY KEY,
 		key BLOB    NOT NULL,
@@ -163,5 +175,6 @@ func createTables() error {
 		log.Println("Unable to create db_key table")
 		return err
 	}
+
 	return nil
 }

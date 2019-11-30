@@ -18,11 +18,13 @@ import (
 
 func BackupDB() {
 	log.Println("Backing up the database itself")
+
 	key := DBKey()               // before shutdown since it's saved in the db
 	storages := storage.GetAll() // also before shutdown
 	log.Println("Closing database")
 	db.ShutdownDatabase()
 	log.Println("Database closed")
+
 	loc := config.Config().DatabaseLocation
 	if _, err := os.Stat(loc + "-wal"); !os.IsNotExist(err) {
 		panic("closed the database but " + loc + "-wal still exists?! this can happen if you have the database open in another program like sqlite3 command line :)")
@@ -30,19 +32,23 @@ func BackupDB() {
 	if _, err := os.Stat(loc + "-shm"); !os.IsNotExist(err) {
 		panic("closed the database but " + loc + "-shm still exists?!")
 	}
+
 	log.Println("Reading database file")
 	dbBytes, err := ioutil.ReadFile(loc)
 	if err != nil {
 		panic(err)
 	}
+
 	log.Println("Done reading, now compressing database file")
 	compressed, err := zstd.Compress(nil, dbBytes)
 	if err != nil {
 		panic(err)
 	}
+
 	log.Println("Done compressing, now encrypting database file")
 	enc := crypto.EncryptDatabase(compressed, key)
 	log.Println("Database", len(dbBytes), "bytes, compressed encrypted to", len(enc), "bytes")
+
 	// <paranoia>
 	testDec := crypto.DecryptDatabase(enc, key)
 	testDecomp, err := zstd.Decompress(nil, testDec)
@@ -54,6 +60,7 @@ func BackupDB() {
 	}
 	log.Println("Decrypt and decompress paranoia verification succeeded")
 	// </paranoia>
+
 	name := "db-backup-" + strconv.FormatInt(now, 10)
 	for _, s := range storages {
 		s.UploadDatabaseBackup(enc, name)

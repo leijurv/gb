@@ -198,6 +198,14 @@ func main() {
 				return nil
 			},
 		},
+		{
+			Name:  "restore",
+			Usage: "restore your files =O",
+			Action: func(c *cli.Context) error {
+				download.Restore(c.Args().Get(0), c.Args().Get(1), -1)
+				return nil
+			},
+		},
 	}
 	err := app.Run(os.Args)
 	if err != nil {

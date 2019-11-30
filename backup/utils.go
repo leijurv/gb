@@ -24,14 +24,23 @@ type File struct {
 
 type Planned struct {
 	File
-	hash          []byte // CAN BE NIL!!!!!
-	confirmedSize *int64 // CAN BE NIL!!!!!
-	stakedClaim   *int64 // CAN BE NIL!!!!!
+
+	// hash and confirmedSize must either both be nil, or both be non-nil
+	hash          []byte
+	confirmedSize *int64
+
+	// if this is non-nil, then this is a staked size claim, and hash and confirmedSize MUST both be nil.
+	stakedClaim *int64
+
+	// if all three are nil, this is a dummy plan used to signal the bucketer that all its inputs are "done", so it should write whatever it has so far, even if it isn't big enough
 }
 
 type HashPlan struct {
 	File
-	expectedHash []byte // CAN BE NIL!!!!!
+
+	// the hash of this file as of the last time we read it
+	// if it's the same, we don't need to upload it or even create a new entry in files, we just update the last modified time to be accurate
+	expectedHash []byte
 }
 
 type BlobPlan []Planned

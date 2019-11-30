@@ -61,7 +61,7 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS files_by_hash ON files(hash); /* needed when getting sources for a blob entry */
 	CREATE INDEX IF NOT EXISTS files_by_path ON files(path); /* needed when getting the history of a file */
 	CREATE UNIQUE INDEX IF NOT EXISTS files_by_path_and_end ON files(path, end) WHERE end IS NOT NULL; /* custom uniqueness constraint, ensures history is sane */
-	CREATE UNIQUE INDEX IF NOT EXISTS files_by_path_curr ON files(path) WHERE end IS NULL; /* very important, allows efficient query of WHERE path=? AND end IS NULL, also requires that that query is unique in its result*/
+	CREATE UNIQUE INDEX IF NOT EXISTS files_by_path_curr ON files(path) WHERE end IS NULL; /* very important, allows efficient query of WHERE path=? AND end IS NULL, also requires that that query is unique in its result */
 	`)
 	if err != nil {
 		log.Println("Unable to create files table")

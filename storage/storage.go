@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
@@ -11,8 +12,6 @@ import (
 	"github.com/leijurv/gb/s3"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
-
-	"sync"
 )
 
 var cache = make(map[[32]byte]storage_base.Storage)

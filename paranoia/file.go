@@ -42,6 +42,7 @@ func ParanoiaFile(path string) {
 	log.Println("Your paranoia level is", level)
 	if level == 2 && stat.IsDir() {
 		log.Println("Warning: level 2 on a directory is incredibly inefficient and slow, you would be better off doing `gb paranoia storage` which makes bulk metadata queries that are literally hundreds of times faster")
+		time.Sleep(1500 * time.Millisecond)
 	}
 	if level == 4 {
 		repeat := "If I don't trust SHA-256, then NONE of gb is sound. Regardless, purely for my own paranoia, I want you to perform a useless byte by byte comparison, which will be slower for no reason."

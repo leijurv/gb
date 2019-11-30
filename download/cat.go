@@ -11,7 +11,7 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func CatCloser(hash []byte, tx *sql.Tx) io.ReadCloser {
+func CatReadCloser(hash []byte, tx *sql.Tx) io.ReadCloser {
 	var blobID []byte
 	var offset int64
 	var length int64
@@ -53,7 +53,7 @@ func CatCloser(hash []byte, tx *sql.Tx) io.ReadCloser {
 }
 
 func Cat(hash []byte, sql *sql.Tx) io.Reader {
-	return utils.ReadCloserToReader(CatCloser(hash, sql))
+	return utils.ReadCloserToReader(CatReadCloser(hash, sql))
 }
 
 func CatEz(hash []byte) io.Reader {

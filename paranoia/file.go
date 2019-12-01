@@ -142,7 +142,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 		if err != nil {
 			panic(err)
 		}
-		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", path, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decrypting using", compressionAlg)
+		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", pathInStorage, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decrypting using", compressionAlg)
 		count++
 		if level > 1 {
 			log.Println("Fetching the metadata of the blob containing this file to verify that it's what we expect...")

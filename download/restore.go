@@ -7,16 +7,16 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/leijurv/gb/utils"
-
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/utils"
 )
 
 const (
-	QUERY_BASE = "SELECT files.hash, files.path, files.fs_modified, files.permissions, files.start, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE (? > files.start AND (files.end > ? OR files.end IS NULL)) AND files.path "
+	QUERY_BASE = "SELECT files.hash, files.path, files.fs_modified, files.permissions, files.start, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE (? >= files.start AND (files.end > ? OR files.end IS NULL)) AND files.path "
 )
 
 // one path on disk we are going to write, and what should be written there
@@ -36,15 +36,12 @@ type Restoration struct {
 	hash []byte
 	size int64
 
-	destinations []Item
+	destinations map[string]Item
 
-	sourcesOnDisk []Source
-}
+	nominatedSource *string
 
-// somewhere on disk where we expect to find some given data
-type Source struct {
-	path       string
-	fsModified int64
+	// somewhere on disk where we expect to find some given data
+	sourcesOnDisk map[string]int64 // path to fsModified
 }
 
 func Restore(src string, dest string, timestamp int64) {
@@ -187,10 +184,16 @@ func Restore(src string, dest string, timestamp int64) {
 	plan := make(map[[32]byte]*Restoration)
 	for _, item := range items {
 		key := utils.SliceToArr(item.hash)
+
 		if _, ok := plan[key]; !ok {
-			plan[key] = &Restoration{item.hash, item.size, nil, nil}
+			plan[key] = &Restoration{
+				hash:          item.hash,
+				size:          item.size,
+				destinations:  make(map[string]Item),
+				sourcesOnDisk: make(map[string]int64),
+			}
 		}
-		plan[key].destinations = append(plan[key].destinations, item)
+		plan[key].destinations[item.destPath] = item
 	}
 	//log.Println(plan)
 	locateSourcesOnDisk(plan)
@@ -199,13 +202,119 @@ func Restore(src string, dest string, timestamp int64) {
 		if len(r.destinations) == 0 || len(r.hash) == 0 {
 			panic("failed")
 		}
+	}
+	log.Println("Okay that was all database stuff, now I will stat your disk to see how much is already in place, how much I can pull from other files, and how much needs to be downloaded from storage")
+	statSources(plan)
+	cnt = 0
+	cnt2 := 0
+	for _, r := range plan {
+		if len(r.destinations) == 0 {
+			panic("failed")
+		}
 		if len(r.sourcesOnDisk) == 0 {
-			log.Println("WARNING: have no source on disk for", r.destinations[0].destPath)
-		} else {
-			log.Println("Have a source on disk for", r.destinations[0].destPath, ":", r.sourcesOnDisk[0].path)
+			for _, d := range r.destinations {
+				log.Println("WARNING: have no source on disk for", d.destPath)
+				cnt2++
+			}
+			log.Println("Size is", r.size)
+			cnt++
 		}
 	}
-	log.Println("TODO: now execute the plan")
+	log.Println("Okay I've stat'd all the possible sources of these hashes, run the numbers, etc etc etc")
+	log.Println("Obviously, who cares how much I need to mkdir and cp --reflink and modify mtimes to make this happen")
+	log.Println("Local sources don't matter")
+	log.Println("Let's get down to what really matters: how much of it is not local, aka files I need to pull from storage")
+	var sum int64
+	for _, r := range plan {
+		if r.nominatedSource == nil {
+			sum += r.size
+		}
+	}
+	log.Println("The answer is", sum, "bytes across", cnt, "distinct hashes, to be written to", cnt2, "places on disk")
+}
+
+func statSources(plan map[[32]byte]*Restoration) {
+	// it's impossible for one path to appear as a source in more than 1 restoration
+	// > this is because the files table has a partial unique index on path where end is null
+	// therefore, no caching is needed we can just stat them all in order
+	// but perhaps, for disk locality, let's do them in lexicographic order
+	destinations := make(map[string][32]byte)
+	sources := make(map[string][32]byte)
+	paths := make([]string, 0)
+	sourceVerified := make(map[[32]byte]struct{})
+	for hash, rest := range plan {
+		for _, item := range rest.destinations {
+			destinations[item.destPath] = hash
+		}
+		for path, _ := range rest.sourcesOnDisk {
+			sources[path] = hash
+			paths = append(paths, path)
+		}
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		_, iDest := destinations[paths[i]]
+		_, jDest := destinations[paths[j]]
+		if iDest && !jDest {
+			return true
+		}
+		if jDest && !iDest {
+			return false
+		}
+		return paths[i] < paths[j]
+	})
+	log.Println(paths)
+	for _, path := range paths {
+		key := sources[path]
+		if _, ok := sourceVerified[key]; ok {
+			if _, ok := destinations[path]; !ok {
+				//log.Println("Skipping stat of", path, "since we already have a verified source and this is not a destination")
+				continue
+			}
+		}
+		restoration := plan[key]
+		stat, err := os.Stat(path)
+		if err == nil && utils.NormalFile(stat) && stat.Size() == restoration.size && stat.ModTime().Unix() == restoration.sourcesOnDisk[path] {
+			sourceVerified[key] = struct{}{}
+			tmp := path                        // CURSED: &path results in the same address the whole way through
+			restoration.nominatedSource = &tmp // CURSED: &path results in the same address the whole way through
+			if item, ok := restoration.destinations[path]; ok {
+				if stat.ModTime().Unix() != item.fsModified {
+					log.Println("what the cursed?")
+					log.Println("i will now chtime", path, "from", stat.ModTime().Unix(), "to", item.fsModified)
+					panic("chtime unimplemented")
+				} else {
+					log.Println("#BLESSED: the fs modified is the same in the restore AND the current backup AND the filesystem")
+				}
+				log.Println("Therefore", path, "is DONE")
+				// okay so basically this file is #done
+				delete(restoration.destinations, path)
+			}
+			continue
+		} else {
+			// don't crash lol!
+			// this just means that the user has deleted/edited a file after backing it up, and we didn't know until right this moment
+			if err != nil {
+				log.Println(path, "no longer exists, cannot use")
+			} else {
+				log.Println(path, "exists but has been modified")
+			}
+			delete(restoration.sourcesOnDisk, path)
+		}
+	}
+	// at this point, there is no overlap between sourcesOndisk and destinations for any restoration
+	for _, hash := range completedRestorationDestinations(plan) {
+		delete(plan, hash)
+	}
+}
+
+func completedRestorationDestinations(plan map[[32]byte]*Restoration) [][32]byte {
+	ret := make([][32]byte, 0)
+	for k, v := range plan {
+		if len(v.destinations) == 0 {
+			ret = append(ret, k)
+		}
+	}
+	return ret
 }
 
 func locateSourcesOnDisk(plan map[[32]byte]*Restoration) {
@@ -236,12 +345,13 @@ func locateSourcesOnDisk(plan map[[32]byte]*Restoration) {
 			}
 			defer rows.Close()
 			for rows.Next() {
-				var source Source
-				err = rows.Scan(&source.path, &source.fsModified)
+				var path string
+				var fsModified int64
+				err = rows.Scan(&path, &fsModified)
 				if err != nil {
 					panic(err)
 				}
-				rest.sourcesOnDisk = append(rest.sourcesOnDisk, source)
+				rest.sourcesOnDisk[path] = fsModified
 			}
 			err = rows.Err()
 			if err != nil {

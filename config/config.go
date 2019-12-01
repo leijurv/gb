@@ -165,7 +165,17 @@ func sanity() {
 	if config.NumUploaderThreads < 1 {
 		panic("NumUploaderThreads must be at least 1")
 	}
-	// TODO maybe panic if nocompressionexts / excludeprefixes / excludesuffixes are not all lower case? idk
+	mustBeLower(config.NoCompressionExts)
+	mustBeLower(config.ExcludePrefixes)
+	mustBeLower(config.ExcludeSuffixes)
+}
+
+func mustBeLower(data []string) {
+	for _, str := range data {
+		if strings.ToLower(str) != str {
+			panic(str + " must be lower case")
+		}
+	}
 }
 
 func saveConfig() {

@@ -249,7 +249,7 @@ func execute(rest Restoration) {
 		// https://stackoverflow.com/a/31151508/2277831
 		dirMode := mode               // start with perms of the file
 		dirMode |= (mode >> 2) & 0111 // for group and other, allow execute (dir read) if they can read
-		dirMode |= 0100               // we must have execute no matter what, otherwise this recursive mkdir won't work in the first place
+		dirMode |= 0700               // we must have full access no matter what, otherwise this recursive mkdir won't work in the first place
 
 		log.Println("mkdir", dir, "with original", mode, "overridden to", dirMode)
 		err := os.MkdirAll(dir, dirMode)

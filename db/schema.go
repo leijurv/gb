@@ -176,5 +176,24 @@ func createTables() error {
 		return err
 	}
 
+	// for when i'm fiddling with the database manually
+	_, err = tx.Exec(`CREATE VIEW IF NOT EXISTS f AS
+		SELECT
+			files.path,
+			sizes.size,
+			lower(hex(files.hash)) AS hash,
+			files.start,
+			files.end,
+			files.fs_modified,
+			files.permissions
+		FROM
+			files
+			INNER JOIN sizes ON files.hash = sizes.hash
+	`)
+	if err != nil {
+		log.Println("Unable to create f view")
+		return err
+	}
+
 	return nil
 }

@@ -22,7 +22,8 @@ func TestAllFiles() {
 		}
 	}()
 	// TODO some other ordering idk? this is just the most recent files you uploaded, which is reasonable i think?
-	rows, err := tx.Query(`SELECT d.hash FROM (SELECT DISTINCT hash FROM files WHERE end IS NULL) d INNER JOIN sizes ON sizes.hash = d.hash WHERE sizes.size < 100000000 ORDER BY sizes.hash`)
+	//rows, err := tx.Query(`SELECT d.hash FROM (SELECT DISTINCT hash FROM files WHERE end IS NULL) d INNER JOIN sizes ON sizes.hash = d.hash WHERE sizes.size < 100000000 ORDER BY sizes.hash`)
+	rows, err := tx.Query(`SELECT DISTINCT hash, path FROM (SELECT files.*, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash) WHERE size < 10000000 ORDER BY start DESC`)
 	// SELECT DISTINCT hash FROM blob_entries WHERE compression_alg = "lepton"
 	if err != nil {
 		panic(err)
@@ -30,11 +31,12 @@ func TestAllFiles() {
 	defer rows.Close()
 	for rows.Next() {
 		var hash []byte
-		err := rows.Scan(&hash)
+		var path string
+		err := rows.Scan(&hash, &path)
 		if err != nil {
 			panic(err)
 		}
-		log.Println("Testing fetching hash", hex.EncodeToString(hash))
+		log.Println("Testing fetching hash", hex.EncodeToString(hash), "which is the contents of", path)
 		reader := download.Cat(hash, tx)
 		h := utils.NewSHA256HasherSizer()
 		utils.Copy(&h, reader)

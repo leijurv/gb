@@ -49,7 +49,7 @@ func scanDirectory(path string, tx *sql.Tx) {
 		filesMap[path] = info
 		scanFile(File{path, info}, tx)
 	})
-	pruneDeletedFiles(path, filesMap, tx)
+	pruneDeletedFiles(path, filesMap)
 }
 
 func scanFile(file File, tx *sql.Tx) {
@@ -95,7 +95,21 @@ func scanFile(file File, tx *sql.Tx) {
 }
 
 // find files in the database for this path, that no longer exist on disk (i.e. they're DELETED LOL)
-func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo, tx *sql.Tx) {
+func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
+	// we cannot upgrade the long lived RO transaction to a RW transaction, it would conflict with the intermediary RW transactions, it seems
+	// reusing the tx from scanner results in a sqlite busy panic, very consistently
+	tx, err := db.DB.Begin()
+	if err != nil {
+		panic(err)
+	}
+	defer func() {
+		log.Println("Pruner committing")
+		err = tx.Commit()
+		if err != nil {
+			panic(err)
+		}
+		log.Println("Pruner committed")
+	}()
 	if !strings.HasSuffix(backupPath, "/") {
 		panic(backupPath) // sanity check, should have already been completed
 	}

@@ -24,6 +24,7 @@ type ConfigData struct {
 	NoCompressionExts  []string `json:"no_compression_exts"`
 	ExcludeSuffixes    []string `json:"exclude_suffixes"`
 	ExcludePrefixes    []string `json:"exclude_prefixes"`
+	DedupeExclude      []string `json:"dedupe_exclude"`
 }
 
 func Config() ConfigData {
@@ -89,6 +90,10 @@ var config = ConfigData{
 		// "/path/to/dir/to/exclude/",
 		// you REALLY SHOULD include the trailing /
 		// this really is just a starts with / ends with check on the path!
+	},
+	DedupeExclude: []string{
+		// folders that you have already fully deduped against each other
+		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
 }
 
@@ -168,12 +173,13 @@ func sanity() {
 	mustBeLower(config.NoCompressionExts)
 	mustBeLower(config.ExcludePrefixes)
 	mustBeLower(config.ExcludeSuffixes)
+	mustBeLower(config.DedupeExclude)
 }
 
 func mustBeLower(data []string) {
 	for _, str := range data {
 		if strings.ToLower(str) != str {
-			panic(str + " must be lower case")
+			panic(str + " must be lower case, to make it clear this is a case insensitive match")
 		}
 	}
 }
@@ -199,6 +205,16 @@ func ExcludeFromBackup(path string) bool {
 		}
 	}
 	for _, prefix := range config.ExcludePrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func ExcludeFromDedupe(path string) bool {
+	path = strings.ToLower(path)
+	for _, prefix := range config.DedupeExclude {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}

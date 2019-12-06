@@ -2,8 +2,10 @@ package download
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -48,7 +50,7 @@ func Restore(src string, dest string, timestamp int64) {
 	// concept: restore a directory
 	// src is where the directory was (is, in the database)
 	// dest is where the directory should be
-	if timestamp == -1 {
+	if timestamp == 0 {
 		timestamp = time.Now().Unix()
 	}
 	if dest == "" {
@@ -231,6 +233,64 @@ func Restore(src string, dest string, timestamp int64) {
 		}
 	}
 	log.Println("The answer is", sum, "bytes across", cnt, "distinct hashes, to be written to", cnt2, "places on disk")
+	log.Println("Confirm? (yes: enter, no: ctrl+c) >")
+	bufio.NewReader(os.Stdin).ReadString('\n')
+	for _, r := range plan {
+		execute(*r)
+	}
+}
+
+func execute(rest Restoration) {
+	writers := make([]io.Writer, 0)
+	for path, item := range rest.destinations {
+		dir := filepath.Dir(path)
+		mode := item.permissions
+
+		// https://stackoverflow.com/a/31151508/2277831
+		dirMode := mode               // start with perms of the file
+		dirMode |= (mode >> 2) & 0111 // for group and other, allow execute (dir read) if they can read
+		dirMode |= 0100               // we must have execute no matter what, otherwise this recursive mkdir won't work in the first place
+
+		log.Println("mkdir", dir, "with original", mode, "overridden to", dirMode)
+		err := os.MkdirAll(dir, dirMode)
+		if err != nil {
+			panic(err)
+		}
+
+		log.Println("open", path, "for write")
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+		writers = append(writers, f)
+	}
+	out := io.MultiWriter(writers...)
+
+	hs := utils.NewSHA256HasherSizer()
+	out = io.MultiWriter(out, &hs)
+
+	var src io.Reader
+	if rest.nominatedSource == nil {
+		log.Println("Fetching from storage")
+		src = CatEz(rest.hash)
+	} else {
+		log.Println("Reading locally, from", *rest.nominatedSource)
+		f, err := os.Open(*rest.nominatedSource)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+		src = f
+	}
+	utils.Copy(out, src)
+	log.Println("Expecting size and hash:", rest.size, hex.EncodeToString(rest.hash))
+	hash, size := hs.HashAndSize()
+	log.Println("Got size and hash:", size, hex.EncodeToString(hash))
+	if size != rest.size || !bytes.Equal(hash, rest.hash) {
+		panic("wrong")
+	}
+	log.Println("Success")
 }
 
 func statSources(plan map[[32]byte]*Restoration) {
@@ -277,14 +337,9 @@ func statSources(plan map[[32]byte]*Restoration) {
 			sourceVerified[key] = struct{}{}
 			tmp := path                        // CURSED: &path results in the same address the whole way through
 			restoration.nominatedSource = &tmp // CURSED: &path results in the same address the whole way through
-			if item, ok := restoration.destinations[path]; ok {
-				if stat.ModTime().Unix() != item.fsModified {
-					log.Println("what the cursed?")
-					log.Println("i will now chtime", path, "from", stat.ModTime().Unix(), "to", item.fsModified)
-					panic("chtime unimplemented")
-				} else {
-					log.Println("#BLESSED: the fs modified is the same in the restore AND the current backup AND the filesystem")
-				}
+			if _, ok := restoration.destinations[path]; ok {
+				// regardless of fsModified, this path has the contents we want it to, since the hash matches
+				// TODO: leave it as a destination if the fsModified time is wrong? idk probably not
 				log.Println("Therefore", path, "is DONE")
 				// okay so basically this file is #done
 				delete(restoration.destinations, path)

@@ -101,7 +101,11 @@ func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 		}
 		end := preEncInfo.Size()
 		length := end - startOffset
-		log.Println("File length was", realSize, "but was compressed to", length)
+		if realSize == length {
+			log.Println("File length was", formatCommas(realSize), "and was not compressed")
+		} else {
+			log.Println("File length was", formatCommas(realSize), "but was compressed to", formatCommas(length), "change of", formatCommas(length-realSize))
+		}
 		entries = append(entries, BlobEntry{
 			originalPlan:        planned,
 			hash:                realHash,

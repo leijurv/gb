@@ -5,6 +5,7 @@ go 1.13
 require (
 	cloud.google.com/go v0.48.0 // indirect
 	github.com/DataDog/zstd v1.4.4
+	github.com/araddon/dateparse v0.0.0-20190622164848-0fb0a474d195
 	github.com/aws/aws-sdk-go v1.25.36
 	github.com/cespare/diff v0.0.0-20150524045016-c6e4a33d5a81
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
@@ -14,7 +15,6 @@ require (
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/urfave/cli v1.22.1
 	go.opencensus.io v0.22.2 // indirect
-	golang.org/x/crypto v0.0.0-20190605123033-f99c8df09eb5 // indirect
 	golang.org/x/net v0.0.0-20191116160921-f9c825593386
 	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
 	golang.org/x/sys v0.0.0-20191118073850-2f86c98f3482 // indirect

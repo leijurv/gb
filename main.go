@@ -1,11 +1,13 @@
 package main
 
 import (
-	"os"
-
 	"encoding/hex"
 	"errors"
+	"log"
+	"os"
+	"time"
 
+	"github.com/araddon/dateparse"
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
@@ -175,6 +177,14 @@ func main() {
 			},
 		},
 		{
+			Name:  "search",
+			Usage: "search for any path containing the given argument",
+			Action: func(c *cli.Context) error {
+				history.Search(c.Args().First())
+				return nil
+			},
+		},
+		{
 			Name:  "ls",
 			Usage: "list backup info about files in a directory",
 			Action: func(c *cli.Context) error {
@@ -193,16 +203,48 @@ func main() {
 		{
 			Name:  "fdupes",
 			Usage: "print out duplicated file paths in fdupes format, for consumption by duperemove",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "since",
+					Usage: "timestamp of the most recent successful and completed deduplication, so that the output can be filtered to only groups that contain files that were updated since then",
+				},
+			},
 			Action: func(c *cli.Context) error {
-				dupes.PrintDupes()
+				var timestamp int64
+				if c.String("since") != "" {
+					t, err := dateparse.ParseLocal(c.String("since"))
+					if err != nil {
+						log.Println("Hint: make sure you are providing a year")
+						return err
+					}
+					timestamp = t.Unix()
+					log.Println("Interpreting provided date as:", time.Unix(timestamp, 0).Format(time.RFC3339)) // so as to not misrepresent what will happen, this conversion intentionally rounds to nearest second
+				}
+				dupes.PrintDupes(timestamp)
 				return nil
 			},
 		},
 		{
 			Name:  "restore",
 			Usage: "restore your files =O",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "at, to, timestamp",
+					Usage: "timestamp to which this should be restored",
+				},
+			},
 			Action: func(c *cli.Context) error {
-				download.Restore(c.Args().Get(0), c.Args().Get(1), -1)
+				var timestamp int64
+				if c.String("at") != "" {
+					t, err := dateparse.ParseLocal(c.String("at"))
+					if err != nil {
+						log.Println("Hint: make sure you are providing a year")
+						return err
+					}
+					timestamp = t.Unix()
+					// restore prints out the timestamp for confirmation, no need to do it twice
+				}
+				download.Restore(c.Args().Get(0), c.Args().Get(1), timestamp)
 				return nil
 			},
 		},

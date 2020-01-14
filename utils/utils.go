@@ -30,6 +30,19 @@ func NormalFile(info os.FileInfo) bool {
 
 // walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
 func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
+	type PathAndInfo struct {
+		path string
+		info os.FileInfo
+	}
+	filesCh := make(chan PathAndInfo, 32)
+	done := make(chan struct{})
+	go func() {
+		for file := range filesCh {
+			fn(file.path, file.info)
+		}
+		log.Println("Scan processor signaling done")
+		done <- struct{}{}
+	}()
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			log.Println("While traversing those files, I got this error:")
@@ -48,7 +61,7 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
 			return nil
 		}
-		fn(path, info)
+		filesCh <- PathAndInfo{path, info}
 		return nil
 	})
 	if err != nil {
@@ -57,6 +70,10 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 		// aka, do not continue with a partially complete traversal of the directory lmao
 		panic(err)
 	}
+	log.Println("Walker thread done")
+	close(filesCh)
+	<-done
+	log.Println("Scan processor done")
 }
 
 type HasherSizer struct {

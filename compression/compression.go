@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/leijurv/gb/config"
@@ -50,6 +51,10 @@ func ByAlgName(algName string) Compression {
 
 func howToCompress(path string) []Compression {
 	path = strings.ToLower(path)
+	stat, err := os.Stat(path)
+	if err == nil && stat.Size() < config.Config().MinCompressSize {
+		return []Compression{&NoCompression{}}
+	}
 	if strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") {
 		return []Compression{&LeptonCompression{}, &NoCompression{}}
 	}

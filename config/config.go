@@ -13,19 +13,20 @@ var ConfigLocation string
 var inited = false
 
 type ConfigData struct {
-	MinBlobSize        int64    `json:"min_blob_size"`
-	MinCompressSize    int64    `json:"min_compress_size"`
-	DatabaseLocation   string   `json:"database_location"`
-	PaddingMinBytes    int64    `json:"padding_min_bytes"`
-	PaddingMaxBytes    int64    `json:"padding_max_bytes"`
-	PaddingMinPercent  float64  `json:"padding_min_percent"`
-	PaddingMaxPercent  float64  `json:"padding_max_percent"`
-	NumHasherThreads   int      `json:"num_hasher_threads"`
-	NumUploaderThreads int      `json:"num_uploader_threads"`
-	NoCompressionExts  []string `json:"no_compression_exts"`
-	ExcludeSuffixes    []string `json:"exclude_suffixes"`
-	ExcludePrefixes    []string `json:"exclude_prefixes"`
-	DedupeExclude      []string `json:"dedupe_exclude"`
+	MinBlobSize          int64    `json:"min_blob_size"`
+	MinCompressSize      int64    `json:"min_compress_size"`
+	DatabaseLocation     string   `json:"database_location"`
+	PaddingMinBytes      int64    `json:"padding_min_bytes"`
+	PaddingMaxBytes      int64    `json:"padding_max_bytes"`
+	PaddingMinPercent    float64  `json:"padding_min_percent"`
+	PaddingMaxPercent    float64  `json:"padding_max_percent"`
+	NumHasherThreads     int      `json:"num_hasher_threads"`
+	NumUploaderThreads   int      `json:"num_uploader_threads"`
+	UploadStatusInterval int      `json:"upload_statusprint_interval"`
+	NoCompressionExts    []string `json:"no_compression_exts"`
+	ExcludeSuffixes      []string `json:"exclude_suffixes"`
+	ExcludePrefixes      []string `json:"exclude_prefixes"`
+	DedupeExclude        []string `json:"dedupe_exclude"`
 }
 
 func Config() ConfigData {
@@ -34,15 +35,16 @@ func Config() ConfigData {
 }
 
 var config = ConfigData{
-	MinBlobSize:        64000000,
-	MinCompressSize:    1024,
-	DatabaseLocation:   HomeDir + "/.gb.db",
-	PaddingMinBytes:    5021,
-	PaddingMaxBytes:    12345,
-	PaddingMinPercent:  0.05,
-	PaddingMaxPercent:  0.1, // percent means percent. this is 0.1% not 10%!!
-	NumHasherThreads:   2,
-	NumUploaderThreads: 8,
+	MinBlobSize:          64000000,
+	MinCompressSize:      1024,
+	DatabaseLocation:     HomeDir + "/.gb.db",
+	PaddingMinBytes:      5021,
+	PaddingMaxBytes:      12345,
+	PaddingMinPercent:    0.05,
+	PaddingMaxPercent:    0.1, // percent means percent. this is 0.1% not 10%!!
+	NumHasherThreads:     2,
+	NumUploaderThreads:   8,
+	UploadStatusInterval: 5, // interval between "Bytes written:" prints, in seconds [-1 to disable prints]
 	NoCompressionExts: []string{
 		"mp4",
 		"mkv",
@@ -84,6 +86,7 @@ var config = ConfigData{
 		"rar",
 		"dmg",
 	},
+	// if any component of the path matches these suffixes, it will be excluded, e.g. ".app"s
 	ExcludeSuffixes: []string{
 		".part",
 	},
@@ -171,6 +174,9 @@ func sanity() {
 	}
 	if config.NumUploaderThreads < 1 {
 		panic("NumUploaderThreads must be at least 1")
+	}
+	if config.UploadStatusInterval < -1 || config.UploadStatusInterval == 0 {
+		panic("UploadStatusInterval must be -1 or positive")
 	}
 	mustBeLower(config.NoCompressionExts)
 	mustBeLower(config.ExcludePrefixes)

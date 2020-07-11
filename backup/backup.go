@@ -52,12 +52,14 @@ func Backup(path string) {
 		go uploaderThread()
 	}
 
-	go func() {
-		for {
-			log.Println("Bytes written:", formatCommas(stats.Total()))
-			time.Sleep(5 * time.Second)
-		}
-	}()
+	if config.Config().UploadStatusInterval != -1 {
+		go func() {
+			for {
+				log.Println("Bytes written:", formatCommas(stats.Total()))
+				time.Sleep(time.Duration(config.Config().UploadStatusInterval) * time.Second)
+			}
+		}()
+	}
 	wg.Wait()
 	log.Println("Backup complete")
 	BackupDB()

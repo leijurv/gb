@@ -142,7 +142,7 @@ func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 		if err != nil {
 			panic(err)
 		}
-		log.Println("Committed")
+		log.Println("Committed uploaded blob")
 	}()
 	// **obviously** all this needs to be in a tx
 	_, err = tx.Exec("INSERT INTO blobs (blob_id, encryption_key, size, hash_pre_enc, hash_post_enc) VALUES (?, ?, ?, ?, ?)", blobID, key, totalSize, hashPreEnc, hashPostEnc)
@@ -189,7 +189,7 @@ func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 			panic(err)
 		}
 	}
-	log.Println("Uploader done")
+	log.Println("Uploader done with blob", plan)
 }
 
 // this function should be called if the uploader thread was intended to upload a backup of a certain hash, but failed to do so, for any reason

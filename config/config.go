@@ -22,7 +22,7 @@ type ConfigData struct {
 	PaddingMaxPercent    float64  `json:"padding_max_percent"`
 	NumHasherThreads     int      `json:"num_hasher_threads"`
 	NumUploaderThreads   int      `json:"num_uploader_threads"`
-	UploadStatusInterval int      `json:"upload_statusprint_interval"`
+	UploadStatusInterval int      `json:"upload_status_print_interval"`
 	NoCompressionExts    []string `json:"no_compression_exts"`
 	ExcludeSuffixes      []string `json:"exclude_suffixes"`
 	ExcludePrefixes      []string `json:"exclude_prefixes"`

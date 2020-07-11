@@ -33,8 +33,16 @@ func main() {
 			Usage:       "path to where you want your config file",
 			Destination: &config.ConfigLocation,
 		},
+		&cli.BoolFlag{
+			Name:  "no-log-timestamps",
+			Usage: "do not include timestamps in logs",
+		},
 	}
 	app.Before = func(c *cli.Context) error {
+		if c.Bool("no-log-timestamps") {
+			log.SetFlags(0)
+		}
+
 		// we don't know where the database should be read from until after the "config-file" flag is parsed
 		db.SetupDatabase()
 		return nil

@@ -44,19 +44,25 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 		done <- struct{}{}
 	}()
 	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+		if config.ExcludeFromBackup(path) {
+			if info == nil {
+				log.Println("EXCLUDING & ERROR while reading path which is ignored by your configuration:", path, err)
+				return nil
+			}
+
+			log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
+
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if err != nil {
 			log.Println("While traversing those files, I got this error:")
 			log.Println(err)
 			log.Println("while looking at this path:")
 			log.Println(path)
 			return err
-		}
-		if config.ExcludeFromBackup(path) {
-			log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
 		}
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
 			return nil

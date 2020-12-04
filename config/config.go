@@ -91,14 +91,14 @@ var config = ConfigData{
 		".part",
 	},
 	ExcludePrefixes: []string{
-		// e.g.
-		// "/path/to/dir/to/exclude/",
-		// you REALLY SHOULD include the trailing /
-		// this really is just a starts with / ends with check on the path!
+	// e.g.
+	// "/path/to/dir/to/exclude/",
+	// you REALLY SHOULD include the trailing /
+	// this really is just a starts with / ends with check on the path!
 	},
 	DedupeExclude: []string{
-		// folders that you have already fully deduped against each other
-		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
+	// folders that you have already fully deduped against each other
+	// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
 }
 

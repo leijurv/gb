@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/leijurv/gb/config"
+	"github.com/leijurv/gb/utils"
 )
 
 func Backup(path string) {
@@ -55,7 +56,7 @@ func Backup(path string) {
 	if config.Config().UploadStatusInterval != -1 {
 		go func() {
 			for {
-				log.Println("Bytes written:", formatCommas(stats.Total()))
+				log.Println("Bytes written:", utils.FormatCommas(stats.Total()))
 				time.Sleep(time.Duration(config.Config().UploadStatusInterval) * time.Second)
 			}
 		}()

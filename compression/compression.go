@@ -24,6 +24,8 @@ type Compression interface {
 	// a general purpose compression like zstd or xz should return false, since they work on any arbitrary input bytes
 	// special purpose compression such as lepton should return true, since it only works on well-formed jpgs
 	Fallible() bool
+
+	DecompressionTrollBashCommandIncludingThePipe() string
 }
 
 var compressionMap = make(map[string]Compression)

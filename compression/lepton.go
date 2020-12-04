@@ -49,3 +49,7 @@ func (n *LeptonCompression) AlgName() string {
 func (n *LeptonCompression) Fallible() bool {
 	return true
 }
+
+func (n *LeptonCompression) DecompressionTrollBashCommandIncludingThePipe() string {
+	return " | lepton -allowprogressive -memory=2048M -threadmemory=256M -"
+}

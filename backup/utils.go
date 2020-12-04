@@ -5,8 +5,6 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"regexp"
-	"strconv"
 	"sync"
 	"time"
 
@@ -135,16 +133,6 @@ func hashAFile(path string) ([]byte, int64, error) {
 	}
 	hash, size := hs.HashAndSize()
 	return hash, size, nil // go is a BIGOT for not letting me do return hs.HashAndSize(), nil
-}
-
-func formatCommas(num int64) string {
-	str := strconv.FormatInt(num, 10)
-	re := regexp.MustCompile("(\\d+)(\\d{3})")
-	for n := ""; n != str; {
-		n = str
-		str = re.ReplaceAllString(str, "$1,$2")
-	}
-	return str
 }
 
 // return true if and only if the provided FileInfo represents a completely normal file, and nothing weird like a directory, symlink, pipe, socket, block device, etc

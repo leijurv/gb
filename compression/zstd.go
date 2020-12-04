@@ -27,3 +27,7 @@ func (n *ZstdCompression) AlgName() string {
 func (n *ZstdCompression) Fallible() bool {
 	return false
 }
+
+func (n *ZstdCompression) DecompressionTrollBashCommandIncludingThePipe() string {
+	return " | zstd -d"
+}

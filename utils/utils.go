@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync/atomic"
 
@@ -187,4 +188,14 @@ func Copy(out io.Writer, in io.Reader) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func FormatCommas(num int64) string {
+	str := strconv.FormatInt(num, 10)
+	re := regexp.MustCompile("(\\d+)(\\d{3})")
+	for n := ""; n != str; {
+		n = str
+		str = re.ReplaceAllString(str, "$1,$2")
+	}
+	return str
 }

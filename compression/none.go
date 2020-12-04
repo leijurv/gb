@@ -24,3 +24,7 @@ func (n *NoCompression) AlgName() string {
 func (n *NoCompression) Fallible() bool {
 	return false
 }
+
+func (n *NoCompression) DecompressionTrollBashCommandIncludingThePipe() string {
+	return ""
+}

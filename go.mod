@@ -4,7 +4,7 @@ go 1.13
 
 require (
 	cloud.google.com/go v0.48.0 // indirect
-	github.com/DataDog/zstd v1.4.4
+	github.com/DataDog/zstd v1.4.5
 	github.com/araddon/dateparse v0.0.0-20190622164848-0fb0a474d195
 	github.com/aws/aws-sdk-go v1.25.36
 	github.com/cespare/diff v0.0.0-20150524045016-c6e4a33d5a81

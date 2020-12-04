@@ -30,6 +30,16 @@ func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
 		panic(err)
 	}
 
+	iv, remainingSeek := CalcIVAndSeek(seekOffset)
+
+	stream := cipher.NewCTR(block, iv)
+
+	// hack to advance, xor the right amount of garbage with the right amount of garbage
+	stream.XORKeyStream(make([]byte, remainingSeek), make([]byte, remainingSeek))
+	return &cipher.StreamReader{S: stream, R: in}
+}
+
+func CalcIVAndSeek(seekOffset int64) ([]byte, int64) {
 	// while encrypting, by the time it got to this location we know that
 	// the IV will have incremented in a big endian manner up until floor(seekOffset/16)
 	iv := new(big.Int).SetInt64(seekOffset / 16).Bytes() // if this were C I would just cast &seekOffset to a uint8_t* lol
@@ -38,12 +48,9 @@ func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
 	padding := make([]byte, 16-len(iv))
 	iv = append(padding, iv...) // pad with leading zero bytes to be proper length
 
-	stream := cipher.NewCTR(block, iv)
 	// no guarantee that the files are aligned to multiples of 16 in length...
 	// so we still need to advance by seekOffset%16 bytes, within this block
-	// hack to advance, xor the right amount of garbage with the right amount of garbage
-	stream.XORKeyStream(make([]byte, seekOffset%16), make([]byte, seekOffset%16))
-	return &cipher.StreamReader{S: stream, R: in}
+	return iv, seekOffset % 16
 }
 
 func RandBytes(length int) []byte {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/cespare/diff"
 	"github.com/leijurv/gb/compression"
+	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/storage"
@@ -155,7 +156,20 @@ func paranoia(path string, info os.FileInfo, level int) {
 			panic(err)
 		}
 		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", pathInStorage, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decompressing using", compressionAlg)
-		log.Println("For example, to verify, run: cat", pathInStorage, "| openssl enc -aes-128-ctr -d -K", hex.EncodeToString(key), "-iv 00000000000000000000000000000000 2>/dev/null | tail -c +"+strconv.FormatInt(offset+1, 10), "| head -c", strconv.FormatInt(length, 10)+compression.ByAlgName(compressionAlg).DecompressionTrollBashCommandIncludingThePipe(), "| shasum -a 256")
+		log.Println("For example, to verify this, download the file into", hex.EncodeToString(blobID), "and run")
+		cmd := ""
+		if offset == 0 {
+			cmd += "cat " + hex.EncodeToString(blobID) + " | "
+		} else {
+			cmd += "<" + hex.EncodeToString(blobID) + " { dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0; cat; } | "
+		}
+		iv, remainingSeek := crypto.CalcIVAndSeek(offset)
+		cmd += "openssl enc -aes-128-ctr -d -K " + hex.EncodeToString(key) + " -iv " + hex.EncodeToString(iv) + " 2>/dev/null | "
+		if remainingSeek != 0 {
+			cmd += "{ dd bs=" + strconv.FormatInt(remainingSeek, 10) + " skip=1 count=0; cat; } | "
+		}
+		cmd += "head -c " + strconv.FormatInt(length, 10) + compression.ByAlgName(compressionAlg).DecompressionTrollBashCommandIncludingThePipe() + " | shasum -a 256"
+		log.Println(cmd)
 		log.Println("And ensure it outputs the hash of the file, which is", hex.EncodeToString(hash))
 		count++
 		if level > 1 {

@@ -46,7 +46,12 @@ func CatReadCloser(hash []byte, tx *sql.Tx) io.ReadCloser {
 	if err != nil {
 		panic(err)
 	}
-	storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
+	storageR := storage.StorageDataToStorage(storage.StorageDescriptor{
+		StorageID:  utils.SliceToArr(storageID),
+		Kind:       kind,
+		Identifier: identifier,
+		RootPath:   rootPath,
+	})
 	reader := utils.ReadCloserToReader(storageR.DownloadSection(path, offset, length))
 	decrypted := crypto.DecryptBlobEntry(reader, offset, key)
 	return compression.ByAlgName(compressionAlg).Decompress(decrypted)

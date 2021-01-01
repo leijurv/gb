@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"strings"
@@ -18,29 +19,48 @@ import (
 var cache = make(map[[32]byte]storage_base.Storage)
 var cacheLock sync.Mutex
 
+type StorageDescriptor struct {
+	StorageID    [32]byte
+	StorageIDHex string `json:"storage_id_hex"`
+	Kind         string `json:"kind"`
+	Identifier   string `json:"identifier"`
+	RootPath     string `json:"root_path"`
+}
+
 func GetAll() []storage_base.Storage {
+	return ResolveDescriptors(GetAllDescriptors())
+}
+
+func ResolveDescriptors(descriptors []StorageDescriptor) []storage_base.Storage {
+	storages := make([]storage_base.Storage, 0)
+	for _, descriptor := range descriptors {
+		storages = append(storages, StorageDataToStorage(descriptor))
+	}
+	return storages
+}
+
+func GetAllDescriptors() []StorageDescriptor {
 	rows, err := db.DB.Query(`SELECT storage_id, type, identifier, root_path FROM storage`)
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
-	storages := make([]storage_base.Storage, 0)
+	descriptors := make([]StorageDescriptor, 0)
 	for rows.Next() {
-		var storageID []byte
-		var kind string // owo
-		var identifier string
-		var rootPath string
-		err := rows.Scan(&storageID, &kind, &identifier, &rootPath)
+		var descriptor StorageDescriptor
+		var tmpsid []byte
+		err := rows.Scan(&tmpsid, &descriptor.Kind, &descriptor.Identifier, &descriptor.RootPath)
 		if err != nil {
 			panic(err)
 		}
-		storages = append(storages, StorageDataToStorage(storageID, kind, identifier, rootPath))
+		descriptor.StorageID = utils.SliceToArr(tmpsid)
+		descriptors = append(descriptors, descriptor)
 	}
 	err = rows.Err()
 	if err != nil {
 		panic(err)
 	}
-	return storages
+	return descriptors
 }
 
 func GetByID(id []byte) storage_base.Storage {
@@ -49,20 +69,58 @@ func GetByID(id []byte) storage_base.Storage {
 	return cache[utils.SliceToArr(id)]
 }
 
-func StorageDataToStorage(storageID []byte, kind string, identifier string, rootPath string) storage_base.Storage {
+func StorageDataToStorage(descriptor StorageDescriptor) storage_base.Storage {
+	test := Unmarshal(Marshal(descriptor))
+	if test != descriptor {
+		log.Println(descriptor)
+		log.Println(test)
+		panic("oh no")
+	}
 	cacheLock.Lock()
 	defer cacheLock.Unlock()
-	arr := utils.SliceToArr(storageID)
-	_, ok := cache[arr]
+	_, ok := cache[descriptor.StorageID]
 	if !ok {
-		cache[arr] = internalCreateStorage(storageID, kind, identifier, rootPath)
+		cache[descriptor.StorageID] = internalCreateStorage(descriptor.StorageID[:], descriptor.Kind, descriptor.Identifier, descriptor.RootPath)
 	}
-	return cache[arr]
+	return cache[descriptor.StorageID]
+}
+
+func Marshal(descriptor StorageDescriptor) []byte {
+	if descriptor.StorageIDHex != "" {
+		panic(descriptor.StorageIDHex)
+	}
+	descriptor.StorageIDHex = hex.EncodeToString(descriptor.StorageID[:])
+	ret, err := json.Marshal(descriptor)
+	if err != nil {
+		panic(err)
+	}
+	descriptor.StorageIDHex = ""
+	return ret
+}
+
+func Unmarshal(marshaled []byte) StorageDescriptor {
+	var descriptor StorageDescriptor
+	err := json.Unmarshal(marshaled, &descriptor)
+	if err != nil {
+		panic(err)
+	}
+	sid, err := hex.DecodeString(descriptor.StorageIDHex)
+	if err != nil {
+		panic(err)
+	}
+	descriptor.StorageID = utils.SliceToArr(sid)
+	descriptor.StorageIDHex = ""
+	return descriptor
 }
 
 func NewStorage(kind string, identifier string, rootPath string, label string) storage_base.Storage {
 	storageID := crypto.RandBytes(32)
-	storage := StorageDataToStorage(storageID, kind, identifier, rootPath)
+	storage := StorageDataToStorage(StorageDescriptor{
+		StorageID:  utils.SliceToArr(storageID),
+		Kind:       kind,
+		Identifier: identifier,
+		RootPath:   rootPath,
+	})
 	if !bytes.Equal(storage.GetID(), storageID) {
 		panic("sanity check")
 	}

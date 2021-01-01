@@ -30,7 +30,7 @@ func uploaderThread() {
 
 type UploadService interface {
 	Begin(blobID []byte) io.Writer
-	End() []storage_base.UploadedBlob
+	End(sha256 []byte) []storage_base.UploadedBlob
 }
 
 type directUpload struct {
@@ -50,7 +50,7 @@ func (du *directUpload) Begin(blobID []byte) io.Writer {
 	return io.MultiWriter(writers...)
 }
 
-func (du *directUpload) End() []storage_base.UploadedBlob {
+func (du *directUpload) End(sha256 []byte) []storage_base.UploadedBlob {
 	completeds := make([]storage_base.UploadedBlob, 0)
 	for _, upload := range du.uploads {
 		completeds = append(completeds, upload.End())
@@ -139,16 +139,15 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		})
 	}
 	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
-	log.Println("All bytes written")
-	completeds := serv.End()
-	log.Println("All bytes flushed")
-
 	hashPreEnc, sizePreEnc := preEncInfo.HashAndSize()
 	hashPostEnc, sizePostEnc := postEncInfo.HashAndSize()
 	if sizePreEnc != sizePostEnc {
 		panic("what??")
 	}
 	totalSize := sizePreEnc
+	log.Println("All bytes written")
+	completeds := serv.End(hashPostEnc)
+	log.Println("All bytes flushed")
 
 	hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
 	defer hashLateMapLock.Unlock()
@@ -170,8 +169,8 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		panic(err)
 	}
 	now := time.Now().Unix()
-	for i, completed := range completeds {
-		_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blobID, completeds[i].StorageID, completed.Path, completed.Checksum, now)
+	for _, completed := range completeds {
+		_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blobID, completed.StorageID, completed.Path, completed.Checksum, now)
 		if err != nil {
 			panic(err)
 		}

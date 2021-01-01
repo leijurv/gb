@@ -174,7 +174,12 @@ func paranoia(path string, info os.FileInfo, level int) {
 		count++
 		if level > 1 {
 			log.Println("Fetching the metadata of the blob containing this file to verify that it's what we expect...")
-			storageR := storage.StorageDataToStorage(storageID, kind, identifier, rootPath)
+			storageR := storage.StorageDataToStorage(storage.StorageDescriptor{
+				StorageID:  utils.SliceToArr(storageID),
+				Kind:       kind,
+				Identifier: identifier,
+				RootPath:   rootPath,
+			})
 			fetchedChecksum, fetchedSize := storageR.Metadata(pathInStorage)
 			log.Println("Checksum in fetched metadata:", fetchedChecksum)
 			log.Println("Size in fetched metadata:", fetchedSize)

@@ -141,18 +141,26 @@ func main() {
 									Name:  "path, p",
 									Usage: "path in the bucket, just put / if you want gb to write to the root",
 								},
+								cli.StringFlag{
+									Name:  "region, r",
+									Usage: "AWS region of your bucket, e.g. us-east-1",
+								},
+								cli.StringFlag{
+									Name:  "keyid",
+									Usage: "AWS key id (the shorter one)",
+								},
+								cli.StringFlag{
+									Name:  "secretkey",
+									Usage: "AWS secret key (the longer one)",
+								},
 							},
 							Action: func(c *cli.Context) error {
-								if c.String("label") == "" {
-									return errors.New("give me a label")
+								for _, thing := range []string{"label", "bucket", "path", "region", "keyid", "secretkey"} {
+									if c.String(thing) == "" {
+										return errors.New("give me a " + thing)
+									}
 								}
-								if c.String("bucket") == "" {
-									return errors.New("give me a bucket")
-								}
-								if c.String("path") == "" {
-									return errors.New("give me a path")
-								}
-								storage.NewS3Storage(c.String("label"), c.String("bucket"), c.String("path"))
+								storage.NewS3Storage(c.String("label"), c.String("bucket"), c.String("path"), c.String("region"), c.String("keyid"), c.String("secretkey"))
 								return nil
 							},
 						},

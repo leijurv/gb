@@ -25,10 +25,11 @@ type Storage interface {
 // can be either immediately after an upload, or later on while listing
 // therefore: should not rely on data that is only provided on a completed upload
 type UploadedBlob struct {
-	BlobID   []byte // nil if fetched from a list operation, has data if fetched from database
-	Path     string
-	Checksum string
-	Size     int64
+	StorageID []byte
+	BlobID    []byte // nil if fetched from a list operation, has data if fetched from database
+	Path      string
+	Checksum  string
+	Size      int64
 }
 
 // an upload in progress

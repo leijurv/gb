@@ -22,8 +22,40 @@ func uploaderThread() {
 		panic("no storage")
 	}
 	for plan := range uploaderCh {
-		executeBlobUploadPlan(plan, storage)
+		executeBlobUploadPlan(plan, &directUpload{
+			storages: storage,
+		})
 	}
+}
+
+type UploadService interface {
+	Begin(blobID []byte) io.Writer
+	End() []storage_base.UploadedBlob
+}
+
+type directUpload struct {
+	storages []storage_base.Storage
+	uploads  []storage_base.StorageUpload
+}
+
+func (du *directUpload) Begin(blobID []byte) io.Writer {
+	du.uploads = make([]storage_base.StorageUpload, 0)
+	for _, storage := range du.storages {
+		du.uploads = append(du.uploads, storage.BeginBlobUpload(blobID))
+	}
+	writers := make([]io.Writer, 0)
+	for _, upload := range du.uploads {
+		writers = append(writers, upload.Writer())
+	}
+	return io.MultiWriter(writers...)
+}
+
+func (du *directUpload) End() []storage_base.UploadedBlob {
+	completeds := make([]storage_base.UploadedBlob, 0)
+	for _, upload := range du.uploads {
+		completeds = append(completeds, upload.End())
+	}
+	return completeds
 }
 
 type BlobEntry struct {
@@ -35,7 +67,7 @@ type BlobEntry struct {
 	compression         string
 }
 
-func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
+func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	log.Println("Executing upload plan", plan)
 	for _, f := range plan {
 		defer wg.Done() // there's a wg.Add(1) for each and every entry in the plan
@@ -48,16 +80,7 @@ func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 	}
 	blobID := crypto.RandBytes(32)
 
-	uploads := make([]storage_base.StorageUpload, 0)
-	for _, storage := range storageDests {
-		uploads = append(uploads, storage.BeginBlobUpload(blobID))
-	}
-	writers := make([]io.Writer, 0)
-	for _, upload := range uploads {
-		writers = append(writers, upload.Writer())
-	}
-
-	out := io.MultiWriter(writers...)
+	out := serv.Begin(blobID)
 
 	postEncInfo := utils.NewSHA256HasherSizer()
 	out = io.MultiWriter(out, &postEncInfo)
@@ -117,10 +140,7 @@ func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 	}
 	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	log.Println("All bytes written")
-	completeds := make([]storage_base.UploadedBlob, 0)
-	for _, upload := range uploads {
-		completeds = append(completeds, upload.End())
-	}
+	completeds := serv.End()
 	log.Println("All bytes flushed")
 
 	hashPreEnc, sizePreEnc := preEncInfo.HashAndSize()
@@ -151,7 +171,7 @@ func executeBlobUploadPlan(plan BlobPlan, storageDests []storage_base.Storage) {
 	}
 	now := time.Now().Unix()
 	for i, completed := range completeds {
-		_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blobID, storageDests[i].GetID(), completed.Path, completed.Checksum, now)
+		_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blobID, completeds[i].StorageID, completed.Path, completed.Checksum, now)
 		if err != nil {
 			panic(err)
 		}

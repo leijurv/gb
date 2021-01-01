@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"encoding/json"
 	"log"
 	"strings"
 	"sync"
@@ -77,7 +78,7 @@ func NewGDriveStorage(label string) {
 	NewStorage("GDrive", identifier, rootPath, label)
 }
 
-func NewS3Storage(label string, bucket string, root string) {
+func NewS3Storage(label string, bucket string, root string, region string, keyid string, secretkey string) {
 	for strings.HasPrefix(root, "/") {
 		log.Println("S3 keys shouldn't begin with \"/\" so I'm removing it, edit the database if you're absolutely sure you want that (hint: you don't).")
 		root = root[1:]
@@ -87,17 +88,22 @@ func NewS3Storage(label string, bucket string, root string) {
 	} else {
 		log.Println("Will write to", root, "in bucket", bucket)
 	}
-	NewStorage("S3", bucket, root, label)
+	id, err := json.Marshal(s3.S3DatabaseIdentifier{
+		Bucket:    bucket,
+		KeyID:     keyid,
+		SecretKey: secretkey,
+		Region:    region,
+	})
+	if err != nil {
+		panic(err)
+	}
+	NewStorage("S3", string(id), root, label)
 }
 
 func internalCreateStorage(storageID []byte, kind string, identifier string, rootPath string) storage_base.Storage {
 	switch kind {
 	case "S3":
-		return &s3.S3{
-			StorageID: storageID,
-			Bucket:    identifier,
-			RootPath:  rootPath,
-		}
+		return s3.LoadS3StorageInfoFromDatabase(storageID, identifier, rootPath)
 	case "GDrive":
 		return gdrive.LoadGDriveStorageInfoFromDatabase(storageID, identifier, rootPath)
 	default:

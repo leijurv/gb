@@ -40,7 +40,7 @@ func connectToRelaySplitter(port int, desc []storage.StorageDescriptor) *remoteS
 	if err != nil {
 		panic(err)
 	}
-	marshalDescriptors(conn, desc)
+	writeJSON(conn, desc)
 	return &remoteSplitterRelayedUploadService{
 		storages: storage.ResolveDescriptors(desc),
 		conn:     conn,
@@ -85,8 +85,9 @@ func (rsrus *remoteSplitterRelayedUploadService) End(sha256 []byte, size int64) 
 	var completeds []storage_base.UploadedBlob
 	readJSON(rsrus.conn, &completeds)
 	for i := range completeds {
-		completeds[i].BlobID = rsrus.blobIDCache
-		completeds[i].StorageID = rsrus.storages[i].GetID()
+		if !bytes.Equal(completeds[i].BlobID, rsrus.blobIDCache) || !bytes.Equal(completeds[i].StorageID, rsrus.storages[i].GetID()) {
+			panic("sanity check")
+		}
 	}
 	rsrus.blobIDCache = nil
 	return completeds
@@ -112,7 +113,8 @@ func handleConnection(conn net.Conn) {
 	var out io.Writer
 	in = conn
 	out = conn
-	descs := unmarshalDescriptors(in)
+	var descs []storage.StorageDescriptor
+	readJSON(in, &descs)
 	storages := storage.ResolveDescriptors(descs)
 	for {
 		uploader := backup.BeginDirectUpload(storages)

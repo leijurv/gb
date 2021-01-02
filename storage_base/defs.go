@@ -27,9 +27,9 @@ type Storage interface {
 type UploadedBlob struct {
 	StorageID []byte
 	BlobID    []byte // nil if fetched from a list operation, has data if fetched from database
-	Path      string `json:"path"`
-	Checksum  string `json:"checksum"`
-	Size      int64  `json:"size"`
+	Path      string
+	Checksum  string
+	Size      int64
 }
 
 // an upload in progress

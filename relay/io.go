@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-
-	"github.com/leijurv/gb/storage"
 )
 
 func readJSON(in io.Reader, val interface{}) {
@@ -50,22 +48,4 @@ func writeData(out io.Writer, data []byte) {
 	if err != nil || n != len(data) {
 		panic(err)
 	}
-}
-
-func unmarshalDescriptors(in io.Reader) []storage.StorageDescriptor {
-	var descStr []string
-	readJSON(in, &descStr)
-	ret := make([]storage.StorageDescriptor, 0)
-	for _, str := range descStr {
-		ret = append(ret, storage.Unmarshal(str))
-	}
-	return ret
-}
-
-func marshalDescriptors(out io.Writer, val []storage.StorageDescriptor) {
-	descStr := make([]string, 0)
-	for _, v := range val {
-		descStr = append(descStr, storage.Marshal(v))
-	}
-	writeJSON(out, descStr)
 }

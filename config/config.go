@@ -23,6 +23,7 @@ type ConfigData struct {
 	NumHasherThreads     int      `json:"num_hasher_threads"`
 	NumUploaderThreads   int      `json:"num_uploader_threads"`
 	UploadStatusInterval int      `json:"upload_status_print_interval"`
+	RelayServerPort      int      `json:"relay_server_port"`
 	NoCompressionExts    []string `json:"no_compression_exts"`
 	ExcludeSuffixes      []string `json:"exclude_suffixes"`
 	ExcludePrefixes      []string `json:"exclude_prefixes"`
@@ -45,6 +46,7 @@ var config = ConfigData{
 	NumHasherThreads:     2,
 	NumUploaderThreads:   8,
 	UploadStatusInterval: 5, // interval between "Bytes written:" prints, in seconds [-1 to disable prints]
+	RelayServerPort:      -1,
 	NoCompressionExts: []string{
 		"mp4",
 		"mkv",

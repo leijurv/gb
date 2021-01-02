@@ -85,7 +85,7 @@ func StorageDataToStorage(descriptor StorageDescriptor) storage_base.Storage {
 	return cache[descriptor.StorageID]
 }
 
-func Marshal(descriptor StorageDescriptor) []byte {
+func Marshal(descriptor StorageDescriptor) string {
 	if descriptor.StorageIDHex != "" {
 		panic(descriptor.StorageIDHex)
 	}
@@ -95,12 +95,12 @@ func Marshal(descriptor StorageDescriptor) []byte {
 		panic(err)
 	}
 	descriptor.StorageIDHex = ""
-	return ret
+	return string(ret)
 }
 
-func Unmarshal(marshaled []byte) StorageDescriptor {
+func Unmarshal(marshaled string) StorageDescriptor {
 	var descriptor StorageDescriptor
-	err := json.Unmarshal(marshaled, &descriptor)
+	err := json.Unmarshal([]byte(marshaled), &descriptor)
 	if err != nil {
 		panic(err)
 	}

@@ -95,7 +95,7 @@ func (hs *HasherSizer) Write(p []byte) (int, error) {
 }
 
 func (hs *HasherSizer) HashAndSize() ([]byte, int64) {
-	return hs.hasher.Sum(nil), hs.Size()
+	return hs.Hash(), hs.Size()
 }
 
 func (hs *HasherSizer) Hash() []byte {

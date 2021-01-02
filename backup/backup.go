@@ -11,7 +11,7 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func Backup(path string) {
+func Backup(path string, serviceCh UploadServiceFactory) {
 	log.Println("Going to back up this path:", path)
 	var err error
 	path, err = filepath.Abs(path)
@@ -50,7 +50,7 @@ func Backup(path string) {
 	go bucketerThread()
 
 	for i := 0; i < config.Config().NumUploaderThreads; i++ {
-		go uploaderThread()
+		go uploaderThread(<-serviceCh)
 	}
 
 	if config.Config().UploadStatusInterval != -1 {

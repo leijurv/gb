@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/araddon/dateparse"
@@ -15,6 +16,7 @@ import (
 	"github.com/leijurv/gb/dupes"
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
+	"github.com/leijurv/gb/relay"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
 	"github.com/urfave/cli"
@@ -56,7 +58,11 @@ func main() {
 				if len(storage.GetAll()) == 0 {
 					return errors.New("make a storage first")
 				}
-				backup.Backup(path)
+				ch, ok := relay.RemoteSplitter()
+				if !ok {
+					ch = backup.MakeDefaultServiceFactory()
+				}
+				backup.Backup(path, ch)
 				return nil
 			},
 		},
@@ -264,6 +270,16 @@ func main() {
 				return nil
 			},
 		},
+	}
+	// relay must bypass all of this, because it has no config file nor database, so we should not harass the user about setting up those things
+	if len(os.Args) == 3 && os.Args[1] == "relay" {
+		port, err := strconv.Atoi(os.Args[2])
+		if err != nil {
+			panic(err)
+		}
+		log.Println("Going to run a relay server listening on port", port)
+		relay.Listen(port)
+		return
 	}
 	err := app.Run(os.Args)
 	if err != nil {

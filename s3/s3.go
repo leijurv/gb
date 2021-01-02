@@ -120,6 +120,7 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 		result: resultCh,
 		path:   path,
 		s3:     remote,
+		blobID: blobID,
 	}
 }
 

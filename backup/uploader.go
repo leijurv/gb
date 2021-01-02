@@ -16,21 +16,37 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func uploaderThread() {
-	storage := storage.GetAll()
-	if len(storage) == 0 {
-		panic("no storage")
-	}
+func uploaderThread(service UploadService) {
 	for plan := range uploaderCh {
-		executeBlobUploadPlan(plan, &directUpload{
-			storages: storage,
-		})
+		executeBlobUploadPlan(plan, service)
 	}
 }
 
 type UploadService interface {
 	Begin(blobID []byte) io.Writer
-	End(sha256 []byte) []storage_base.UploadedBlob
+	End(sha256 []byte, size int64) []storage_base.UploadedBlob
+}
+
+type UploadServiceFactory chan UploadService
+
+func MakeDefaultServiceFactory() UploadServiceFactory {
+	ch := make(UploadServiceFactory)
+	storage := storage.GetAll()
+	go func() {
+		for {
+			ch <- BeginDirectUpload(storage)
+		}
+	}()
+	return ch
+}
+
+func BeginDirectUpload(storages []storage_base.Storage) UploadService {
+	if len(storages) == 0 {
+		panic("no storage")
+	}
+	return &directUpload{
+		storages: storages,
+	}
 }
 
 type directUpload struct {
@@ -39,6 +55,9 @@ type directUpload struct {
 }
 
 func (du *directUpload) Begin(blobID []byte) io.Writer {
+	if len(blobID) != 32 {
+		panic("sanity check")
+	}
 	du.uploads = make([]storage_base.StorageUpload, 0)
 	for _, storage := range du.storages {
 		du.uploads = append(du.uploads, storage.BeginBlobUpload(blobID))
@@ -50,10 +69,15 @@ func (du *directUpload) Begin(blobID []byte) io.Writer {
 	return io.MultiWriter(writers...)
 }
 
-func (du *directUpload) End(sha256 []byte) []storage_base.UploadedBlob {
+func (du *directUpload) End(sha256 []byte, size int64) []storage_base.UploadedBlob {
 	completeds := make([]storage_base.UploadedBlob, 0)
 	for _, upload := range du.uploads {
-		completeds = append(completeds, upload.End())
+		c := upload.End()
+		if c.Size != size {
+			log.Println(c.Size, size)
+			panic("sanity check")
+		}
+		completeds = append(completeds, c)
 	}
 	return completeds
 }
@@ -146,7 +170,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	}
 	totalSize := sizePreEnc
 	log.Println("All bytes written")
-	completeds := serv.End(hashPostEnc)
+	completeds := serv.End(hashPostEnc, totalSize)
 	log.Println("All bytes flushed")
 
 	hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
@@ -170,6 +194,12 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	}
 	now := time.Now().Unix()
 	for _, completed := range completeds {
+		if !bytes.Equal(completed.BlobID, blobID) {
+			log.Println(completed.Path)
+			log.Println(completed.BlobID)
+			log.Println(blobID)
+			panic("sanity check")
+		}
 		_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blobID, completed.StorageID, completed.Path, completed.Checksum, now)
 		if err != nil {
 			panic(err)

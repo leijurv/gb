@@ -51,7 +51,8 @@ func BlobParanoia(label string) {
 		panic(err)
 	}
 	lines := strings.Split(string(stdin), "\n")
-	for _, line := range lines {
+	var sz int64
+	for i, line := range lines {
 		if line == "" {
 			continue
 		}
@@ -63,11 +64,12 @@ func BlobParanoia(label string) {
 		if err != nil {
 			panic(err)
 		}
-		blobParanoia(blobID, storage)
+		sz += blobParanoia(blobID, storage)
+		log.Println("Processed", i+1, "blobs out of", len(lines), "and downloaded", sz, "bytes")
 	}
 }
 
-func blobParanoia(blobID []byte, storage storage_base.Storage) {
+func blobParanoia(blobID []byte, storage storage_base.Storage) int64 {
 	log.Println("Running paranoia on", hex.EncodeToString(blobID), "in storage", storage)
 	if len(blobID) != 32 {
 		panic("sanity check")
@@ -150,4 +152,5 @@ func blobParanoia(blobID []byte, storage storage_base.Storage) {
 		panic("sanity check")
 	}
 	log.Println("Fully verified all hashes and paddings")
+	return blobSize
 }

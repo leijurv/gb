@@ -65,7 +65,7 @@ func BlobParanoia(label string) {
 			panic(err)
 		}
 		sz += blobParanoia(blobID, storage)
-		log.Println("Processed", i+1, "blobs out of", len(lines), "and downloaded", sz, "bytes")
+		log.Println("Processed", i+1, "blobs out of", len(lines), "and downloaded", utils.FormatCommas(sz), "bytes")
 	}
 }
 

@@ -115,6 +115,20 @@ func main() {
 						return nil
 					},
 				},
+				{
+					Name:  "blob",
+					Usage: "fetch blobs from storage and ensure that all contents are correct",
+					Flags: []cli.Flag{
+						cli.StringFlag{
+							Name:  "label",
+							Usage: "storage label",
+						},
+					},
+					Action: func(c *cli.Context) error {
+						paranoia.BlobParanoia(c.String("label"))
+						return nil
+					},
+				},
 			},
 			Action: func(c *cli.Context) error {
 				path := c.Args().First()

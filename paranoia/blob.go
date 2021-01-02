@@ -113,7 +113,7 @@ func blobParanoia(blobID []byte, storage storage_base.Storage) {
 		}
 		log.Println("Expected hash for this entry is " + hex.EncodeToString(hash) + ", decompressing...")
 		entryReader := io.LimitReader(reader, entrySize)
-		finalReader := compression.ByAlgName(compressionAlg).Decompress(entryReader)
+		finalReader := utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(entryReader))
 		verify := utils.NewSHA256HasherSizer()
 		utils.Copy(&verify, finalReader)
 		if hasherPreEnc.Size() != offset+entrySize {

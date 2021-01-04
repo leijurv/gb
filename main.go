@@ -295,6 +295,12 @@ func main() {
 		relay.Listen(port)
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "sha256" {
+		hs := utils.NewSHA256HasherSizer()
+		utils.Copy(&hs, os.Stdin)
+		log.Println(hex.EncodeToString(hs.Hash()))
+		return
+	}
 	err := app.Run(os.Args)
 	if err != nil {
 		panic(err)

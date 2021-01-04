@@ -117,13 +117,13 @@ func Compress(path string, out io.Writer, in io.Reader, hs *utils.HasherSizer) s
 			go func() {
 				decom := c.Decompress(pR)
 				defer decom.Close()
-				utils.Copy(&verify, decom)
+				utils.Copy(&verify, decom) // this only returns once decom is EOF, which only happens strictly after pW.Close(), so this is correct
 				done <- struct{}{}
 			}()
 
 			out = io.MultiWriter(out, pW)
 			// wow infallible compression is so much easier wow
-			bufout := bufio.NewWriterSize(out, 128*1024) // 128kb
+			bufout := bufio.NewWriterSize(out, 128*1024) // 128kb, because zstd sometimes writes in small chunks
 			err := c.Compress(bufout, read)
 			if err != nil {
 				log.Println("you are infallible you cannot fail :cry:")

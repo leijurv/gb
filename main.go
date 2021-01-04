@@ -173,6 +173,10 @@ func main() {
 									Name:  "secretkey",
 									Usage: "AWS secret key (the longer one)",
 								},
+								cli.StringFlag{
+									Name:  "endpoint",
+									Usage: "Override the s3 endpoint to another, for example you could put: backblazeb2.com",
+								},
 							},
 							Action: func(c *cli.Context) error {
 								for _, thing := range []string{"label", "bucket", "path", "region", "keyid", "secretkey"} {
@@ -180,7 +184,7 @@ func main() {
 										return errors.New("give me a " + thing)
 									}
 								}
-								storage.NewS3Storage(c.String("label"), c.String("bucket"), c.String("path"), c.String("region"), c.String("keyid"), c.String("secretkey"))
+								storage.NewS3Storage(c.String("label"), c.String("bucket"), c.String("path"), c.String("region"), c.String("keyid"), c.String("secretkey"), c.String("endpoint"))
 								return nil
 							},
 						},

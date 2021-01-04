@@ -10,6 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
@@ -50,6 +51,7 @@ type S3DatabaseIdentifier struct {
 	KeyID     string `json:"aws_access_key_id"`
 	SecretKey string `json:"aws_secret_access_key"`
 	Region    string `json:"aws_region"`
+	Endpoint  string `json:"endpoint"`
 }
 
 func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath string) storage_base.Storage {
@@ -59,6 +61,9 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 		log.Println("Identifier was", identifier)
 		panic("S3 database identifier is not in JSON format. This is probably not your fault, I had to change the S3 database format to include the AWS region + keys, not just the bucket name. It's JSON now.")
 	}
+	if ident.Endpoint == "" {
+		ident.Endpoint = "amazonaws.com"
+	}
 	return &S3{
 		StorageID: storageID,
 		Data:      *ident,
@@ -66,6 +71,15 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 		sess: session.Must(session.NewSession(&aws.Config{
 			Region:      aws.String(ident.Region),
 			Credentials: credentials.NewStaticCredentials(ident.KeyID, ident.SecretKey, ""),
+			EndpointResolver: endpoints.ResolverFunc(func(service, region string, optFns ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
+				if service == endpoints.S3ServiceID {
+					return endpoints.ResolvedEndpoint{
+						URL:           "https://s3." + ident.Region + "." + ident.Endpoint + "/",
+						SigningRegion: ident.Region,
+					}, nil
+				}
+				return endpoints.DefaultResolver().EndpointFor(service, region, optFns...)
+			}),
 		})),
 	}
 }

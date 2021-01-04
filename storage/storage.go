@@ -100,7 +100,7 @@ func NewGDriveStorage(label string) {
 	NewStorage("GDrive", identifier, rootPath, label)
 }
 
-func NewS3Storage(label string, bucket string, root string, region string, keyid string, secretkey string) {
+func NewS3Storage(label string, bucket string, root string, region string, keyid string, secretkey string, endpoint string) {
 	for strings.HasPrefix(root, "/") {
 		log.Println("S3 keys shouldn't begin with \"/\" so I'm removing it, edit the database if you're absolutely sure you want that (hint: you don't).")
 		root = root[1:]
@@ -115,6 +115,7 @@ func NewS3Storage(label string, bucket string, root string, region string, keyid
 		KeyID:     keyid,
 		SecretKey: secretkey,
 		Region:    region,
+		Endpoint:  endpoint,
 	})
 	if err != nil {
 		panic(err)

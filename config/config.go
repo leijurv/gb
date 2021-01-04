@@ -195,7 +195,7 @@ func mustBeLower(data []string) {
 }
 
 func saveConfig() {
-	data, err := json.Marshal(config)
+	data, err := json.MarshalIndent(config, "", "    ")
 	if err != nil {
 		panic(err) // impossible. marshal only errors on unrepresentatable datatypes like chan and func
 	}

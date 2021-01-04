@@ -12,16 +12,6 @@ import (
 )
 
 func scannerThread(path string, info os.FileInfo) {
-	defer close(hasherCh)
-	defer wg.Done()
-	defer func() {
-		go func() {
-			for {
-				time.Sleep(1 * time.Second)
-				bucketerCh <- Planned{}
-			}
-		}()
-	}()
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
@@ -34,21 +24,24 @@ func scannerThread(path string, info os.FileInfo) {
 		}
 		log.Println("Scanner committed")
 	}()
-
-	if info.IsDir() {
-		scanDirectory(path, tx)
-	} else {
+	if !info.IsDir() {
 		scanFile(File{path, info}, tx)
+		return
 	}
-}
-
-func scanDirectory(path string, tx *sql.Tx) {
-	filesMap := make(map[string]os.FileInfo)
 	log.Println("Beginning scan now!")
+	filesMap := make(map[string]os.FileInfo)
 	utils.WalkFiles(path, func(path string, info os.FileInfo) {
 		filesMap[path] = info
 		scanFile(File{path, info}, tx)
 	})
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			bucketerCh <- Planned{}
+		}
+	}()
+	close(hasherCh)
+	wg.Wait()
 	pruneDeletedFiles(path, filesMap)
 }
 

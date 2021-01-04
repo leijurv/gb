@@ -39,9 +39,6 @@ func Backup(path string, serviceCh UploadServiceFactory) {
 		log.Println("This is a single file...?")
 	}
 
-	wg.Add(1)
-	go scannerThread(path, stat)
-
 	for i := 0; i < config.Config().NumHasherThreads; i++ {
 		wg.Add(1)
 		go hasherThread()
@@ -61,6 +58,7 @@ func Backup(path string, serviceCh UploadServiceFactory) {
 			}
 		}()
 	}
+	scannerThread(path, stat)
 	wg.Wait()
 	log.Println("Backup complete")
 	BackupDB()

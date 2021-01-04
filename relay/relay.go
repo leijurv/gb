@@ -108,6 +108,11 @@ func Listen(port int) {
 }
 
 func handleConnection(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println("Panic recovered", r)
+		}
+	}()
 	log.Println("Incoming relay", conn)
 	var in io.Reader
 	var out io.Writer

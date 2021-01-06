@@ -114,10 +114,8 @@ func blobParanoia(blobID []byte, storage storage_base.Storage) int64 {
 			panic("got misaligned somehow. gap between entries??")
 		}
 		log.Println("Expected hash for this entry is " + hex.EncodeToString(hash) + ", decompressing...")
-		entryReader := io.LimitReader(reader, entrySize)
-		finalReader := utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(entryReader))
 		verify := utils.NewSHA256HasherSizer()
-		utils.Copy(&verify, finalReader)
+		utils.Copy(&verify, utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(io.LimitReader(reader, entrySize))))
 		if hasherPreEnc.Size() != offset+entrySize {
 			panic("entry was wrong size")
 		}

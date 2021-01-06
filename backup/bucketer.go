@@ -33,7 +33,7 @@ func bucketerThread() {
 		if sz < minSize {
 			tmp = append(tmp, plan) // small boys get grouped together
 			tmpSize += sz
-			if tmpSize >= minSize { // we now have enough small boys stacked on each other's shoulders to be tall enoguh to ride
+			if tmpSize >= minSize { // we now have enough small boys stacked on each other's shoulders to be tall enough to ride
 				log.Println("Dumping blob")
 				uploaderCh <- tmp
 				tmp = nil

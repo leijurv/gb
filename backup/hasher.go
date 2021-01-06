@@ -2,7 +2,6 @@ package backup
 
 import (
 	"bytes"
-	"database/sql"
 	"encoding/hex"
 	"log"
 	"os"
@@ -17,18 +16,6 @@ func hasherThread() {
 		hashOneFile(hashPlan)
 	}
 	log.Println("Hasher thread exiting")
-}
-
-func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
-	// important to use the same "now" for both of these queries, so that the file's history is presented without "gaps" (that could be present if we called time.Now() twice in a row)
-	_, err := tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", now, path)
-	if err != nil {
-		panic(err)
-	}
-	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, now, info.ModTime().Unix(), info.Mode()&os.ModePerm)
-	if err != nil {
-		panic(err)
-	}
 }
 
 func hashOneFile(plan HashPlan) {

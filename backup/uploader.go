@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/hex"
 	"io"
 	"log"
@@ -11,8 +12,6 @@ import (
 	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
-	"github.com/leijurv/gb/storage"
-	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
 
@@ -20,75 +19,6 @@ func uploaderThread(service UploadService) {
 	for plan := range uploaderCh {
 		executeBlobUploadPlan(plan, service)
 	}
-}
-
-type UploadService interface {
-	Begin(blobID []byte) io.Writer
-	End(sha256 []byte, size int64) []storage_base.UploadedBlob
-}
-
-type UploadServiceFactory chan UploadService
-
-func MakeDefaultServiceFactory() UploadServiceFactory {
-	ch := make(UploadServiceFactory)
-	storage := storage.GetAll()
-	go func() {
-		for {
-			ch <- BeginDirectUpload(storage)
-		}
-	}()
-	return ch
-}
-
-func BeginDirectUpload(storages []storage_base.Storage) UploadService {
-	if len(storages) == 0 {
-		panic("no storage")
-	}
-	return &directUpload{
-		storages: storages,
-	}
-}
-
-type directUpload struct {
-	storages []storage_base.Storage
-	uploads  []storage_base.StorageUpload
-}
-
-func (du *directUpload) Begin(blobID []byte) io.Writer {
-	if len(blobID) != 32 {
-		panic("sanity check")
-	}
-	du.uploads = make([]storage_base.StorageUpload, 0)
-	for _, storage := range du.storages {
-		du.uploads = append(du.uploads, storage.BeginBlobUpload(blobID))
-	}
-	writers := make([]io.Writer, 0)
-	for _, upload := range du.uploads {
-		writers = append(writers, upload.Writer())
-	}
-	return io.MultiWriter(writers...)
-}
-
-func (du *directUpload) End(sha256 []byte, size int64) []storage_base.UploadedBlob {
-	completeds := make([]storage_base.UploadedBlob, 0)
-	for _, upload := range du.uploads {
-		c := upload.End()
-		if c.Size != size {
-			log.Println(c.Size, size)
-			panic("sanity check")
-		}
-		completeds = append(completeds, c)
-	}
-	return completeds
-}
-
-type BlobEntry struct {
-	originalPlan        Planned
-	hash                []byte
-	offset              int64
-	postCompressionSize int64
-	preCompressionSize  int64
-	compression         string
 }
 
 func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
@@ -102,8 +32,8 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			// whether it's successful upload, IO error, or size mismatch
 		}
 	}
-	blobID := crypto.RandBytes(32)
 
+	blobID := crypto.RandBytes(32)
 	out := serv.Begin(blobID)
 
 	postEncInfo := utils.NewSHA256HasherSizer()
@@ -116,7 +46,15 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 
 	stats.Add(&preEncInfo)
 
-	entries := make([]BlobEntry, 0)
+	type blobEntry struct {
+		originalPlan        Planned
+		hash                []byte
+		offset              int64
+		postCompressionSize int64
+		preCompressionSize  int64
+		compression         string
+	}
+	entries := make([]blobEntry, 0)
 
 	for _, planned := range plan {
 		log.Println("Adding", planned.File)
@@ -134,26 +72,19 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			}()
 			continue
 		}
-		compAlg := func() string {
-			defer f.Close() // yeah its kinda paranoid but i prefer to always defer in a closure than put a Close/Unlock manually afterwards
-			return compression.Compress(planned.path, out, io.TeeReader(f, &verify), &verify)
-		}()
+		compAlg := compression.Compress(planned.path, out, io.TeeReader(f, &verify), &verify)
+		f.Close()
 		realHash, realSize := verify.HashAndSize()
-		// not sure what the error should be regarding confirmed size vs staked claims, or if there even should be an error.....
-		/*if realSize != planned.size {
-			log.Println("File copied successfully, but bytes read was", realSize, "when we expected", planned.size)
-		}*/
 		if len(planned.hash) > 0 && !bytes.Equal(realHash, planned.hash) {
 			log.Println("File copied successfully, but hash was", hex.EncodeToString(realHash), "when we expected", hex.EncodeToString(planned.hash))
 		}
-		end := preEncInfo.Size()
-		length := end - startOffset
-		if realSize == length {
+		length := preEncInfo.Size() - startOffset
+		if compAlg == "" {
 			log.Println("File length was", utils.FormatCommas(realSize), "and was not compressed")
 		} else {
 			log.Println("File length was", utils.FormatCommas(realSize), "but was compressed to", utils.FormatCommas(length), "change of", utils.FormatCommas(length-realSize))
 		}
-		entries = append(entries, BlobEntry{
+		entries = append(entries, blobEntry{
 			originalPlan:        planned,
 			hash:                realHash,
 			offset:              startOffset,
@@ -241,6 +172,18 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	log.Println("Uploader done with blob", plan)
 }
 
+func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
+	// important to use the same "now" for both of these queries, so that the file's history is presented without "gaps" (that could be present if we called time.Now() twice in a row)
+	_, err := tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", now, path)
+	if err != nil {
+		panic(err)
+	}
+	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, now, info.ModTime().Unix(), info.Mode()&os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
+}
+
 // this function should be called if the uploader thread was intended to upload a backup of a certain hash, but failed to do so, for any reason
 func uploadFailure(planned Planned) {
 	plannedHash := planned.hash
@@ -261,7 +204,7 @@ func uploadFailure(planned Planned) {
 		wg.Add(1)
 		go func() {
 			// obviously, only write ONE of the other files we know to have this hash, not all
-			bucketerCh <- Planned{late[0], plannedHash, planned.confirmedSize, nil}
+			bucketerCh <- Planned{planned.File, plannedHash, planned.confirmedSize, nil}
 		}() // we will upload the next file on the list with the same hash so they don't get left stranded (hashed, planned, but not actually uploaded)
 	} else {
 		delete(hashLateMap, expected) // important! otherwise the ok / len(late) > 0 check would panic lmao

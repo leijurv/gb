@@ -16,14 +16,6 @@ func scannerThread(path string, info os.FileInfo) {
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		log.Println("Scanner committing")
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Scanner committed")
-	}()
 	if !info.IsDir() {
 		scanFile(File{path, info}, tx)
 		return
@@ -34,6 +26,12 @@ func scannerThread(path string, info os.FileInfo) {
 		filesMap[path] = info
 		scanFile(File{path, info}, tx)
 	})
+	log.Println("Scanner committing")
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Scanner committed")
 	go func() {
 		for {
 			time.Sleep(1 * time.Second)

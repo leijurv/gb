@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/md5"
 	"crypto/sha256"
+	"golang.org/x/sys/unix"
 	"hash"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/leijurv/gb/config"
 )
@@ -27,6 +29,11 @@ func SliceToArr(in []byte) [32]byte {
 // return true if and only if the provided FileInfo represents a completely normal file, and nothing weird like a directory, symlink, pipe, socket, block device, etc
 func NormalFile(info os.FileInfo) bool {
 	return info.Mode()&os.ModeType == 0
+}
+
+func HaveReadPermission(path string) bool {
+	err := syscall.Access(path, unix.R_OK)
+	return err != syscall.EACCES
 }
 
 // walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
@@ -58,7 +65,14 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 			}
 			return nil
 		}
+		ignoreErrors := config.Config().IgnorePermissionErrors
 		if err != nil {
+			if oserr, ok := err.(*os.PathError); ok && ignoreErrors {
+				if oserr.Err == syscall.EACCES {
+					log.Printf("permission error for %s, skipping...", path)
+					return nil
+				}
+			}
 			log.Println("While traversing those files, I got this error:")
 			log.Println(err)
 			log.Println("while looking at this path:")
@@ -68,7 +82,9 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
 			return nil
 		}
-		filesCh <- PathAndInfo{path, info}
+		if !ignoreErrors || HaveReadPermission(path) {
+			filesCh <- PathAndInfo{path, info}
+		}
 		return nil
 	})
 	if err != nil {

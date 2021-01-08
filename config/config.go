@@ -13,21 +13,22 @@ var ConfigLocation string
 var inited = false
 
 type ConfigData struct {
-	MinBlobSize          int64    `json:"min_blob_size"`
-	MinCompressSize      int64    `json:"min_compress_size"`
-	DatabaseLocation     string   `json:"database_location"`
-	PaddingMinBytes      int64    `json:"padding_min_bytes"`
-	PaddingMaxBytes      int64    `json:"padding_max_bytes"`
-	PaddingMinPercent    float64  `json:"padding_min_percent"`
-	PaddingMaxPercent    float64  `json:"padding_max_percent"`
-	NumHasherThreads     int      `json:"num_hasher_threads"`
-	NumUploaderThreads   int      `json:"num_uploader_threads"`
-	UploadStatusInterval int      `json:"upload_status_print_interval"`
-	RelayServerPort      int      `json:"relay_server_port"`
-	NoCompressionExts    []string `json:"no_compression_exts"`
-	ExcludeSuffixes      []string `json:"exclude_suffixes"`
-	ExcludePrefixes      []string `json:"exclude_prefixes"`
-	DedupeExclude        []string `json:"dedupe_exclude"`
+	MinBlobSize            int64    `json:"min_blob_size"`
+	MinCompressSize        int64    `json:"min_compress_size"`
+	DatabaseLocation       string   `json:"database_location"`
+	PaddingMinBytes        int64    `json:"padding_min_bytes"`
+	PaddingMaxBytes        int64    `json:"padding_max_bytes"`
+	PaddingMinPercent      float64  `json:"padding_min_percent"`
+	PaddingMaxPercent      float64  `json:"padding_max_percent"`
+	NumHasherThreads       int      `json:"num_hasher_threads"`
+	NumUploaderThreads     int      `json:"num_uploader_threads"`
+	UploadStatusInterval   int      `json:"upload_status_print_interval"`
+	RelayServerPort        int      `json:"relay_server_port"`
+	NoCompressionExts      []string `json:"no_compression_exts"`
+	ExcludeSuffixes        []string `json:"exclude_suffixes"`
+	ExcludePrefixes        []string `json:"exclude_prefixes"`
+	DedupeExclude          []string `json:"dedupe_exclude"`
+	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
 }
 
 func Config() ConfigData {
@@ -93,15 +94,16 @@ var config = ConfigData{
 		".part",
 	},
 	ExcludePrefixes: []string{
-	// e.g.
-	// "/path/to/dir/to/exclude/",
-	// you REALLY SHOULD include the trailing /
-	// this really is just a starts with / ends with check on the path!
+		// e.g.
+		// "/path/to/dir/to/exclude/",
+		// you REALLY SHOULD include the trailing /
+		// this really is just a starts with / ends with check on the path!
 	},
 	DedupeExclude: []string{
-	// folders that you have already fully deduped against each other
-	// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
+		// folders that you have already fully deduped against each other
+		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
+	IgnorePermissionErrors: false,
 }
 
 /*

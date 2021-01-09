@@ -82,9 +82,10 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
 			return nil
 		}
-		if !ignoreErrors || HaveReadPermission(path) {
-			filesCh <- PathAndInfo{path, info}
+		if ignoreErrors && !HaveReadPermission(path) {
+			return nil // skip this file
 		}
+		filesCh <- PathAndInfo{path, info}
 		return nil
 	})
 	if err != nil {

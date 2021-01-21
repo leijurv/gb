@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/leijurv/gb/proxy"
+
 	"github.com/araddon/dateparse"
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/config"
@@ -288,6 +290,39 @@ func main() {
 				return nil
 			},
 		},
+		{
+			Name:  "sha256",
+			Usage: "sha256 something",
+			Action: func(c *cli.Context) error {
+				log.SetFlags(0)
+				hs := utils.NewSHA256HasherSizer()
+				utils.Copy(&hs, os.Stdin)
+				log.Println(hex.EncodeToString(hs.Hash()))
+				return nil
+			},
+		},
+		{
+			Name:  "proxy",
+			Usage: "proxy",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				proxy.Proxy(c.String("label"))
+				return nil
+			},
+		},
+		{
+			Name:  "restoredb",
+			Usage: "restore an encrypted and compressed database backup",
+			Action: func(c *cli.Context) error {
+				download.RestoreDB(c.Args().First())
+				return nil
+			},
+		},
 	}
 	// relay must bypass all of this, because it has no config file nor database, so we should not harass the user about setting up those things
 	if len(os.Args) == 3 && os.Args[1] == "relay" {
@@ -297,12 +332,6 @@ func main() {
 		}
 		log.Println("Going to run a relay server listening on port", port)
 		relay.Listen(port)
-		return
-	}
-	if len(os.Args) == 2 && os.Args[1] == "sha256" {
-		hs := utils.NewSHA256HasherSizer()
-		utils.Copy(&hs, os.Stdin)
-		log.Println(hex.EncodeToString(hs.Hash()))
 		return
 	}
 	err := app.Run(os.Args)

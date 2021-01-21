@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -183,6 +184,10 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 		panic(err)
 	}
 	return result.Body
+}
+
+func (remote *S3) DownloadSectionHTTP(path string, offset int64, length int64) *http.Response {
+	panic("not supported")
 }
 
 func (remote *S3) ListBlobs() []storage_base.UploadedBlob {

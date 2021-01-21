@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/leijurv/gb/storage_base"
@@ -84,9 +85,16 @@ func (gds *gDriveStorage) UploadDatabaseBackup(encryptedDatabase []byte, name st
 }
 
 func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
+	return gds.DownloadSectionHTTP(path, offset, length).Body
+}
+
+func (gds *gDriveStorage) DownloadSectionHTTP(path string, offset int64, length int64) *http.Response {
 	if length == 0 {
 		// a range of length 0 is invalid! we get a 400 instead of an empty 200!
-		return &utils.EmptyReadCloser{}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       ioutil.NopCloser(bytes.NewReader(nil)),
+		}
 	}
 	log.Println("GDrive key is", path)
 	rangeStr := utils.FormatHTTPRange(offset, length)
@@ -97,7 +105,7 @@ func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int6
 	if err != nil {
 		panic(err)
 	}
-	return resp.Body
+	return resp
 }
 
 func (gds *gDriveStorage) Metadata(path string) (string, int64) {

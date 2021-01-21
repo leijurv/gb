@@ -1,9 +1,10 @@
 package paranoia
 
 import (
-	"log"
-
+	"encoding/hex"
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
+	"log"
 )
 
 var queriesThatShouldHaveNoRows = []string{
@@ -18,6 +19,58 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL", // i really should have made this a NOT NULL. my mistake.
 
 	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND compression_alg != ''",
+
+	// ensure we only have one zero-byte blob entry
+	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND rowid != (SELECT rowid FROM blob_entries WHERE final_size = 0 LIMIT 1)",
+	// ensure we only have one zero-byte sizes entry
+	"SELECT hash FROM sizes WHERE size = 0 AND rowid != (SELECT rowid FROM sizes WHERE size = 0 LIMIT 1)",
+
+	// make sure that there are no two blob_entries at the same blob_id and offset, EXCEPT for the one entry that's allowed to be zero-byte
+	`
+	WITH collision AS (
+		SELECT
+			blob_id,
+			offset,
+			COUNT(*) AS cnt
+		FROM
+			blob_entries
+		GROUP BY
+			blob_id,
+			offset
+		HAVING
+			cnt > 1
+	),
+	allowed_collision AS (
+		SELECT
+			blob_id,
+			offset
+		FROM
+			blob_entries
+		WHERE
+			final_size = 0
+	)
+	SELECT
+		blob_id
+	FROM
+		collision
+	WHERE
+		cnt != 2
+		OR 
+			(
+				SELECT
+					COUNT(*)
+				FROM
+					allowed_collision
+				WHERE
+					allowed_collision.blob_id = collision.blob_id
+					AND allowed_collision.offset = collision.offset
+			) = 0
+	`,
+
+	"SELECT hash FROM files WHERE path LIKE '%/'",
+
+	// everything has been backed up to every destination
+	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage)",
 
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2
 	// but it's super slow since it can't efficiently use indexes then
@@ -69,8 +122,74 @@ func DBParanoia() {
 		err := db.DB.QueryRow(q).Scan(&result)
 		if err != db.ErrNoRows {
 			log.Println(err)
+			log.Println("Result is", hex.EncodeToString(result))
 			panic("sanity query should have no rows")
 		}
 	}
+	blobsCoherence()
 	log.Println("Done running database paranoia")
+}
+
+func blobsCoherence() {
+	log.Println("Running blob entry coherence")
+	rows, err := db.DB.Query("SELECT blob_id, size FROM blobs")
+	if err != nil {
+		panic(err)
+	}
+	cnt := 0
+	entriesCnt := 0
+	defer rows.Close()
+	for rows.Next(){
+		var blobID []byte
+		var size int64
+		err = rows.Scan(&blobID, &size)
+		if err != nil {
+			panic(err)
+		}
+		entriesCnt += blobCoherence(blobID, size)
+		cnt++
+	}
+	err = rows.Err()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Verified entry coherence on", cnt, "blobs and", entriesCnt, "entries")
+}
+
+func blobCoherence(blobID []byte, size int64) int {
+	rows, err := db.DB.Query("SELECT final_size, offset FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size", blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
+	if err != nil {
+		panic(err)
+	}
+	cnt := 0
+	defer rows.Close()
+	var nextStartsAt int64
+	for rows.Next() {
+		var finalSize int64
+		var offset int64
+		err = rows.Scan(&finalSize, &offset)
+		if err != nil {
+			panic(err)
+		}
+		cnt++
+		if nextStartsAt != offset {
+			log.Println(offset)
+			log.Println(finalSize)
+			log.Println(nextStartsAt)
+			panic("incoherent blob_entries packing")
+		}
+		nextStartsAt += finalSize
+	}
+	err = rows.Err()
+	if err != nil {
+		panic(err)
+	}
+	remain := size - nextStartsAt
+	if remain < config.Config().PaddingMinBytes + int64(float64(nextStartsAt) * (config.Config().PaddingMinPercent) / 100){
+		panic("not enough padding at end of file")
+	}
+	if remain > config.Config().PaddingMaxBytes + int64(float64(nextStartsAt) * (config.Config().PaddingMaxPercent) / 100){
+		panic("too much padding at end of file")
+	}
+	return cnt
 }

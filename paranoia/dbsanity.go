@@ -73,6 +73,12 @@ var queriesThatShouldHaveNoRows = []string{
 	// everything has been backed up to every destination
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage)",
 
+	// nothing was ever backed up to the same place twice
+	"SELECT blob_id FROM blob_storage GROUP BY blob_id, storage_id HAVING COUNT(*) > 1",
+
+	// nothing was ever backed up twice
+	"SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1",
+
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2
 	// but it's super slow since it can't efficiently use indexes then
 	// these two are SUPER fast as-is, no need to combine

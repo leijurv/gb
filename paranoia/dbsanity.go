@@ -2,9 +2,10 @@ package paranoia
 
 import (
 	"encoding/hex"
+	"log"
+
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
-	"log"
 )
 
 var queriesThatShouldHaveNoRows = []string{
@@ -139,7 +140,7 @@ func blobsCoherence() {
 	cnt := 0
 	entriesCnt := 0
 	defer rows.Close()
-	for rows.Next(){
+	for rows.Next() {
 		var blobID []byte
 		var size int64
 		err = rows.Scan(&blobID, &size)
@@ -185,10 +186,10 @@ func blobCoherence(blobID []byte, size int64) int {
 		panic(err)
 	}
 	remain := size - nextStartsAt
-	if remain < config.Config().PaddingMinBytes + int64(float64(nextStartsAt) * (config.Config().PaddingMinPercent) / 100){
+	if remain < config.Config().PaddingMinBytes+int64(float64(nextStartsAt)*(config.Config().PaddingMinPercent)/100) {
 		panic("not enough padding at end of file")
 	}
-	if remain > config.Config().PaddingMaxBytes + int64(float64(nextStartsAt) * (config.Config().PaddingMaxPercent) / 100){
+	if remain > config.Config().PaddingMaxBytes+int64(float64(nextStartsAt)*(config.Config().PaddingMaxPercent)/100) {
 		panic("too much padding at end of file")
 	}
 	return cnt

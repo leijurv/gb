@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"crypto/tls"
-	"github.com/leijurv/gb/storage"
 	"html/template"
 	"io"
 	"log"
@@ -12,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/leijurv/gb/storage"
 
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
@@ -103,19 +104,19 @@ h1 {padding: 0.1em; background-color: #777; color: white; border-bottom: thin wh
 
 func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
-	if !strings.HasSuffix(path, "/"){
+	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
 
-	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", path + "*")
+	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", path+"*")
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
 	type Entry struct {
-		Name string
-		Size int64
-		Odd bool
+		Name        string
+		Size        int64
+		Odd         bool
 		EscapedName string
 	}
 	entries := make(map[Entry]struct{})
@@ -131,10 +132,10 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
 			Size: size,
 		}
 		entry.Name = entry.Name[len(path):]
-		if strings.Contains(entry.Name, "/"){
+		if strings.Contains(entry.Name, "/") {
 			entry.Name = strings.Split(entry.Name, "/")[0] + "/"
 			entry.Size = -1
-			entry.EscapedName = "/" + url.PathEscape(path[1:] + entry.Name)
+			entry.EscapedName = "/" + url.PathEscape(path[1:]+entry.Name)
 		} else {
 			entry.EscapedName = "/" + url.PathEscape(match[1:])
 		}
@@ -152,11 +153,11 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
 		return keys[i].Name < keys[j].Name
 	})
 	for i := range keys {
-		keys[i].Odd = i%2==1
+		keys[i].Odd = i%2 == 1
 	}
 	err = listTemplate.Execute(w, struct {
 		Match string
-		Rows []Entry
+		Rows  []Entry
 	}{path, keys})
 	if err != nil {
 		panic(err)
@@ -302,7 +303,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	w.Header().Set("Accept-Ranges", "bytes")
 	log.Println("Response headers", w.Header())
 	status := resp.StatusCode
-	log.Println("Response status code",status)
+	log.Println("Response status code", status)
 	if !respondWithRange && status == 206 {
 		log.Println("Overwriting 206 to 200 because the client did not ask for a Range")
 		status = 200

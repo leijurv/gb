@@ -3,7 +3,6 @@ package utils
 import (
 	"crypto/md5"
 	"crypto/sha256"
-	"golang.org/x/sys/unix"
 	"hash"
 	"io"
 	"log"
@@ -13,6 +12,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/leijurv/gb/config"
 )

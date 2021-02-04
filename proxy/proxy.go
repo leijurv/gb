@@ -107,8 +107,8 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-
-	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", path+"*")
+	globPath := strings.Replace(strings.Replace(path, "[", "?", -1), "]", "?", -1) + "*"
+	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
 	if err != nil {
 		panic(err)
 	}

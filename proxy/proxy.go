@@ -19,7 +19,7 @@ import (
 	"github.com/leijurv/gb/storage_base"
 )
 
-func Proxy(label string) {
+func Proxy(label string, base string) {
 	if label == "" {
 		log.Println("First, we need to pick a storage to fetch em from")
 		log.Println("Options:")
@@ -42,10 +42,13 @@ func Proxy(label string) {
 	}
 	storage := storage.GetByID(storageID)
 	log.Println("Using storage:", storage)
+	if !strings.HasPrefix(base, "/") && base != "" {
+		panic("invalid base")
+	}
 	server := &http.Server{
-		Addr: ":7893",
+		Addr: "127.0.0.1:7893",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			handleHTTP(w, r, storage)
+			handleHTTP(w, r, storage, base)
 		}),
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disables http/2
 	}
@@ -102,11 +105,7 @@ h1 {padding: 0.1em; background-color: #777; color: white; border-bottom: thin wh
 </html>
 `))
 
-func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
-	path := req.URL.Path
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
+func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
 	globPath := strings.Replace(strings.Replace(path, "[", "?", -1), "]", "?", -1) + "*"
 	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
 	if err != nil {
@@ -135,9 +134,9 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
 		if strings.Contains(entry.Name, "/") {
 			entry.Name = strings.Split(entry.Name, "/")[0] + "/"
 			entry.Size = -1
-			entry.EscapedName = "/" + url.PathEscape(path[1:]+entry.Name)
+			entry.EscapedName = "/" + url.PathEscape(path[1+len(base):]+entry.Name)
 		} else {
-			entry.EscapedName = "/" + url.PathEscape(match[1:])
+			entry.EscapedName = "/" + url.PathEscape(match[1+len(base):])
 		}
 		entries[entry] = struct{}{}
 	}
@@ -164,13 +163,20 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.Storage) {
+func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.Storage, base string) {
 	pathOnDisk := req.URL.Path
+	if !strings.HasPrefix(pathOnDisk, "/") {
+		pathOnDisk = "/" + pathOnDisk
+	}
+	for strings.HasSuffix(base, "/") {
+		base = base[:len(base)-1]
+	}
+	pathOnDisk = base + pathOnDisk
 	log.Println("Request is for", pathOnDisk)
 	var hash []byte
 	err := db.DB.QueryRow("SELECT hash FROM files WHERE path = ? AND end IS NULL", pathOnDisk).Scan(&hash)
 	if err == db.ErrNoRows {
-		handleDirMaybe(w, req)
+		handleDirMaybe(w, req, pathOnDisk, base)
 		return
 	}
 	if err != nil {

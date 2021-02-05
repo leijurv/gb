@@ -309,9 +309,13 @@ func main() {
 					Name:  "label",
 					Usage: "storage label",
 				},
+				cli.StringFlag{
+					Name:  "base",
+					Usage: "base path",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				proxy.Proxy(c.String("label"))
+				proxy.Proxy(c.String("label"), c.String("base"))
 				return nil
 			},
 		},

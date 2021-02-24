@@ -93,6 +93,10 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			compression:         compAlg,
 		})
 	}
+	if len(entries) == 0 {
+		log.Println("Exiting because nothing wrote")
+		return
+	}
 	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	hashPreEnc, sizePreEnc := preEncInfo.HashAndSize()
 	hashPostEnc, sizePostEnc := postEncInfo.HashAndSize()

@@ -7,9 +7,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/utils"
 )
+
+// use the includePaths that are deeper than the inputPath but if there are none just use the inputPath
+func getDirectoriesToScan(inputPath string, includePaths []string) []string {
+	out := make([]string, 0)
+	for _, include := range includePaths {
+		if strings.HasPrefix(include, inputPath) {
+			out = append(out, include)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	} else {
+		return []string{inputPath}
+	}
+}
 
 func scannerThread(path string, info os.FileInfo) {
 	tx, err := db.DB.Begin()
@@ -22,10 +38,18 @@ func scannerThread(path string, info os.FileInfo) {
 	}
 	log.Println("Beginning scan now!")
 	filesMap := make(map[string]os.FileInfo)
-	utils.WalkFiles(path, func(path string, info os.FileInfo) {
-		filesMap[path] = info
-		scanFile(File{path, info}, tx)
-	})
+	for _, exclude := range config.Config().ExcludePrefixes {
+		if strings.HasPrefix(path, exclude) {
+			log.Printf("Input path bypasses exclude \"%s\"\n", exclude)
+			// maybe add a sleep here to be safe?
+		}
+	}
+	for _, dir := range getDirectoriesToScan(path, config.Config().Includes) {
+		utils.WalkFiles(dir, func(path string, info os.FileInfo) {
+			filesMap[path] = info
+			scanFile(File{path, info}, tx)
+		})
+	}
 	log.Println("Scanner committing")
 	err = tx.Commit()
 	if err != nil {

@@ -211,7 +211,7 @@ func mustBeLower(data []string) {
 func mustEndWithSlash(data []string) {
 	for _, str := range data {
 		if !strings.HasSuffix(str, "/") {
-			panic(str + "in includes must end with a /")
+			panic(str + " in includes must end with a /")
 		}
 	}
 }

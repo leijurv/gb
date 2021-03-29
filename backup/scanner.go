@@ -27,25 +27,26 @@ func getDirectoriesToScan(inputPath string, includePaths []string) []string {
 	}
 }
 
-func scannerThread(path string, info os.FileInfo) {
+func scannerThread(input string, info os.FileInfo) {
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
 	}
 	if !info.IsDir() {
-		scanFile(File{path, info}, tx)
+		scanFile(File{input, info}, tx)
 		return
 	}
 	log.Println("Beginning scan now!")
 	filesMap := make(map[string]os.FileInfo)
 	for _, exclude := range config.Config().ExcludePrefixes {
-		if strings.HasPrefix(path, exclude) {
-			log.Printf("Input path bypasses exclude \"%s\"\n", exclude)
+		if strings.HasPrefix(input, exclude) {
+			log.Printf("Input input bypasses exclude \"%s\"\n", exclude)
 			// maybe add a sleep here to be safe?
 		}
 	}
-	for _, dir := range getDirectoriesToScan(path, config.Config().Includes) {
-		utils.WalkFiles(dir, func(path string, info os.FileInfo) {
+	pathsToBackup := getDirectoriesToScan(input, config.Config().Includes)
+	for _, path := range pathsToBackup {
+		utils.WalkFiles(path, func(path string, info os.FileInfo) {
 			filesMap[path] = info
 			scanFile(File{path, info}, tx)
 		})
@@ -64,7 +65,9 @@ func scannerThread(path string, info os.FileInfo) {
 	}()
 	close(hasherCh)
 	wg.Wait()
-	pruneDeletedFiles(path, filesMap)
+	for _, path := range pathsToBackup {
+		pruneDeletedFiles(path, filesMap)
+	}
 }
 
 func scanFile(file File, tx *sql.Tx) {

@@ -38,7 +38,7 @@ func HaveReadPermission(path string) bool {
 }
 
 // walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
-func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
+func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 	type PathAndInfo struct {
 		path string
 		info os.FileInfo
@@ -52,8 +52,8 @@ func WalkFiles(path string, fn func(path string, info os.FileInfo)) {
 		log.Println("Scan processor signaling done")
 		done <- struct{}{}
 	}()
-	err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-		if config.ExcludeFromBackup(path) {
+	err := filepath.Walk(startPath, func(path string, info os.FileInfo, err error) error {
+		if config.ExcludeFromBackup(startPath, path) {
 			if info == nil {
 				log.Println("EXCLUDING & ERROR while reading path which is ignored by your configuration:", path, err)
 				return nil

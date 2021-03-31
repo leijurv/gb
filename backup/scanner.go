@@ -7,25 +7,50 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/utils"
 )
 
-func scannerThread(path string, info os.FileInfo) {
+// use the includePaths that are deeper than the inputPath but if there are none just use the inputPath
+func getDirectoriesToScan(inputPath string, includePaths []string) []string {
+	out := make([]string, 0)
+	for _, include := range includePaths {
+		if strings.HasPrefix(include, inputPath) {
+			out = append(out, include)
+		}
+	}
+	if len(out) > 0 {
+		return out
+	} else {
+		return []string{inputPath}
+	}
+}
+
+func scannerThread(input string, info os.FileInfo) {
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
 	}
 	if !info.IsDir() {
-		scanFile(File{path, info}, tx)
+		scanFile(File{input, info}, tx)
 		return
 	}
 	log.Println("Beginning scan now!")
 	filesMap := make(map[string]os.FileInfo)
-	utils.WalkFiles(path, func(path string, info os.FileInfo) {
-		filesMap[path] = info
-		scanFile(File{path, info}, tx)
-	})
+	for _, exclude := range config.Config().ExcludePrefixes {
+		if strings.HasPrefix(input, exclude) {
+			log.Printf("Input input bypasses exclude \"%s\"\n", exclude)
+			// maybe add a sleep here to be safe?
+		}
+	}
+	pathsToBackup := getDirectoriesToScan(input, config.Config().Includes)
+	for _, path := range pathsToBackup {
+		utils.WalkFiles(path, func(path string, info os.FileInfo) {
+			filesMap[path] = info
+			scanFile(File{path, info}, tx)
+		})
+	}
 	log.Println("Scanner committing")
 	err = tx.Commit()
 	if err != nil {
@@ -40,7 +65,9 @@ func scannerThread(path string, info os.FileInfo) {
 	}()
 	close(hasherCh)
 	wg.Wait()
-	pruneDeletedFiles(path, filesMap)
+	for _, path := range pathsToBackup {
+		pruneDeletedFiles(path, filesMap)
+	}
 }
 
 func scanFile(file File, tx *sql.Tx) {

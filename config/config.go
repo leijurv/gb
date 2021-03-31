@@ -25,6 +25,7 @@ type ConfigData struct {
 	UploadStatusInterval   int      `json:"upload_status_print_interval"`
 	RelayServerPort        int      `json:"relay_server_port"`
 	NoCompressionExts      []string `json:"no_compression_exts"`
+	Includes               []string `json:"includes"`
 	ExcludeSuffixes        []string `json:"exclude_suffixes"`
 	ExcludePrefixes        []string `json:"exclude_prefixes"`
 	DedupeExclude          []string `json:"dedupe_exclude"`
@@ -89,6 +90,12 @@ var config = ConfigData{
 		"wmv",
 		"rar",
 		"dmg",
+	},
+	Includes: []string{
+	// folders that will be searched from if they are a child of the path argument.
+	// useful if you want to backup a few sibling folders but not everything around them and want to do so by running backup on the parent folder.
+	// this is ignored if no folders are given
+		"/",
 	},
 	// if any component of the path matches these suffixes, it will be excluded, e.g. ".app"s
 	ExcludeSuffixes: []string{
@@ -187,12 +194,24 @@ func sanity() {
 	mustBeLower(config.ExcludePrefixes)
 	mustBeLower(config.ExcludeSuffixes)
 	mustBeLower(config.DedupeExclude)
+	mustEndWithSlash(config.Includes)
+	if len(config.Includes) == 0 {
+		panic("No include paths")
+	}
 }
 
 func mustBeLower(data []string) {
 	for _, str := range data {
 		if strings.ToLower(str) != str {
 			panic(str + " must be lower case, to make it clear this is a case insensitive match")
+		}
+	}
+}
+
+func mustEndWithSlash(data []string) {
+	for _, str := range data {
+		if !strings.HasSuffix(str, "/") {
+			panic(str + " in includes must end with a /")
 		}
 	}
 }
@@ -210,7 +229,8 @@ func saveConfig() {
 	}
 }
 
-func ExcludeFromBackup(path string) bool {
+// rootPath is the path the scan was started from
+func ExcludeFromBackup(rootPath string, path string) bool {
 	path = strings.ToLower(path)
 	for _, suffix := range config.ExcludeSuffixes {
 		if strings.HasSuffix(path, suffix) {
@@ -218,7 +238,8 @@ func ExcludeFromBackup(path string) bool {
 		}
 	}
 	for _, prefix := range config.ExcludePrefixes {
-		if strings.HasPrefix(path, prefix) {
+		// if an exclude prefix is a parent of the path we are searching from we bypass the exclude
+		if strings.HasPrefix(prefix, rootPath) && strings.HasPrefix(path, prefix) {
 			return true
 		}
 	}

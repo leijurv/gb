@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/leijurv/gb/config"
@@ -32,6 +33,10 @@ type Compression interface {
 var compressionMap = make(map[string]Compression)
 
 func init() {
+	if !isLeptonInPath() {
+		panic("lepton is not installed")
+	}
+
 	compressions := []Compression{
 		&NoCompression{},
 		&ZstdCompression{},
@@ -45,6 +50,11 @@ func init() {
 		}
 		compressionMap[n] = c
 	}
+}
+
+func isLeptonInPath() bool {
+	_, err := exec.LookPath("lepton")
+	return err == nil
 }
 
 func ByAlgName(algName string) Compression {

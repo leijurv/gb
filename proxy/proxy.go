@@ -45,6 +45,9 @@ func Proxy(label string, base string) {
 	if !strings.HasPrefix(base, "/") && base != "" {
 		panic("invalid base")
 	}
+	for strings.HasSuffix(base, "/") {
+		base = base[:len(base)-1]
+	}
 	server := &http.Server{
 		Addr: "127.0.0.1:7893",
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -163,13 +166,43 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base 
 	}
 }
 
+var playerTemplate = template.Must(template.New("player").Parse(`
+<html>
+<head>
+<style type="text/css">
+.videoBgWrapper {
+    display: block;
+    margin: 0 auto;
+    width: 100%;
+}
+.videoBg{
+    width: 100%;
+}
+</style>
+<body>
+<div class="videoBgWrapper">
+<video controls preload=auto class="videoBg" id="myVideo" src="{{ .Path }}"></video>
+</div>
+</body>
+</html>
+`))
+
 func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.Storage, base string) {
 	pathOnDisk := req.URL.Path
 	if !strings.HasPrefix(pathOnDisk, "/") {
 		pathOnDisk = "/" + pathOnDisk
 	}
-	for strings.HasSuffix(base, "/") {
-		base = base[:len(base)-1]
+	if strings.HasPrefix(pathOnDisk, "/player/") {
+		pathOnDisk = pathOnDisk[len("/player"):]
+		t := req.URL.Query().Get("t")
+		log.Println("T is", t)
+		if t != "" {
+			pathOnDisk += "#t=" + t
+		}
+		playerTemplate.Execute(w, struct {
+			Path string
+		}{pathOnDisk})
+		return
 	}
 	pathOnDisk = base + pathOnDisk
 	log.Println("Request is for", pathOnDisk)
@@ -260,22 +293,19 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 		resp = storage.DownloadSectionHTTP(path, seekStart, claimedLength)
 	}
 	defer resp.Body.Close()
-	/*allowedHeaders := map[string]bool {
-		"Date": true,
+	allowedHeaders := map[string]bool{
+		"Date":           true,
 		"Content-Length": true,
-		"Content-Range": true,
-		"Content-Type": true,
-		"Accept-Ranges": true,
-	}*/
+		"Content-Range":  true,
+		"Content-Type":   true,
+		"Accept-Ranges":  true,
+	}
 	for k, vv := range resp.Header {
 		for _, v := range vv {
 			if k == "Content-Length" {
 				log.Println("Intercepted content length reply:", k, v)
 				v = strconv.FormatInt(claimedLength, 10)
 				log.Println("Overridden to", v)
-				if !respondWithRange {
-					continue
-				}
 			}
 			if k == "Content-Range" {
 				log.Println("Intercepted content range reply:", k, v)
@@ -300,9 +330,12 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 			if k == "Content-Disposition" {
 				continue
 			}
-			/*if !allowedHeaders[k] {
+			if !allowedHeaders[k] {
+				// there are a lot of complicated other headers
+				// for example, google drive sends an alt-svc to suggest renegotiating over QUIC or HTTP/2 or some similar complication
+				// need to suppress that
 				continue
-			}*/
+			}
 			w.Header().Add(k, v)
 		}
 	}

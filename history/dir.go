@@ -1,11 +1,12 @@
 package history
 
 import (
-	"github.com/leijurv/gb/db"
 	"log"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/leijurv/gb/db"
 )
 
 func DirHistory(basePath string) {

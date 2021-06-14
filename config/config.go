@@ -23,6 +23,7 @@ type ConfigData struct {
 	NumHasherThreads       int      `json:"num_hasher_threads"`
 	NumUploaderThreads     int      `json:"num_uploader_threads"`
 	UploadStatusInterval   int      `json:"upload_status_print_interval"`
+	RelayServer            string   `json:"relay_server"`
 	RelayServerPort        int      `json:"relay_server_port"`
 	NoCompressionExts      []string `json:"no_compression_exts"`
 	Includes               []string `json:"includes"`
@@ -48,6 +49,7 @@ var config = ConfigData{
 	NumHasherThreads:     2,
 	NumUploaderThreads:   8,
 	UploadStatusInterval: 5, // interval between "Bytes written:" prints, in seconds [-1 to disable prints]
+	RelayServer:          "localhost",
 	RelayServerPort:      -1,
 	NoCompressionExts: []string{
 		"mp4",
@@ -92,9 +94,9 @@ var config = ConfigData{
 		"dmg",
 	},
 	Includes: []string{
-	// folders that will be searched from if they are a child of the path argument.
-	// useful if you want to backup a few sibling folders but not everything around them and want to do so by running backup on the parent folder.
-	// this is ignored if no folders are given
+		// folders that will be searched from if they are a child of the path argument.
+		// useful if you want to backup a few sibling folders but not everything around them and want to do so by running backup on the parent folder.
+		// this is ignored if no folders are given
 		"/",
 	},
 	// if any component of the path matches these suffixes, it will be excluded, e.g. ".app"s
@@ -197,6 +199,9 @@ func sanity() {
 	mustEndWithSlash(config.Includes)
 	if len(config.Includes) == 0 {
 		panic("No include paths")
+	}
+	if config.RelayServer != "localhost" && !strings.HasPrefix(config.RelayServer, "192.168.") && !strings.HasPrefix(config.RelayServer, "127.0.0.") && !strings.HasPrefix(config.RelayServer, "10.") {
+		panic("Relay is **NOT ENCRYPTED**. Refusing to relay to a non local IP. Do not relay over public internet. Use a ssh tunnel!")
 	}
 }
 

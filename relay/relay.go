@@ -36,7 +36,7 @@ func RemoteSplitter() (backup.UploadServiceFactory, bool) {
 }
 
 func connectToRelaySplitter(port int, desc []storage.StorageDescriptor) *remoteSplitterRelayedUploadService {
-	conn, err := net.Dial("tcp", "localhost:"+strconv.Itoa(port))
+	conn, err := net.Dial("tcp", config.Config().RelayServer+":"+strconv.Itoa(port))
 	if err != nil {
 		panic(err)
 	}

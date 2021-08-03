@@ -14,7 +14,7 @@ import (
 func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 	paths := make([]string, 0)
 	fileInfos := make([]os.FileInfo, 0)
-	for _,path := range rawPaths {
+	for _, path := range rawPaths {
 		log.Println("Going to back up this path:", path)
 		var err error
 		path, err = filepath.Abs(path)

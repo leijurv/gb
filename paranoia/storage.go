@@ -1,6 +1,7 @@
 package paranoia
 
 import (
+	"encoding/hex"
 	"log"
 
 	"github.com/leijurv/gb/db"
@@ -40,6 +41,7 @@ func StorageParanoia() {
 			log.Println("UNKNOWN / UNEXPECTED FILE!!")
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Info:", v)
+			log.Println("Blob ID:", v.BlobID, hex.EncodeToString(v.BlobID))
 		}
 	}
 	log.Println("Done")

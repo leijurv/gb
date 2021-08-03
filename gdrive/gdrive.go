@@ -131,11 +131,16 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 			if strings.HasPrefix(i.Name, "db-backup-") {
 				continue // this is not a blob
 			}
+			blobID, err := hex.DecodeString(i.Name)
+			if err != nil || len(blobID) != 32 {
+				panic("Unexpected file not following GB naming convention \"" + i.Name + "\" Google Drive file ID: " + i.Id)
+			}
 			files = append(files, storage_base.UploadedBlob{
 				StorageID: gds.storageID,
 				Path:      i.Id,
 				Checksum:  i.Md5Checksum,
 				Size:      i.Size,
+				BlobID:    blobID,
 			})
 		}
 		if r.NextPageToken == "" {

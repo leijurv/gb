@@ -11,32 +11,38 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func Backup(path string, serviceCh UploadServiceFactory) {
-	log.Println("Going to back up this path:", path)
-	var err error
-	path, err = filepath.Abs(path)
-	if err != nil {
-		panic(err)
-	}
-	log.Println("Converted to absolute:", path)
-
-	stat, err := os.Stat(path)
-	if err != nil {
-		log.Println("Path doesn't exist?")
-		return
-	}
-
-	if stat.IsDir() {
-		log.Println("This is a directory, good!")
-		if !strings.HasSuffix(path, "/") {
-			path += "/"
+func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
+	paths := make([]string, 0)
+	fileInfos := make([]os.FileInfo, 0)
+	for _,path := range rawPaths {
+		log.Println("Going to back up this path:", path)
+		var err error
+		path, err = filepath.Abs(path)
+		if err != nil {
+			panic(err)
 		}
-		log.Println("Normalized to ensure trailing slash:", path)
-	} else {
-		if !NormalFile(stat) {
-			panic("This file is not normal. Perhaps a symlink or something? Not supported sorry!")
+		log.Println("Converted to absolute:", path)
+
+		stat, err := os.Stat(path)
+		if err != nil {
+			log.Println("Path doesn't exist?")
+			return
 		}
-		log.Println("This is a single file...?")
+
+		if stat.IsDir() {
+			log.Println("This is a directory, good!")
+			if !strings.HasSuffix(path, "/") {
+				path += "/"
+			}
+			log.Println("Normalized to ensure trailing slash:", path)
+		} else {
+			if !NormalFile(stat) {
+				panic("This file is not normal. Perhaps a symlink or something? Not supported sorry!")
+			}
+			log.Println("This is a single file...?")
+		}
+		paths = append(paths, path)
+		fileInfos = append(fileInfos, stat)
 	}
 
 	for i := 0; i < config.Config().NumHasherThreads; i++ {
@@ -58,8 +64,7 @@ func Backup(path string, serviceCh UploadServiceFactory) {
 			}
 		}()
 	}
-	scannerThread(path, stat)
+	scannerThread(paths, fileInfos)
 	wg.Wait()
 	log.Println("Backup complete")
-	BackupDB()
 }

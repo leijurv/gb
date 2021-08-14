@@ -11,14 +11,6 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func KeysString(m map[string]struct{}) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return strings.Join(keys, ", ")
-}
-
 func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 	paths := make([]string, 0)
 	fileInfos := make([]os.FileInfo, 0)
@@ -69,7 +61,7 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 			for {
 				uploading := stats.CurrentlyUploading()
 				if len(uploading) > 0 {
-					log.Println("Currently uploading:", KeysString(uploading))
+					log.Println("Currently uploading:", strings.Join(uploading, ","))
 				}
 				log.Println("Bytes written:", utils.FormatCommas(stats.Total()))
 				time.Sleep(time.Duration(config.Config().UploadStatusInterval) * time.Second)

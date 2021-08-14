@@ -97,10 +97,14 @@ func (s *Stats) Total() int64 {
 	return sum
 }
 
-func (s *Stats) CurrentlyUploading() map[string]struct{} {
+func (s *Stats) CurrentlyUploading() []string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	return s.currentlyUploading
+	keys := make([]string, 0, len(s.currentlyUploading))
+	for k := range s.currentlyUploading {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func (s *Stats) AddCurrentlyUploading(path string) {

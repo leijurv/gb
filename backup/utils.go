@@ -45,8 +45,9 @@ type HashPlan struct {
 type BlobPlan []Planned
 
 type Stats struct {
-	inProgress []*utils.HasherSizer
-	lock       sync.Mutex
+	inProgress         []*utils.HasherSizer
+	currentlyUploading map[string]struct{}
+	lock               sync.Mutex
 }
 
 // an abstraction over uploading to our storage destinations
@@ -76,7 +77,9 @@ var uploaderCh = make(chan BlobPlan)
 
 var wg sync.WaitGroup // files + threads
 
-var stats Stats
+var stats = Stats{
+	currentlyUploading: make(map[string]struct{}),
+}
 
 func (s *Stats) Add(hs *utils.HasherSizer) {
 	s.lock.Lock()
@@ -92,6 +95,24 @@ func (s *Stats) Total() int64 {
 		sum += hs.Size()
 	}
 	return sum
+}
+
+func (s *Stats) CurrentlyUploading() map[string]struct{} {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.currentlyUploading
+}
+
+func (s *Stats) AddCurrentlyUploading(path string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.currentlyUploading[path] = struct{}{}
+}
+
+func (s *Stats) FinishedUploading(path string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	delete(s.currentlyUploading, path)
 }
 
 // attempt to exclusively claim files of this size

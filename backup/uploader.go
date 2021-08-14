@@ -72,7 +72,9 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			}()
 			continue
 		}
+		stats.AddCurrentlyUploading(planned.path)
 		compAlg := compression.Compress(planned.path, out, io.TeeReader(f, &verify), &verify)
+		stats.FinishedUploading(planned.path)
 		f.Close()
 		realHash, realSize := verify.HashAndSize()
 		if len(planned.hash) > 0 && !bytes.Equal(realHash, planned.hash) {

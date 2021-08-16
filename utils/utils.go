@@ -66,6 +66,10 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 			}
 			return nil
 		}
+		if IsDatabaseFile(path) {
+			log.Println("EXCLUDING this path because it is the gb database:", path)
+			return nil
+		}
 		ignoreErrors := config.Config().IgnorePermissionErrors
 		if err != nil {
 			if oserr, ok := err.(*os.PathError); ok && ignoreErrors {
@@ -216,4 +220,9 @@ func FormatCommas(num int64) string {
 		str = re.ReplaceAllString(str, "$1,$2")
 	}
 	return str
+}
+
+func IsDatabaseFile(path string) bool {
+	dbPath := config.Config().DatabaseLocation
+	return path == dbPath || path == dbPath+"-wal" || path == dbPath+"-shm"
 }

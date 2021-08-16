@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -104,14 +105,14 @@ var config = ConfigData{
 		".part",
 	},
 	ExcludePrefixes: []string{
-	// e.g.
-	// "/path/to/dir/to/exclude/",
-	// you REALLY SHOULD include the trailing /
-	// this really is just a starts with / ends with check on the path!
+		// e.g.
+		// "/path/to/dir/to/exclude/",
+		// you REALLY SHOULD include the trailing /
+		// this really is just a starts with / ends with check on the path!
 	},
 	DedupeExclude: []string{
-	// folders that you have already fully deduped against each other
-	// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
+		// folders that you have already fully deduped against each other
+		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
 	IgnorePermissionErrors: false,
 }
@@ -202,6 +203,14 @@ func sanity() {
 	}
 	if config.RelayServer != "localhost" && !strings.HasPrefix(config.RelayServer, "192.168.") && !strings.HasPrefix(config.RelayServer, "127.0.0.") && !strings.HasPrefix(config.RelayServer, "10.") {
 		panic("Relay is **NOT ENCRYPTED**. Refusing to relay to a non local IP. Do not relay over public internet. Use a ssh tunnel!")
+	}
+
+	dbAbs, err := filepath.Abs(config.DatabaseLocation)
+	if err != nil {
+		panic(err)
+	}
+	if config.DatabaseLocation != dbAbs {
+		panic("DatabaseLocation must be absolute path")
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/utils"
 )
@@ -110,6 +111,9 @@ func Restore(src string, dest string, timestamp int64) {
 		if !destStat.IsDir() && !utils.NormalFile(destStat) {
 			panic("dst must either be a directory or a normal file")
 		}
+		if src == config.Config().DatabaseLocation {
+			panic("The database can not be restored through gb")
+		}
 		if srcFile {
 			if destStat.IsDir() { // file to dir
 				// if src is /a/b/c (a file) and dest is /d/e/f/ (a directory) we restore to /d/e/f/c
@@ -146,6 +150,9 @@ func Restore(src string, dest string, timestamp int64) {
 	for _, item := range items {
 		line := ""
 
+		if utils.IsDatabaseFile(item.origPath) || utils.IsDatabaseFile(item.destPath) {
+			continue
+		}
 		if item.origPath == item.destPath {
 			line += "Restore to the same place: "
 			line += item.origPath
@@ -185,6 +192,9 @@ func Restore(src string, dest string, timestamp int64) {
 
 	plan := make(map[[32]byte]*Restoration)
 	for _, item := range items {
+		if utils.IsDatabaseFile(item.origPath) || utils.IsDatabaseFile(item.destPath) {
+			continue
+		}
 		key := utils.SliceToArr(item.hash)
 
 		if _, ok := plan[key]; !ok {

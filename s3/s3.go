@@ -62,8 +62,18 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 		log.Println("Identifier was", identifier)
 		panic("S3 database identifier is not in JSON format. This is probably not your fault, I had to change the S3 database format to include the AWS region + keys, not just the bucket name. It's JSON now.")
 	}
-	if ident.Endpoint == "" {
-		ident.Endpoint = "amazonaws.com"
+	normalizedEndpoint := ident.Endpoint
+	if normalizedEndpoint == "" {
+		normalizedEndpoint = "amazonaws.com"
+	}
+	if !strings.HasPrefix(normalizedEndpoint, "https://") {
+		// this works for AWS, and for Backblaze B2 compatibility, allowing you to leave endpoint as blank for AWS, or setting it to "backblazeb2.com" for B2, and allowing it to autofill the region in both cases
+		// however, it does NOT work for Oracle Cloud compatibility. for that, you need to define your entire endpoint, including the namespace at the beginning (can be found under Bucket Details)
+		// (mine looks like: https://abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com)
+		normalizedEndpoint = "https://s3." + ident.Region + "." + normalizedEndpoint + "/"
+	}
+	if !strings.HasSuffix(normalizedEndpoint, "/") {
+		panic("S3 endpoint must end with a slash")
 	}
 	return &S3{
 		StorageID: storageID,
@@ -75,12 +85,21 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 			EndpointResolver: endpoints.ResolverFunc(func(service, region string, optFns ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
 				if service == endpoints.S3ServiceID {
 					return endpoints.ResolvedEndpoint{
-						URL:           "https://s3." + ident.Region + "." + ident.Endpoint + "/",
+						URL:           normalizedEndpoint,
 						SigningRegion: ident.Region,
 					}, nil
 				}
 				return endpoints.DefaultResolver().EndpointFor(service, region, optFns...)
 			}),
+			// I hate Oracle Cloud! I hate Oracle Cloud!
+			S3ForcePathStyle: aws.Bool(strings.Contains(normalizedEndpoint, "oraclecloud")),
+			// ^ this is needed because of https://stackoverflow.com/questions/55236708/how-to-config-oracle-cloud-certificate
+			// without this, it attempts to connect to https://your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com
+			// AWS and Backblaze B2 can correctly provide a TLS certificate for the bucket-specific subdomain via SNI... but Oracle Cloud cannot
+			// so, when requesting that, it provides the default TLS certificate for Oracle's Swift Object Storage
+			// which makes GB panic with "x509: certificate is valid for swiftobjectstorage.eu-zurich-1.oraclecloud.com, not your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com"
+			// this fixes that by forcing the S3 client to use path-style queries (i.e. it will hit "https://s3.amazonaws.com/BUCKET/KEY" instead of the default "https://BUCKET.s3.amazonaws.com/KEY")
+			// which Oracle Cloud DOES support SNI for, allowing the API requests to succeed
 		})),
 	}
 }

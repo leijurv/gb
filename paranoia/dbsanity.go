@@ -77,7 +77,8 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id, storage_id HAVING COUNT(*) > 1",
 
 	// nothing was ever backed up twice
-	"SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1",
+	// "SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1",
+	// NEVER MIND this has happened a few times when another program was modifying files at the same time, such as creating two empty files that get backed up
 
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2
 	// but it's super slow since it can't efficiently use indexes then

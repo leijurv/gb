@@ -20,28 +20,10 @@ import (
 )
 
 func Proxy(label string, base string) {
-	if label == "" {
-		log.Println("First, we need to pick a storage to fetch em from")
-		log.Println("Options:")
-		descs := storage.GetAllDescriptors()
-		for _, d := range descs {
-			var label string
-			err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)
-			if err != nil {
-				panic(err)
-			}
-			log.Println("•", d.Kind, d.RootPath, "To use this one, do `gb proxy --label=\""+label+"\"`")
-		}
+	storage, ok := storage.StorageSelect(label)
+	if !ok {
 		return
 	}
-	storage.GetAll()
-	var storageID []byte
-	err := db.DB.QueryRow("SELECT storage_id FROM storage WHERE readable_label = ?", label).Scan(&storageID)
-	if err != nil {
-		panic(err)
-	}
-	storage := storage.GetByID(storageID)
-	log.Println("Using storage:", storage)
 	if !strings.HasPrefix(base, "/") && base != "" {
 		panic("invalid base")
 	}

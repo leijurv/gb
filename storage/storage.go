@@ -133,3 +133,29 @@ func internalCreateStorage(storageID []byte, kind string, identifier string, roo
 		panic("Unknown storage type " + kind)
 	}
 }
+
+func StorageSelect(label string) (storage_base.Storage, bool) {
+	if label == "" {
+		log.Println("First, we need to pick a storage to fetch em from")
+		log.Println("Options:")
+		descs := GetAllDescriptors()
+		for _, d := range descs {
+			var label string
+			err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)
+			if err != nil {
+				panic(err)
+			}
+			log.Println("•", d.Kind, d.RootPath, "To use this one, add the option `--label=\""+label+"\"`")
+		}
+		return nil, false
+	}
+	GetAll()
+	var storageID []byte
+	err := db.DB.QueryRow("SELECT storage_id FROM storage WHERE readable_label = ?", label).Scan(&storageID)
+	if err != nil {
+		panic(err)
+	}
+	storage := GetByID(storageID)
+	log.Println("Using storage:", storage)
+	return storage, true
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/relay"
+	"github.com/leijurv/gb/replicate"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
 	"github.com/urfave/cli"
@@ -331,6 +332,20 @@ func main() {
 			Usage: "restore an encrypted and compressed database backup",
 			Action: func(c *cli.Context) error {
 				download.RestoreDB(c.Args().First())
+				return nil
+			},
+		},
+		{
+			Name:  "replicate",
+			Usage: "replicate",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				replicate.ReplicateBlobs(c.String("label"))
 				return nil
 			},
 		},

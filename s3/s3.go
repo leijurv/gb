@@ -223,11 +223,16 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 				}
 				etag := *obj.ETag
 				etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
+				blobID, err := hex.DecodeString((*obj.Key)[len("gb/XX/XX/"):])
+				if err != nil || len(blobID) != 32 {
+					panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
+				}
 				files = append(files, storage_base.UploadedBlob{
 					StorageID: remote.StorageID,
 					Path:      *obj.Key,
 					Checksum:  etag,
 					Size:      *obj.Size,
+					BlobID:    blobID,
 				})
 			}
 			if !lastPage {
@@ -243,7 +248,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 }
 
 func (remote *S3) String() string {
-	return "S3 bucket " + remote.Data.Bucket + " at path " + remote.RootPath
+	return "S3 bucket " + remote.Data.Bucket + " at path " + remote.RootPath + " at endpoint " + remote.Data.Endpoint
 }
 
 func (up *s3Upload) Writer() io.Writer {

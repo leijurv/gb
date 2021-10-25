@@ -23,28 +23,10 @@ func BlobParanoia(label string) {
 	log.Println("It does not check remote metadata such as Etag or checksum (use paranoia storage for that)")
 	log.Println("For example, you could pipe in like this: `sqlite3 ~/.gb.db \"select distinct hex(blob_id) from blob_entries where compression_alg='zstd'\" | gb paranoia blob` if, for some reason, you didn't trust zstd")
 	log.Println()
-	if label == "" {
-		log.Println("First, we need to pick a storage to fetch em from")
-		log.Println("Options:")
-		descs := storage.GetAllDescriptors()
-		for _, d := range descs {
-			var label string
-			err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)
-			if err != nil {
-				panic(err)
-			}
-			log.Println("•", d.Kind, d.RootPath, "To use this one, do `gb paranoia blob --label=\""+label+"\"`")
-		}
+	storage, ok := storage.StorageSelect(label)
+	if !ok {
 		return
 	}
-	storage.GetAll()
-	var storageID []byte
-	err := db.DB.QueryRow("SELECT storage_id FROM storage WHERE readable_label = ?", label).Scan(&storageID)
-	if err != nil {
-		panic(err)
-	}
-	storage := storage.GetByID(storageID)
-	log.Println("Using storage:", storage)
 
 	stdin, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
@@ -64,12 +46,28 @@ func BlobParanoia(label string) {
 		if err != nil {
 			panic(err)
 		}
-		sz += blobParanoia(blobID, storage)
+		sz += BlobReaderParanoia(DownloadEntireBlob(blobID, storage), blobID, storage)
 		log.Println("Processed", i+1, "blobs out of", len(lines), "and downloaded", utils.FormatCommas(sz), "bytes")
 	}
 }
 
-func blobParanoia(blobID []byte, storage storage_base.Storage) int64 {
+func DownloadEntireBlob(blobID []byte, storage storage_base.Storage) io.Reader {
+	var blobSize int64
+	err := db.DB.QueryRow("SELECT size FROM blobs WHERE blob_id = ?", blobID).Scan(&blobSize)
+	if err != nil {
+		log.Println("This blob id does not exist")
+		panic(err)
+	}
+	var path string
+	err = db.DB.QueryRow("SELECT path FROM blob_storage WHERE blob_id = ? AND storage_id = ?", blobID, storage.GetID()).Scan(&path)
+	if err != nil {
+		log.Println("Error while grabbing the path of this blob in that storage. Perhaps this blob was never backed up to there?")
+		panic(err)
+	}
+	return utils.ReadCloserToReader(storage.DownloadSection(path, 0, blobSize))
+}
+
+func BlobReaderParanoia(reader io.Reader, blobID []byte, storage storage_base.Storage) int64 {
 	log.Println("Running paranoia on", hex.EncodeToString(blobID), "in storage", storage)
 	if len(blobID) != 32 {
 		panic("sanity check")
@@ -83,13 +81,6 @@ func blobParanoia(blobID []byte, storage storage_base.Storage) int64 {
 		log.Println("This blob id does not exist")
 		panic(err)
 	}
-	var path string
-	err = db.DB.QueryRow("SELECT path FROM blob_storage WHERE blob_id = ? AND storage_id = ?", blobID, storage.GetID()).Scan(&path)
-	if err != nil {
-		log.Println("Error while grabbing the path of this blob in that storage. Perhaps this blob was never backed up to there?")
-		panic(err)
-	}
-	reader := utils.ReadCloserToReader(storage.DownloadSection(path, 0, blobSize))
 	hasherPostEnc := utils.NewSHA256HasherSizer()
 	reader = io.TeeReader(reader, &hasherPostEnc)
 	reader = crypto.DecryptBlobEntry(reader, 0, key)

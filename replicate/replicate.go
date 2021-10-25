@@ -10,8 +10,8 @@ import (
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/paranoia"
 	storagepkg "github.com/leijurv/gb/storage"
-	"github.com/leijurv/gb/utils"
 	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 )
 
 func ReplicateBlobs(label string) {

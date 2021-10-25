@@ -44,7 +44,7 @@ func ReplicateBlobs(label string) {
 				defer wg.Done()
 				for blob := range todo {
 					log.Println("Copy", blob, "from", storage, "to", dst)
-					log.Println("Done", atomic.LoadInt64(sz), "bytes, thread", j)
+					log.Println("Done", utils.FormatCommas(atomic.LoadInt64(sz)), "bytes, thread", j)
 					reader := paranoia.DownloadEntireBlob(blob.BlobID, storage)
 					out := dst.BeginBlobUpload(blob.BlobID)
 					rd := io.TeeReader(reader, out.Writer())

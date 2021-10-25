@@ -80,6 +80,30 @@ var queriesThatShouldHaveNoRows = []string{
 	// "SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1",
 	// NEVER MIND this has happened a few times when another program was modifying files at the same time, such as creating two empty files that get backed up
 
+	// if the same blob has been uploaded to two storages of the same type (such as S3), make sure that the path and checksum matches
+	// this is a good sanity check after doing a `gb replicate`!
+	`
+	WITH all_stored AS (
+		SELECT
+			blob_id,
+			storage_id,
+			checksum,
+			path,
+			type
+		FROM
+			blob_storage
+			INNER JOIN storage USING (storage_id)
+	)
+	SELECT
+		blob_id
+	FROM
+		all_stored AS a
+		INNER JOIN all_stored AS b USING (blob_id, type)
+	WHERE
+		a.storage_id < b.storage_id
+		AND (a.path != b.path OR a.checksum != b.checksum)
+	`,
+
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2
 	// but it's super slow since it can't efficiently use indexes then
 	// these two are SUPER fast as-is, no need to combine

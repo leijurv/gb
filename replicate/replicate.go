@@ -3,6 +3,7 @@ package replicate
 import (
 	"io"
 	"log"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,10 @@ func ReplicateBlobs(label string) {
 	log.Println("This will just go through the blobs in", storage)
 	log.Println("It won't go through what's in the database, so make sure that that's all good (such as with `gb paranoia storage` lol)")
 	toReplicate := storage.ListBlobs()
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(toReplicate), func(i int, j int) {
+		toReplicate[i], toReplicate[j] = toReplicate[j], toReplicate[i]
+	})
 	sz := new(int64)
 	for _, dst := range storagepkg.GetAll() {
 		if dst == storage {

@@ -3,21 +3,23 @@ module github.com/leijurv/gb
 go 1.13
 
 require (
-	github.com/DataDog/zstd v1.4.8
-	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
-	github.com/aws/aws-sdk-go v1.41.11
-	github.com/cespare/diff v0.1.0
-	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/mattn/go-sqlite3 v1.14.9
-	github.com/tyler-smith/go-bip39 v1.1.0
-	github.com/urfave/cli v1.22.5
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
-	golang.org/x/net v0.0.0-20211020060615-d418f374d309
-	golang.org/x/oauth2 v0.0.0-20211005180243-6b3c2da341f1
-	golang.org/x/sys v0.0.0-20211025201205-69cdffdb9359
-	golang.org/x/text v0.3.7 // indirect
-	google.golang.org/api v0.59.0
-	google.golang.org/genproto v0.0.0-20211026145609-4688e4c4e024 // indirect
-	google.golang.org/grpc v1.41.0 // indirect
+	cloud.google.com/go v0.48.0 // indirect
+	github.com/DataDog/zstd v1.4.5
+	github.com/araddon/dateparse v0.0.0-20190622164848-0fb0a474d195
+	github.com/aws/aws-sdk-go v1.36.2
+	github.com/cespare/diff v0.0.0-20150524045016-c6e4a33d5a81
+	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
+	github.com/golang/groupcache v0.0.0-20191027212112-611e8accdfc9 // indirect
+	github.com/hashicorp/golang-lru v0.5.3 // indirect
+	github.com/mattn/go-sqlite3 v1.11.0
+	github.com/tyler-smith/go-bip39 v1.0.2
+	github.com/urfave/cli v1.22.1
+	go.opencensus.io v0.22.2 // indirect
+	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
+	golang.org/x/oauth2 v0.0.0-20190604053449-0f29369cfe45
+	golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f
+	google.golang.org/api v0.14.0
+	google.golang.org/appengine v1.6.5 // indirect
+	google.golang.org/genproto v0.0.0-20191115221424-83cc0476cb11 // indirect
+	google.golang.org/grpc v1.25.1 // indirect
 )

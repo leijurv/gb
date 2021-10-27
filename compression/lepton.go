@@ -37,9 +37,24 @@ func (n *LeptonCompression) Compress(out io.Writer, in io.Reader) error {
 	return cmd.Wait() // only needed to check the exit code, the process has already ended since io.Copy returned, meaning it must have hit EOF
 }
 
+type WrappedReadCloserHackToAvoidZombieProcess struct {
+	cmd *exec.Cmd
+	in io.ReadCloser
+}
+
+func (w *WrappedReadCloserHackToAvoidZombieProcess) Read(p []byte) (int, error) {
+	n, err := w.in.Read(p)
+	return n, err
+}
+
+func (w *WrappedReadCloserHackToAvoidZombieProcess) Close() error {
+	defer w.cmd.Wait()
+	return w.in.Close()
+}
+
 func (n *LeptonCompression) Decompress(in io.Reader) io.ReadCloser {
-	_, lOut := BeginLeptonProcess(in)
-	return lOut // is that even LEGAL?!
+	cmd, lOut := BeginLeptonProcess(in)
+	return &WrappedReadCloserHackToAvoidZombieProcess{cmd, lOut}
 }
 
 func (n *LeptonCompression) AlgName() string {

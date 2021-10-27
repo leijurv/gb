@@ -3,13 +3,14 @@ module github.com/leijurv/gb
 go 1.13
 
 require (
+	github.com/mattn/go-sqlite3 v1.11.0 // database locking was changed in newer versions. gb will randomly panic with "database is locked" in multithreaded situations if this dependency is updated further, apparently in disregard of the option "_busy_timeout=20000" that is set in the db connection. sorry.
+
 	github.com/DataDog/zstd v1.4.8
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/aws/aws-sdk-go v1.41.11
 	github.com/cespare/diff v0.1.0
 	github.com/cpuguy83/go-md2man/v2 v2.0.1 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/mattn/go-sqlite3 v1.11.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli v1.22.5
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect

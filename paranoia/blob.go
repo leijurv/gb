@@ -87,7 +87,7 @@ func BlobReaderParanoia(reader io.Reader, blobID []byte, storage storage_base.St
 	hasherPreEnc := utils.NewSHA256HasherSizer()
 	reader = io.TeeReader(reader, &hasherPreEnc)
 
-	rows, err := db.DB.Query(`SELECT hash, final_size, offset, compression_alg FROM blob_entries WHERE blob_id = ? ORDER BY offset ASC`, blobID)
+	rows, err := db.DB.Query(`SELECT hash, final_size, offset, compression_alg FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size`, blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
 	if err != nil {
 		panic(err)
 	}

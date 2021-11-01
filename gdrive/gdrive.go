@@ -117,7 +117,8 @@ func (gds *gDriveStorage) Metadata(path string) (string, int64) {
 }
 
 func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
-	log.Println("Listing blobs in Google Drive. Requesting pages of size 1000, which is the maximum. This can take 20+ seconds per page because their API is super slow :(")
+	log.Println("Listing blobs in", gds)
+	log.Println("Requesting pages of size 1000, which is the maximum. This can take 20+ seconds per page because their API is super slow :(")
 	// increasing pagesize made this *slower*
 	// also 100 gives enough progress that people will realize it's working
 	query := gds.srv.Files.List().PageSize(1000).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size, name)")
@@ -155,7 +156,7 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 }
 
 func (gds *gDriveStorage) String() string {
-	return "Google Drive"
+	return "Google Drive StorageID " + hex.EncodeToString(gds.storageID[:])
 }
 
 func (up *gDriveUpload) Writer() io.Writer {

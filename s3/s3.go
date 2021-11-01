@@ -210,7 +210,7 @@ func (remote *S3) DownloadSectionHTTP(path string, offset int64, length int64) *
 }
 
 func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
-	log.Println("Listing blobs in S3")
+	log.Println("Listing blobs in", remote)
 	files := make([]storage_base.UploadedBlob, 0)
 	err := s3.New(remote.sess).ListObjectsPages(&s3.ListObjectsInput{
 		Bucket: aws.String(remote.Data.Bucket),
@@ -248,7 +248,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 }
 
 func (remote *S3) String() string {
-	return "S3 bucket " + remote.Data.Bucket + " at path " + remote.RootPath + " at endpoint " + remote.Data.Endpoint
+	return "S3 bucket " + remote.Data.Bucket + " at path " + remote.RootPath + " at endpoint " + remote.Data.Endpoint + " StorageID " + hex.EncodeToString(remote.StorageID[:])
 }
 
 func (up *s3Upload) Writer() io.Writer {

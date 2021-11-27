@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/mattn/go-sqlite3 v1.11.0 // database locking was changed in newer versions. gb will randomly panic with "database is locked" in multithreaded situations if this dependency is updated further, apparently in disregard of the option "_busy_timeout=20000" that is set in the db connection. sorry.
 
+	bazil.org/fuse v0.0.0-20200524192727-fb710f7dfd05 // indirect
 	github.com/DataDog/zstd v1.4.8
 	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/aws/aws-sdk-go v1.41.11

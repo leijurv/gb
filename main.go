@@ -16,6 +16,7 @@ import (
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/dupes"
+	"github.com/leijurv/gb/gbfs"
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/relay"
@@ -265,14 +266,11 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				var timestamp int64
+				timestamp, err := parseTimestamp(c.String("at"))
+				if err != nil {
+					return err
+				}
 				if c.String("since") != "" {
-					t, err := dateparse.ParseLocal(c.String("since"))
-					if err != nil {
-						log.Println("Hint: make sure you are providing a year")
-						return err
-					}
-					timestamp = t.Unix()
 					log.Println("Interpreting provided date as:", time.Unix(timestamp, 0).Format(time.RFC3339)) // so as to not misrepresent what will happen, this conversion intentionally rounds to nearest second
 				}
 				dupes.PrintDupes(timestamp)
@@ -289,16 +287,11 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				var timestamp int64
-				if c.String("at") != "" {
-					t, err := dateparse.ParseLocal(c.String("at"))
-					if err != nil {
-						log.Println("Hint: make sure you are providing a year")
-						return err
-					}
-					timestamp = t.Unix()
-					// restore prints out the timestamp for confirmation, no need to do it twice
+				timestamp, err := parseTimestamp(c.String("at"))
+				if err != nil {
+					return err
 				}
+				// restore prints out the timestamp for confirmation, no need to do it twice
 				download.Restore(c.Args().Get(0), c.Args().Get(1), timestamp)
 				return nil
 			},
@@ -359,6 +352,32 @@ func main() {
 				return nil
 			},
 		},
+		{
+			Name:  "mount",
+			Usage: "mount a readonly FUSE filesystem",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "at, timestamp",
+					Usage: "timestamp files should be chosen from",
+				},
+				cli.StringFlag{
+					Name:  "path",
+					Usage: "source path where files come from",
+					Value: "/",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				timestamp, err := parseTimestamp(c.String("at"))
+				if err != nil {
+					return err
+				}
+				if timestamp == 0 {
+					timestamp = time.Now().Unix()
+				}
+				gbfs.Mount(c.Args().First(), c.String("path"), timestamp)
+				return nil
+			},
+		},
 	}
 	// relay must bypass all of this, because it has no config file nor database, so we should not harass the user about setting up those things
 	if len(os.Args) == 3 && os.Args[1] == "relay" {
@@ -374,4 +393,16 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func parseTimestamp(timestamp string) (int64, error) {
+	if timestamp != "" {
+		t, err := dateparse.ParseLocal(timestamp)
+		if err != nil {
+			log.Println("Hint: make sure you are providing a year")
+			return 0, err
+		}
+		return t.Unix(), nil
+	}
+	return 0, nil
 }

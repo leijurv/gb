@@ -2,9 +2,10 @@ package db
 
 import (
 	"database/sql"
-	"log"
-
+	"errors"
 	"github.com/leijurv/gb/config"
+	"log"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -17,7 +18,16 @@ var ErrNoRows = sql.ErrNoRows
 var DB *sql.DB
 
 func SetupDatabase() {
-	setupDatabase("file:" + config.Config().DatabaseLocation + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=20000")
+	var db string
+	if config.DatabaseLocation != "" {
+		db = config.DatabaseLocation
+		if _, err := os.Stat(db); errors.Is(err, os.ErrNotExist) {
+			panic(db + " does not exist")
+		}
+	} else {
+		db = config.Config().DatabaseLocation
+	}
+	setupDatabase("file:" + db + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=20000")
 }
 
 func SetupDatabaseTestMode() {

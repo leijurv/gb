@@ -38,6 +38,11 @@ func main() {
 			Usage:       "path to where you want your config file",
 			Destination: &config.ConfigLocation,
 		},
+		&cli.StringFlag{
+			Name:        "database-file",
+			Usage:       "path to where the database file is (overrides path from config file)",
+			Destination: &config.DatabaseLocation,
+		},
 		&cli.BoolFlag{
 			Name:  "no-log-timestamps",
 			Usage: "do not include timestamps in logs",

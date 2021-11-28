@@ -11,6 +11,7 @@ import (
 
 var HomeDir = os.Getenv("HOME")
 var ConfigLocation string
+var DatabaseLocation string
 var inited = false
 
 type ConfigData struct {

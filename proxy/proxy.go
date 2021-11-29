@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"crypto/tls"
+	"github.com/leijurv/gb/compression"
 	"html/template"
 	"io"
 	"log"
@@ -208,22 +209,23 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	var offsetIntoBlob int64
 	var comp string
 	err = db.DB.QueryRow(
-		"SELECT blob_entries.blob_id, blobs.encryption_key, blob_storage.path, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
-		hash, storage.GetID()).Scan(&blobID, &key, &path, &offsetIntoBlob, &comp)
+		"SELECT blob_entries.blob_id, blobs.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
+		hash, storage.GetID()).Scan(&blobID, &key, &path, &compressedSize, &offsetIntoBlob, &comp)
 	if err != nil {
 		panic(err)
 	}
-	if comp != "" {
-		http.Error(w, "this blob entry is compressed, random seeking is not currently supported for compression sorry", http.StatusServiceUnavailable)
-		return
-	}
 	log.Println(req)
 	log.Println("Offset into blob", offsetIntoBlob)
-	claimedLength := realContentLength
+	claimedLength := compressedSize
 	seekStart := offsetIntoBlob
 	var requestedStart int64
 	respondWithRange := false
 	if _, ok := req.Header["Range"]; ok {
+		if comp != "" {
+			http.Error(w, "this blob entry is compressed, random seeking is not currently supported for compression sorry", http.StatusServiceUnavailable)
+			return
+		}
+
 		r := req.Header["Range"][0]
 		log.Println("Range requested", r)
 		r = strings.Split(r, "bytes=")[1]
@@ -330,5 +332,6 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 		status = 200
 	}
 	w.WriteHeader(status)
-	io.Copy(w, crypto.DecryptBlobEntry(io.LimitReader(resp.Body, claimedLength), seekStart, key))
+	decrypted := crypto.DecryptBlobEntry(io.LimitReader(resp.Body, claimedLength), seekStart, key)
+	io.Copy(w, compression.ByAlgName(comp).Decompress(decrypted))
 }

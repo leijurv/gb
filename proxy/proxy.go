@@ -20,7 +20,7 @@ import (
 	"github.com/leijurv/gb/storage_base"
 )
 
-func Proxy(label string, base string) {
+func Proxy(label string, base string, listen string) {
 	storage, ok := storage.StorageSelect(label)
 	if !ok {
 		return
@@ -32,7 +32,7 @@ func Proxy(label string, base string) {
 		base = base[:len(base)-1]
 	}
 	server := &http.Server{
-		Addr: "127.0.0.1:7893",
+		Addr: listen,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			handleHTTP(w, r, storage, base)
 		}),
@@ -206,6 +206,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	var blobID []byte
 	var path string
 	var key []byte
+	var compressedSize int64
 	var offsetIntoBlob int64
 	var comp string
 	err = db.DB.QueryRow(

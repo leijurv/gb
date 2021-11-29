@@ -326,9 +326,14 @@ func main() {
 					Name:  "base",
 					Usage: "base path",
 				},
+				cli.StringFlag{
+					Name:  "listen",
+					Usage: "ip and port to listen on",
+					Value: "127.0.0.1:7893",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				proxy.Proxy(c.String("label"), c.String("base"))
+				proxy.Proxy(c.String("label"), c.String("base"), c.String("listen"))
 				return nil
 			},
 		},

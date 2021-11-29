@@ -206,7 +206,11 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 }
 
 func (remote *S3) DownloadSectionHTTP(path string, offset int64, length int64) *http.Response {
-	panic("not supported")
+	reader := remote.DownloadSection(path, offset, length)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       reader,
+	}
 }
 
 func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
@@ -223,7 +227,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 				}
 				etag := *obj.ETag
 				etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
-				blobID, err := hex.DecodeString((*obj.Key)[len(remote.RootPath + "XX/XX/"):])
+				blobID, err := hex.DecodeString((*obj.Key)[len(remote.RootPath+"XX/XX/"):])
 				if err != nil || len(blobID) != 32 {
 					panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
 				}

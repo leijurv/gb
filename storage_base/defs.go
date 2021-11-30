@@ -2,14 +2,12 @@ package storage_base
 
 import (
 	"io"
-	"net/http"
 )
 
 // a place where blobs can be stored
 type Storage interface {
 	BeginBlobUpload(blobID []byte) StorageUpload
 	DownloadSection(path string, offset int64, length int64) io.ReadCloser
-	DownloadSectionHTTP(path string, offset int64, length int64) *http.Response
 
 	UploadDatabaseBackup(encryptedDatabase []byte, name string)
 

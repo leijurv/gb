@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"net/http"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -205,10 +204,6 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 	return result.Body
 }
 
-func (remote *S3) DownloadSectionHTTP(path string, offset int64, length int64) *http.Response {
-	panic("not supported")
-}
-
 func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 	log.Println("Listing blobs in", remote)
 	files := make([]storage_base.UploadedBlob, 0)
@@ -223,7 +218,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 				}
 				etag := *obj.ETag
 				etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
-				blobID, err := hex.DecodeString((*obj.Key)[len(remote.RootPath + "XX/XX/"):])
+				blobID, err := hex.DecodeString((*obj.Key)[len(remote.RootPath+"XX/XX/"):])
 				if err != nil || len(blobID) != 32 {
 					panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
 				}

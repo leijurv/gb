@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"crypto/tls"
+	"github.com/leijurv/gb/compression"
 	"html/template"
 	"io"
 	"log"
@@ -19,7 +20,7 @@ import (
 	"github.com/leijurv/gb/storage_base"
 )
 
-func Proxy(label string, base string) {
+func Proxy(label string, base string, listen string) {
 	storage, ok := storage.StorageSelect(label)
 	if !ok {
 		return
@@ -31,7 +32,7 @@ func Proxy(label string, base string) {
 		base = base[:len(base)-1]
 	}
 	server := &http.Server{
-		Addr: "127.0.0.1:7893",
+		Addr: listen,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			handleHTTP(w, r, storage, base)
 		}),
@@ -205,25 +206,27 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	var blobID []byte
 	var path string
 	var key []byte
+	var compressedSize int64
 	var offsetIntoBlob int64
 	var comp string
 	err = db.DB.QueryRow(
-		"SELECT blob_entries.blob_id, blobs.encryption_key, blob_storage.path, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
-		hash, storage.GetID()).Scan(&blobID, &key, &path, &offsetIntoBlob, &comp)
+		"SELECT blob_entries.blob_id, blobs.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
+		hash, storage.GetID()).Scan(&blobID, &key, &path, &compressedSize, &offsetIntoBlob, &comp)
 	if err != nil {
 		panic(err)
 	}
-	if comp != "" {
-		http.Error(w, "this blob entry is compressed, random seeking is not currently supported for compression sorry", http.StatusServiceUnavailable)
-		return
-	}
 	log.Println(req)
 	log.Println("Offset into blob", offsetIntoBlob)
-	claimedLength := realContentLength
+	claimedLength := compressedSize
 	seekStart := offsetIntoBlob
 	var requestedStart int64
 	respondWithRange := false
 	if _, ok := req.Header["Range"]; ok {
+		if comp != "" {
+			http.Error(w, "this blob entry is compressed, random seeking is not currently supported for compression sorry", http.StatusServiceUnavailable)
+			return
+		}
+
 		r := req.Header["Range"][0]
 		log.Println("Range requested", r)
 		r = strings.Split(r, "bytes=")[1]
@@ -253,7 +256,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 		}
 	}
 
-	var resp *http.Response
+	var data io.ReadCloser
 	if path[:3] == "gb/" {
 		pattern := os.Getenv("GB_HTTP_PROXY_PATTERN")
 		log.Println("HTTP proxy pattern", pattern)
@@ -266,69 +269,43 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 		req.URL = target
 		req.Host = target.Host
 		log.Println(req)
-		resp, err = http.DefaultTransport.RoundTrip(req)
+		resp, err := http.DefaultTransport.RoundTrip(req)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+		data = resp.Body
 	} else {
-		resp = storage.DownloadSectionHTTP(path, seekStart, claimedLength)
+		data = storage.DownloadSection(path, seekStart, claimedLength)
 	}
-	defer resp.Body.Close()
-	allowedHeaders := map[string]bool{
-		"Date":           true,
-		"Content-Length": true,
-		"Content-Range":  true,
-		"Content-Type":   true,
-		"Accept-Ranges":  true,
+	defer data.Close()
+
+	decrypted := crypto.DecryptBlobEntry(io.LimitReader(data, claimedLength), seekStart, key)
+	reader := compression.ByAlgName(comp).Decompress(decrypted)
+	writeHttpResponse(w, reader, requestedStart, claimedLength, realContentLength, pathOnDisk, respondWithRange)
+}
+
+func writeHttpResponse(w http.ResponseWriter, reader io.ReadCloser, start int64, claimedLength int64, realLength int64, path string, respondWithRange bool) {
+	h := w.Header()
+	// for everything else let the http library figure out the content type
+	if strings.HasSuffix(strings.ToLower(path), ".mp4") {
+		h.Add("Content-Type", "video/mp4")
+	} else if strings.HasSuffix(strings.ToLower(path), ".mkv") {
+		h.Add("Content-Type", "video/x-matroska")
+	} else if strings.HasSuffix(strings.ToLower(path), ".png") {
+		h.Add("Content-Type", "image/png")
+	} else if strings.HasSuffix(strings.ToLower(path), ".jpg") {
+		h.Add("Content-Type", "image/jpeg")
 	}
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			if k == "Content-Length" {
-				log.Println("Intercepted content length reply:", k, v)
-				v = strconv.FormatInt(claimedLength, 10)
-				log.Println("Overridden to", v)
-			}
-			if k == "Content-Range" {
-				log.Println("Intercepted content range reply:", k, v)
-				v = "bytes " + strconv.FormatInt(requestedStart, 10) + "-" + strconv.FormatInt(requestedStart+claimedLength-1, 10) + "/" + strconv.FormatInt(realContentLength, 10)
-				log.Println("Overridden to", v)
-				if !respondWithRange {
-					continue
-				}
-			}
-			if k == "Content-Type" {
-				if strings.HasSuffix(strings.ToLower(pathOnDisk), ".mp4") {
-					v = "video/mp4"
-				}
-				if strings.HasSuffix(strings.ToLower(pathOnDisk), ".mkv") {
-					v = "video/x-matroska"
-				}
-				if strings.HasSuffix(strings.ToLower(pathOnDisk), ".png") {
-					v = "image/png"
-				}
-				log.Println("Content type")
-			}
-			if k == "Content-Disposition" {
-				continue
-			}
-			if !allowedHeaders[k] {
-				// there are a lot of complicated other headers
-				// for example, google drive sends an alt-svc to suggest renegotiating over QUIC or HTTP/2 or some similar complication
-				// need to suppress that
-				continue
-			}
-			w.Header().Add(k, v)
-		}
+	h.Add("Connection", "keep-alive")
+	h.Add("Accept-Ranges", "bytes")
+	h.Add("Content-Length", strconv.FormatInt(realLength, 10))
+	if respondWithRange {
+		h.Add("Content-Range", "bytes "+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(start+claimedLength-1, 10)+"/"+strconv.FormatInt(realLength, 10))
+		w.WriteHeader(206) // partial content
+	} else {
+		w.WriteHeader(200) // OK
 	}
-	w.Header().Set("Accept-Ranges", "bytes")
-	log.Println("Response headers", w.Header())
-	status := resp.StatusCode
-	log.Println("Response status code", status)
-	if !respondWithRange && status == 206 {
-		log.Println("Overwriting 206 to 200 because the client did not ask for a Range")
-		status = 200
-	}
-	w.WriteHeader(status)
-	io.Copy(w, crypto.DecryptBlobEntry(io.LimitReader(resp.Body, claimedLength), seekStart, key))
+
+	io.Copy(w, reader)
 }

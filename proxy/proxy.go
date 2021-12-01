@@ -91,6 +91,12 @@ h1 {padding: 0.1em; background-color: #777; color: white; border-bottom: thin wh
 </html>
 `))
 
+var pathEscaper = strings.NewReplacer("?", "%3F", "#", "%23")
+
+func escapePath(path string) string {
+	return pathEscaper.Replace(path)
+}
+
 func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
 	globPath := strings.Replace(strings.Replace(path, "[", "?", -1), "]", "?", -1) + "*"
 	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
@@ -120,9 +126,9 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base 
 		if strings.Contains(entry.Name, "/") {
 			entry.Name = strings.Split(entry.Name, "/")[0] + "/"
 			entry.Size = -1
-			entry.EscapedName = "/" + url.PathEscape(path[1+len(base):]+entry.Name)
+			entry.EscapedName = "/" + escapePath(path[1+len(base):]+entry.Name)
 		} else {
-			entry.EscapedName = "/" + url.PathEscape(match[1+len(base):])
+			entry.EscapedName = "/" + escapePath(match[1+len(base):])
 		}
 		entries[entry] = struct{}{}
 	}

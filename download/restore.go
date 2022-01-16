@@ -263,7 +263,8 @@ func execute(rest Restoration) {
 		paths = append(paths, path)
 	}
 	// To avoid potentially exhausting the open file limit, write to up to 500 files at a time.
-	// This will do multiple downloads but this is only likely to happen with the 0 byte file or a small file
+	// After the first 500 files are restored, one will be chosen as the source of data for the next 500 files.
+	diskSource := rest.nominatedSource
 	for i := 0; i < len(paths); i += 500 {
 		chunk := paths[i:min(len(rest.destinations), i+500)]
 		handles := make([]*os.File, 0)
@@ -298,12 +299,12 @@ func execute(rest Restoration) {
 		out = io.MultiWriter(out, &hs)
 
 		var src io.Reader
-		if rest.nominatedSource == nil {
+		if diskSource == nil {
 			log.Println("Fetching from storage")
 			src = CatEz(rest.hash)
 		} else {
-			log.Println("Reading locally, from", *rest.nominatedSource)
-			f, err := os.Open(*rest.nominatedSource)
+			log.Println("Reading locally, from", *diskSource)
+			f, err := os.Open(*diskSource)
 			if err != nil {
 				panic(err)
 			}
@@ -318,6 +319,7 @@ func execute(rest Restoration) {
 			panic("wrong")
 		}
 		log.Println("Success")
+		diskSource = &chunk[0]
 
 		for _, f := range handles {
 			f.Close()

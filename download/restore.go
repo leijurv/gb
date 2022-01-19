@@ -250,57 +250,81 @@ func Restore(src string, dest string, timestamp int64) {
 	}
 }
 
+func min(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
+}
+
 func execute(rest Restoration) {
-	writers := make([]io.Writer, 0)
-	for path, item := range rest.destinations {
-		dir := filepath.Dir(path)
-		mode := item.permissions
+	paths := make([]string, 0)
+	for path, _ := range rest.destinations {
+		paths = append(paths, path)
+	}
+	// To avoid potentially exhausting the open file limit, write to up to 500 files at a time.
+	// After the first 500 files are restored, one will be chosen as the source of data for the next 500 files.
+	diskSource := rest.nominatedSource
+	for i := 0; i < len(paths); i += 500 {
+		chunk := paths[i:min(len(rest.destinations), i+500)]
+		handles := make([]*os.File, 0)
+		writers := make([]io.Writer, 0)
+		for _, path := range chunk {
+			dir := filepath.Dir(path)
+			mode := rest.destinations[path].permissions
 
-		// https://stackoverflow.com/a/31151508/2277831
-		dirMode := mode               // start with perms of the file
-		dirMode |= (mode >> 2) & 0111 // for group and other, allow execute (dir read) if they can read
-		dirMode |= 0700               // we must have full access no matter what, otherwise this recursive mkdir won't work in the first place
+			// https://stackoverflow.com/a/31151508/2277831
+			dirMode := mode               // start with perms of the file
+			dirMode |= (mode >> 2) & 0111 // for group and other, allow execute (dir read) if they can read
+			dirMode |= 0700               // we must have full access no matter what, otherwise this recursive mkdir won't work in the first place
 
-		log.Println("mkdir", dir, "with original", mode, "overridden to", dirMode)
-		err := os.MkdirAll(dir, dirMode)
-		if err != nil {
-			panic(err)
+			log.Println("mkdir", dir, "with original", mode, "overridden to", dirMode)
+			err := os.MkdirAll(dir, dirMode)
+			if err != nil {
+				panic(err)
+			}
+
+			log.Println("open", path, "for write")
+			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+			if err != nil {
+				panic(err)
+			}
+			handles = append(handles, f)
+			writers = append(writers, f)
 		}
 
-		log.Println("open", path, "for write")
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-		if err != nil {
-			panic(err)
-		}
-		defer f.Close()
-		writers = append(writers, f)
-	}
-	out := io.MultiWriter(writers...)
+		out := io.MultiWriter(writers...)
 
-	hs := utils.NewSHA256HasherSizer()
-	out = io.MultiWriter(out, &hs)
+		hs := utils.NewSHA256HasherSizer()
+		out = io.MultiWriter(out, &hs)
 
-	var src io.Reader
-	if rest.nominatedSource == nil {
-		log.Println("Fetching from storage")
-		src = CatEz(rest.hash)
-	} else {
-		log.Println("Reading locally, from", *rest.nominatedSource)
-		f, err := os.Open(*rest.nominatedSource)
-		if err != nil {
-			panic(err)
+		var src io.Reader
+		if diskSource == nil {
+			log.Println("Fetching from storage")
+			src = CatEz(rest.hash)
+		} else {
+			log.Println("Reading locally, from", *diskSource)
+			f, err := os.Open(*diskSource)
+			if err != nil {
+				panic(err)
+			}
+			defer f.Close()
+			src = f
 		}
-		defer f.Close()
-		src = f
+		utils.Copy(out, src)
+		log.Println("Expecting size and hash:", rest.size, hex.EncodeToString(rest.hash))
+		hash, size := hs.HashAndSize()
+		log.Println("Got size and hash:", size, hex.EncodeToString(hash))
+		if size != rest.size || !bytes.Equal(hash, rest.hash) {
+			panic("wrong")
+		}
+		log.Println("Success")
+		diskSource = &chunk[0]
+
+		for _, f := range handles {
+			f.Close()
+		}
 	}
-	utils.Copy(out, src)
-	log.Println("Expecting size and hash:", rest.size, hex.EncodeToString(rest.hash))
-	hash, size := hs.HashAndSize()
-	log.Println("Got size and hash:", size, hex.EncodeToString(hash))
-	if size != rest.size || !bytes.Equal(hash, rest.hash) {
-		panic("wrong")
-	}
-	log.Println("Success")
 }
 
 func statSources(plan map[[32]byte]*Restoration) {

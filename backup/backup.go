@@ -14,11 +14,11 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
-	paths := make([]string, 0)
-	fileInfos := make([]os.FileInfo, 0)
+func statInputPaths(rawPaths []string) []File {
+	files := make([]File, 0)
 	for _, path := range rawPaths {
 		log.Println("Going to back up this path:", path)
+
 		var err error
 		path, err = filepath.Abs(path)
 		if err != nil {
@@ -28,8 +28,7 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 
 		stat, err := os.Stat(path)
 		if err != nil {
-			log.Println("Path doesn't exist?")
-			return
+			panic("Path doesn't exist?")
 		}
 
 		if stat.IsDir() {
@@ -44,9 +43,13 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 			}
 			log.Println("This is a single file...?")
 		}
-		paths = append(paths, path)
-		fileInfos = append(fileInfos, stat)
+		files = append(files, File{path: path, info: stat})
 	}
+	return files
+}
+
+func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
+	inputs := statInputPaths(rawPaths)
 
 	for i := 0; i < config.Config().NumHasherThreads; i++ {
 		wg.Add(1)
@@ -71,7 +74,7 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 			}
 		}()
 	}
-	scannerThread(paths, fileInfos)
+	scannerThread(inputs)
 	wg.Wait()
 	log.Println("Backup complete")
 }
@@ -103,27 +106,7 @@ func compareFileToDb(path string, info os.FileInfo, tx *sql.Tx) file_status {
 }
 
 func DryBackup(rawPaths []string) {
-	files := make([]File, 0)
-	for _, path := range rawPaths {
-		path, err := filepath.Abs(path)
-		if err != nil {
-			panic(err)
-		}
-		stat, err := os.Stat(path)
-		if err != nil {
-			panic(err)
-		}
-		if stat.IsDir() {
-			if !strings.HasSuffix(path, "/") {
-				path += "/"
-			}
-		} else {
-			if !NormalFile(stat) {
-				panic("This file is not normal. Perhaps a symlink or something? Not supported sorry!")
-			}
-		}
-		files = append(files, File{path: path, info: stat})
-	}
+	inputs := statInputPaths(rawPaths)
 
 	// scanning
 	tx, err := db.DB.Begin()
@@ -131,9 +114,9 @@ func DryBackup(rawPaths []string) {
 		panic(err)
 	}
 	statuses := make([]file_status, 0)
-	for i := range files {
-		input := files[i].path
-		info := files[i].info
+	for i := range inputs {
+		input := inputs[i].path
+		info := inputs[i].info
 		if info.IsDir() {
 			filesMap := make(map[string]os.FileInfo)
 			pathsToBackup := getDirectoriesToScan(input, config.Config().Includes)
@@ -161,7 +144,7 @@ func DryBackup(rawPaths []string) {
 		size += f.file.info.Size()
 	}
 
-	log.Printf("%d paths to be backed up (%s bytes)", len(files), utils.FormatCommas(size))
+	log.Printf("%d paths to be backed up (%s bytes)", len(statuses), utils.FormatCommas(size))
 	for _, f := range statuses {
 		var status string
 		if f.modified {

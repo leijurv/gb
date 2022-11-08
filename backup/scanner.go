@@ -27,15 +27,15 @@ func getDirectoriesToScan(inputPath string, includePaths []string) []string {
 	}
 }
 
-func scannerThread(inputs []string, infos []os.FileInfo) {
+func scannerThread(inputs []File) {
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
 	}
 	log.Println("Beginning scan now!")
 	for i := range inputs {
-		input := inputs[i]
-		info := infos[i]
+		input := inputs[i].path
+		info := inputs[i].info
 		if info.IsDir() {
 			filesMap := make(map[string]os.FileInfo)
 			for _, exclude := range config.Config().ExcludePrefixes {

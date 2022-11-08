@@ -114,12 +114,10 @@ func DryBackup(rawPaths []string) {
 		panic(err)
 	}
 	statuses := make([]file_status, 0)
-	for i := range inputs {
-		input := inputs[i].path
-		info := inputs[i].info
-		if info.IsDir() {
+	for _, input := range inputs {
+		if input.info.IsDir() {
 			filesMap := make(map[string]os.FileInfo)
-			pathsToBackup := getDirectoriesToScan(input, config.Config().Includes)
+			pathsToBackup := getDirectoriesToScan(input.path, config.Config().Includes)
 			for _, path := range pathsToBackup {
 				utils.WalkFiles(path, func(path string, info os.FileInfo) {
 					filesMap[path] = info
@@ -130,7 +128,7 @@ func DryBackup(rawPaths []string) {
 				})
 			}
 		} else {
-			comparison := compareFileToDb(input, info, tx)
+			comparison := compareFileToDb(input.path, input.info, tx)
 			if comparison.modified || comparison.new {
 				statuses = append(statuses, comparison)
 			}

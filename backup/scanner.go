@@ -33,18 +33,16 @@ func scannerThread(inputs []File) {
 		panic(err)
 	}
 	log.Println("Beginning scan now!")
-	for i := range inputs {
-		input := inputs[i].path
-		info := inputs[i].info
-		if info.IsDir() {
+	for _, input := range inputs {
+		if input.info.IsDir() {
 			filesMap := make(map[string]os.FileInfo)
 			for _, exclude := range config.Config().ExcludePrefixes {
-				if strings.HasPrefix(input, exclude) {
+				if strings.HasPrefix(input.path, exclude) {
 					log.Printf("Input input bypasses exclude \"%s\"\n", exclude)
 					// maybe add a sleep here to be safe?
 				}
 			}
-			pathsToBackup := getDirectoriesToScan(input, config.Config().Includes)
+			pathsToBackup := getDirectoriesToScan(input.path, config.Config().Includes)
 			for _, path := range pathsToBackup {
 				utils.WalkFiles(path, func(path string, info os.FileInfo) {
 					filesMap[path] = info
@@ -57,7 +55,7 @@ func scannerThread(inputs []File) {
 				}
 			}()
 		} else {
-			scanFile(File{input, info}, tx)
+			scanFile(input, tx)
 		}
 	}
 	log.Println("Scanner committing")

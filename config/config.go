@@ -247,6 +247,7 @@ func saveConfig() {
 // rootPath is the path the scan was started from
 func ExcludeFromBackup(rootPath string, path string) bool {
 	path = strings.ToLower(path)
+	rootPath = strings.ToLower(rootPath)
 	for _, suffix := range config.ExcludeSuffixes {
 		if strings.HasSuffix(path, suffix) {
 			return true

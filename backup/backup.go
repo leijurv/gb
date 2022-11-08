@@ -103,8 +103,7 @@ func compareFileToDb(path string, info os.FileInfo, tx *sql.Tx) file_status {
 }
 
 func DryBackup(rawPaths []string) {
-	paths := make([]string, 0)
-	fileInfos := make([]os.FileInfo, 0)
+	files := make([]File, 0)
 	for _, path := range rawPaths {
 		path, err := filepath.Abs(path)
 		if err != nil {
@@ -123,8 +122,7 @@ func DryBackup(rawPaths []string) {
 				panic("This file is not normal. Perhaps a symlink or something? Not supported sorry!")
 			}
 		}
-		paths = append(paths, path)
-		fileInfos = append(fileInfos, stat)
+		files = append(files, File{path: path, info: stat})
 	}
 
 	// scanning
@@ -132,45 +130,46 @@ func DryBackup(rawPaths []string) {
 	if err != nil {
 		panic(err)
 	}
-	files := make([]file_status, 0)
-	for i := range paths {
-		input := paths[i]
-		info := fileInfos[i]
+	statuses := make([]file_status, 0)
+	for i := range files {
+		input := files[i].path
+		info := files[i].info
 		if info.IsDir() {
 			filesMap := make(map[string]os.FileInfo)
 			pathsToBackup := getDirectoriesToScan(input, config.Config().Includes)
 			for _, path := range pathsToBackup {
 				utils.WalkFiles(path, func(path string, info os.FileInfo) {
 					filesMap[path] = info
-					meow := compareFileToDb(path, info, tx)
-					if meow.modified || meow.new {
-						files = append(files, meow)
+					comparison := compareFileToDb(path, info, tx)
+					if comparison.modified || comparison.new {
+						statuses = append(statuses, comparison)
 					}
 				})
 			}
 		} else {
-			meow := compareFileToDb(input, info, tx)
-			if meow.modified || meow.new {
-				files = append(files, meow)
+			comparison := compareFileToDb(input, info, tx)
+			if comparison.modified || comparison.new {
+				statuses = append(statuses, comparison)
 			}
 		}
 	}
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].file.info.Size() < files[j].file.info.Size()
+	sort.Slice(statuses, func(i, j int) bool {
+		return statuses[i].file.info.Size() < statuses[j].file.info.Size()
 	})
 	var size int64
-	for _, f := range files {
+	for _, f := range statuses {
 		size += f.file.info.Size()
 	}
-	log.Printf("%d paths to be backed up (%s bytes)", len(files), utils.HumanReadableByteCountSI(size))
-	for _, f := range files {
-		var lol string
+
+	log.Printf("%d paths to be backed up (%s bytes)", len(files), utils.FormatCommas(size))
+	for _, f := range statuses {
+		var status string
 		if f.modified {
-			lol = "modified"
+			status = "modified"
 		}
 		if f.new {
-			lol = "new"
+			status = "new"
 		}
-		log.Printf("%s (%s, %s)", f.file.path, utils.HumanReadableByteCountSI(f.file.info.Size()), lol)
+		log.Printf("%s (%s, %s)", f.file.path, utils.FormatCommas(f.file.info.Size()), status)
 	}
 }

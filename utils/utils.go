@@ -3,7 +3,6 @@ package utils
 import (
 	"crypto/md5"
 	"crypto/sha256"
-	"fmt"
 	"hash"
 	"io"
 	"log"
@@ -226,17 +225,4 @@ func FormatCommas(num int64) string {
 func IsDatabaseFile(path string) bool {
 	dbPath := config.Config().DatabaseLocation
 	return path == dbPath || path == dbPath+"-wal" || path == dbPath+"-shm"
-}
-
-func HumanReadableByteCountSI(b int64) string {
-	const unit = 1000
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "kMGTPE"[exp])
 }

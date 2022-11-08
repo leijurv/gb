@@ -378,6 +378,15 @@ func main() {
 				return nil
 			},
 		},
+		{
+			Name:  "stat",
+			Usage: "stat existing files and count how many files are not backed up",
+			Action: func(c *cli.Context) error {
+				paths := append([]string{c.Args().First()}, c.Args().Tail()...) // even if no argument (like: "gb backup"), backup current directory by passing one empty string arg
+				backup.DryBackup(paths)
+				return nil
+			},
+		},
 	}
 	// relay must bypass all of this, because it has no config file nor database, so we should not harass the user about setting up those things
 	if len(os.Args) == 3 && os.Args[1] == "relay" {

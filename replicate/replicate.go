@@ -26,6 +26,13 @@ func ReplicateBlobs(label string) {
 	log.Println("The intended usage is `gb paranoia storage` (a clean run with nothing flagged), then add your new storage, then this")
 	log.Println("This will just go through the blobs in", storage)
 	log.Println("It won't go through what's in the database, so make sure that that's all good (such as with `gb paranoia storage` lol)")
+	log.Println()
+	log.Println("Seriously, make sure that `gb paranoia db` and `gb paranoia storage` complete cleanly with no issues BOTH before AND after using `gb replicate`")
+	log.Println()
+	log.Println("Some considerations to think about when running this:")
+	log.Println("• Google Drive has a 10 terabyte per 24 hour limit on downloads, beyond which you'll get \"panic: googleapi: Error 403: The download quota for this file has been exceeded., downloadQuotaExceeded\". Consider how much bandwidth you need - anything above 1gbps will be overkill since GDrive throttles you to less than that over 24h (assuming you have over 10tb to begin with)")
+	log.Println("• If `gb replicate` says it's completed, but it isn't, look at `gb paranoia storage` and clear any files marked as \"UNKNOWN / UNEXPECTED\". That can happen if a file uploads successfully, but GB doesn't commit it to the database (can happen if another thread among the 8 replicate threads crashes at that exact moment). After you clear that file, `gb replicate` will again notice that it isn't in the destination, and will try copying it again.")
+	log.Println("• Backblaze has very frequent 500s and 503s. Consider running `gb replicate` in a loop. I use a 100 second delay between runs.")
 	toReplicate := storage.ListBlobs()
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(toReplicate), func(i int, j int) {
@@ -72,4 +79,5 @@ func ReplicateBlobs(label string) {
 		close(todo)
 		wg.Wait()
 	}
+	log.Println("Done replicating. Now you should do `gb paranoia db` and `gb paranoia storage`!")
 }

@@ -71,7 +71,7 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT hash FROM files WHERE path LIKE '%/'",
 
 	// everything has been backed up to every destination
-	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage)",
+	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage) -- if this one fails it means that there is a blob that is in some storages but not all of them. `gb replicate` can help with this!",
 
 	// nothing was ever backed up to the same place twice
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id, storage_id HAVING COUNT(*) > 1",

@@ -3,6 +3,7 @@ package download
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -47,11 +48,17 @@ type Restoration struct {
 	sourcesOnDisk map[string]int64 // path to fsModified
 }
 
-func Restore(src string, dest string, timestamp int64) {
+func Restore(src string, dest string, timestamp int64, latest bool) {
 	// concept: restore a directory
 	// src is where the directory was (is, in the database)
 	// dest is where the directory should be
-	if timestamp == 0 {
+	// if latest: restore all files that were present in latest backup
+
+	if latest {
+		// for now only directory
+		timestamp = findLatestTimestampForDir(src)
+		log.Println("using latest timestamp of:", timestamp)
+	} else if timestamp == 0 {
 		timestamp = time.Now().Unix()
 	}
 	if dest == "" {
@@ -497,4 +504,27 @@ func generatePlanUsingQuery(query string, path string, timestamp int64, prefixCh
 		panic(err)
 	}
 	return plan
+}
+
+func findLatestTimestampForDir(path string) int64 {
+	return findLatestTimestamp(timestampQueryBase+"GLOB ?", path+"*")
+}
+
+// also this doesn't handle the prefix case I think
+// essentially get timestamp of delete
+const timestampQueryBase = "SELECT MAX(files.end) FROM files WHERE files.path "
+
+func findLatestTimestamp(query string, path string) int64 {
+	row := db.DB.QueryRow(query, path)
+
+	var timestamp int64
+	err := row.Scan(&timestamp)
+	if err != nil {
+		if err != sql.ErrNoRows {
+		} // TODO: idk what max does if no files match
+		panic(err)
+	}
+
+	// -1 because want to get files before they were deleted
+	return timestamp - 1
 }

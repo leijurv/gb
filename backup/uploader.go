@@ -99,7 +99,10 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		log.Println("Exiting because nothing wrote")
 		return
 	}
-	out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
+	_, err := out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
+	if err != nil {
+		panic(err)
+	}
 	hashPreEnc, sizePreEnc := preEncInfo.HashAndSize()
 	hashPostEnc, sizePostEnc := postEncInfo.HashAndSize()
 	if sizePreEnc != sizePostEnc {

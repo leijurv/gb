@@ -124,14 +124,6 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		log.Println("Pruner committing")
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Pruner committed")
-	}()
 	if !strings.HasSuffix(backupPath, "/") {
 		panic(backupPath) // sanity check, should have already been completed
 	}
@@ -167,4 +159,10 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 	if err != nil {
 		panic(err)
 	}
+	log.Println("Pruner committing")
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Pruner committed")
 }

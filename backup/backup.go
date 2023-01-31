@@ -49,6 +49,7 @@ func statInputPaths(rawPaths []string) []File {
 }
 
 func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
+	DBKey()
 	inputs := statInputPaths(rawPaths)
 
 	for i := 0; i < config.Config().NumHasherThreads; i++ {

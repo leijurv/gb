@@ -4,22 +4,23 @@
 package gbfs
 
 import (
-	"bazil.org/fuse"
-	fuseFs "bazil.org/fuse/fs"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
+	"strings"
+	"syscall"
+	"time"
+
+	"bazil.org/fuse"
+	fuseFs "bazil.org/fuse/fs"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
-	"io"
-	"os"
-	"strings"
-	"syscall"
-	"time"
 )
 
 type File struct {

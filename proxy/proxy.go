@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"crypto/tls"
-	"github.com/leijurv/gb/compression"
 	"html/template"
 	"io"
 	"log"
@@ -12,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/leijurv/gb/compression"
 
 	"github.com/leijurv/gb/storage"
 

@@ -17,7 +17,8 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN blob_storage ON blobs.blob_id = blob_storage.blob_id WHERE blob_storage.blob_id IS NULL",                                                        // know of a blob that isn't stored anywhere
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN (SELECT * FROM blob_entries WHERE offset = 0) initial_entries ON blobs.blob_id = initial_entries.blob_id WHERE initial_entries.blob_id IS NULL", // know of a blob with no entry at offset 0
 
-	"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL", // i really should have made this a NOT NULL. my mistake.
+	// no longer possible with database layer 2 (the column is now NOT NULL)
+	//"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL",
 
 	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND compression_alg != ''",
 

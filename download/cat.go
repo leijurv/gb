@@ -67,7 +67,7 @@ func CatEz(hash []byte) io.Reader {
 		panic(err)
 	}
 	defer func() {
-		err = tx.Commit()
+		err = tx.Commit() // this is ok since read-only
 		if err != nil {
 			panic(err)
 		}

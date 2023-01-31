@@ -8,38 +8,37 @@ import (
 	"math/big"
 )
 
-func EncryptBlob(out io.Writer) (io.Writer, []byte) {
+func EncryptBlob(out io.Writer, seekOffset int64) (io.Writer, []byte) {
 	key := RandBytes(16)
-	return EncryptBlobWithKey(out, key), key
+	return EncryptBlobWithKey(out, seekOffset, key), key
 }
 
-func EncryptBlobWithKey(out io.Writer, key []byte) io.Writer {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		panic(err)
-	}
-	stream := cipher.NewCTR(block, make([]byte, 16))
-	return &cipher.StreamWriter{S: stream, W: out}
+func EncryptBlobWithKey(out io.Writer, seekOffset int64, key []byte) io.Writer {
+	return &cipher.StreamWriter{S: createCipherStream(seekOffset, key), W: out}
 }
 
 // take advantage of AES-CTR by seeking
 // assume seekOffset is where this reader is "starting", and the seeking has *already taken place* (e.g. by a Range query to s3)
 func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
+	return &cipher.StreamReader{S: createCipherStream(seekOffset, key), R: in}
+}
+
+func createCipherStream(seekOffset int64, key []byte) cipher.Stream {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		panic(err)
 	}
-
 	iv, remainingSeek := CalcIVAndSeek(seekOffset)
-
 	stream := cipher.NewCTR(block, iv)
-
 	// hack to advance, xor the right amount of garbage with the right amount of garbage
 	stream.XORKeyStream(make([]byte, remainingSeek), make([]byte, remainingSeek))
-	return &cipher.StreamReader{S: stream, R: in}
+	return stream
 }
 
 func CalcIVAndSeek(seekOffset int64) ([]byte, int64) {
+	if seekOffset < 0 {
+		panic("negative seek is impossible")
+	}
 	// while encrypting, by the time it got to this location we know that
 	// the IV will have incremented in a big endian manner up until floor(seekOffset/16)
 	iv := new(big.Int).SetInt64(seekOffset / 16).Bytes() // if this were C I would just cast &seekOffset to a uint8_t* lol
@@ -47,7 +46,6 @@ func CalcIVAndSeek(seekOffset int64) ([]byte, int64) {
 	// big.Int.Bytes() will only be as long as it needs to be, so we need to:
 	padding := make([]byte, 16-len(iv))
 	iv = append(padding, iv...) // pad with leading zero bytes to be proper length
-
 	// no guarantee that the files are aligned to multiples of 16 in length...
 	// so we still need to advance by seekOffset%16 bytes, within this block
 	return iv, seekOffset % 16

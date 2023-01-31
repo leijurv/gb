@@ -120,39 +120,44 @@ func Compress(path string, out io.Writer, in io.Reader, hs *utils.HasherSizer) s
 			} else {
 				read = in
 			}
-
-			pR, pW := io.Pipe()
-			verify := utils.NewSHA256HasherSizer()
-			done := make(chan struct{})
-			go func() {
-				decom := c.Decompress(pR)
-				defer decom.Close()
-				utils.Copy(&verify, decom) // this only returns once decom is EOF, which only happens strictly after pW.Close(), so this is correct
-				done <- struct{}{}
-			}()
-
-			out = io.MultiWriter(out, pW)
-			// wow infallible compression is so much easier wow
-			bufout := bufio.NewWriterSize(out, 128*1024) // 128kb, because zstd sometimes writes in small chunks
-			err := c.Compress(bufout, read)
-			if err != nil {
-				log.Println("you are infallible you cannot fail :cry:")
-				panic(err)
-			}
-			err = bufout.Flush()
-			if err != nil {
-				panic(err)
-			}
-			pW.Close()
-			<-done
-			if !bytes.Equal(verify.Hash(), hs.Hash()) {
-				log.Println(verify.Hash(), verify.Size(), hs.Hash(), hs.Size())
-				panic("compression CLAIMED it succeeded but decompressed to DIFFERENT DATA this is VERY BAD")
-			}
+			VerifiedCompression(c, out, read, hs)
 			log.Println("Compression verified")
 
 			return c.AlgName()
 		}
 	}
 	panic("this should never happen, at least NoCompression should run on every possible file")
+}
+
+// compress data while also verifying that the stream will decompress back to the same data
+// but without buffering - do the whole thing streaming
+func VerifiedCompression(c Compression, out io.Writer, read io.Reader, hs *utils.HasherSizer) {
+	pR, pW := io.Pipe()
+	verify := utils.NewSHA256HasherSizer()
+	done := make(chan struct{})
+	go func() {
+		decom := c.Decompress(pR)
+		defer decom.Close()
+		utils.Copy(&verify, decom) // this only returns once decom is EOF, which only happens strictly after pW.Close(), so this is correct
+		done <- struct{}{}
+	}()
+
+	out = io.MultiWriter(out, pW)
+	// wow infallible compression is so much easier wow
+	bufout := bufio.NewWriterSize(out, 128*1024) // 128kb, because zstd sometimes writes in small chunks
+	err := c.Compress(bufout, read)
+	if err != nil {
+		log.Println("you are infallible you cannot fail :cry:")
+		panic(err)
+	}
+	err = bufout.Flush()
+	if err != nil {
+		panic(err)
+	}
+	pW.Close()
+	<-done
+	if !bytes.Equal(verify.Hash(), hs.Hash()) {
+		log.Println(verify.Hash(), verify.Size(), hs.Hash(), hs.Size())
+		panic("compression CLAIMED it succeeded but decompressed to DIFFERENT DATA this is VERY BAD")
+	}
 }

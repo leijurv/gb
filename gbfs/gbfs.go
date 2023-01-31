@@ -141,7 +141,7 @@ func newUncompressedHandle(hash []byte, tx *sql.Tx) UncompressedFileHandle {
 				blob_entries.blob_id,
 				blob_entries.offset, 
 				blob_entries.final_size,
-				blobs.encryption_key,
+				blob_entries.encryption_key,
 				blob_storage.path,
 				storage.storage_id,
 				storage.type,

@@ -217,7 +217,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	var offsetIntoBlob int64
 	var comp string
 	err = db.DB.QueryRow(
-		"SELECT blob_entries.blob_id, blobs.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
+		"SELECT blob_entries.blob_id, blob_entries.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
 		hash, storage.GetID()).Scan(&blobID, &key, &path, &compressedSize, &offsetIntoBlob, &comp)
 	if err != nil {
 		panic(err)

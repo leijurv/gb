@@ -28,7 +28,7 @@ func CatReadCloser(hash []byte, tx *sql.Tx) io.ReadCloser {
 				blob_entries.offset, 
 				blob_entries.final_size,
 				blob_entries.compression_alg,
-				blobs.encryption_key,
+				blob_entries.encryption_key,
 				blob_storage.path,
 				storage.storage_id,
 				storage.type,

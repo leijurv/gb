@@ -3,6 +3,7 @@ package proxy
 import (
 	"crypto/tls"
 	"github.com/leijurv/gb/compression"
+	"github.com/leijurv/gb/utils"
 	"html/template"
 	"io"
 	"log"
@@ -98,7 +99,7 @@ func escapePath(path string) string {
 }
 
 func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
-	globPath := strings.Replace(strings.Replace(path, "[", "?", -1), "]", "?", -1) + "*"
+	globPath := utils.FormatForSqliteGlob(path) + "*"
 	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
 	if err != nil {
 		panic(err)

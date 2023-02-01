@@ -306,7 +306,7 @@ func queryAllFiles(path string, timestamp int64) []File {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	rows, err := tx.Query(QUERY, timestamp, timestamp, path+"*")
+	rows, err := tx.Query(QUERY, timestamp, timestamp, utils.FormatForSqliteGlob(path+"*"))
 	if err != nil {
 		panic(err)
 	}

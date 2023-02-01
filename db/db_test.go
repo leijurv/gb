@@ -2,7 +2,10 @@ package db
 
 import (
 	"crypto/sha256"
+	"strings"
 	"testing"
+
+	"github.com/leijurv/gb/utils"
 )
 
 func WithTestingDatabase(t *testing.T, fn func()) {
@@ -51,4 +54,26 @@ func TestBlobFetch(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestGlob(t *testing.T) {
+	WithTestingDatabase(t, func() {
+		for _, pattern := range []string{"meow", "a", "a[", "[a", "a]", "]a", "a[b", "a]b", "a[b]", "[a]b", "a]b[", "]a[b", "]a]b", "a]b]", "[a[b", "a[b[", "a[b]c", "[][]][][]]]][[[]", "][[]][[]][][][][[]][][[]]["} {
+			if strings.Contains(pattern, "[") && globs(t, pattern, pattern) {
+				t.Errorf(pattern + " shouldn't glob itself on its own, since it has a [")
+			}
+			if !globs(t, pattern, utils.FormatForSqliteGlob(pattern)) {
+				t.Errorf(pattern + " should glob itself when converted to " + utils.FormatForSqliteGlob(pattern))
+			}
+		}
+	})
+}
+
+func globs(t *testing.T, test string, pattern string) bool {
+	var ret bool
+	err := DB.QueryRow("SELECT ? GLOB ?", test, pattern).Scan(&ret)
+	if err != nil {
+		t.Error(err)
+	}
+	return ret
 }

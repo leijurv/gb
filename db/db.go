@@ -3,9 +3,10 @@ package db
 import (
 	"database/sql"
 	"errors"
-	"github.com/leijurv/gb/config"
 	"log"
 	"os"
+
+	"github.com/leijurv/gb/config"
 
 	_ "github.com/mattn/go-sqlite3"
 )

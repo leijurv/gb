@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -225,4 +226,20 @@ func FormatCommas(num int64) string {
 func IsDatabaseFile(path string) bool {
 	dbPath := config.Config().DatabaseLocation
 	return path == dbPath || path == dbPath+"-wal" || path == dbPath+"-shm"
+}
+
+func FormatForSqliteGlob(pattern string) string {
+	// https://stackoverflow.com/questions/12934671/how-to-use-glob-and-find-brace-brackets-in-sqlite
+	var ret strings.Builder
+	for _, ch := range pattern {
+		switch string(ch) {
+		case "[":
+			ret.WriteString("[[]")
+		case "]":
+			ret.WriteString("[]]") // technically all my unit tests pass without this "]" case, but it feels weird to have unmatched brackets like that, so I'm leaving this in
+		default:
+			ret.WriteRune(ch)
+		}
+	}
+	return ret.String()
 }

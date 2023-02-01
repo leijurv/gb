@@ -469,7 +469,7 @@ func generatePlanAssumingDir(path string, timestamp int64) []Item {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	return generatePlanUsingQuery(QUERY_BASE+" GLOB ?", path+"*", timestamp, path)
+	return generatePlanUsingQuery(QUERY_BASE+" GLOB ?", utils.FormatForSqliteGlob(path+"*"), timestamp, path)
 }
 
 func generatePlanUsingQuery(query string, path string, timestamp int64, prefixChk string) []Item {

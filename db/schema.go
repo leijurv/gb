@@ -263,20 +263,23 @@ func determineDatabaseLayer() DatabaseLayer {
 	}
 
 	// sanity
-	if tables != "blob_entries,blob_storage,blobs,db_key,files,sizes,storage," {
-		panic("gb.db doesn't have the tables that I expect. expected 'blob_entries,blob_storage,blobs,db_key,files,sizes,storage,' but got '" + tables + "'")
+	expectedTables := "blob_entries,blob_storage,blobs,db_key,files,sizes,storage,"
+	if tables != expectedTables {
+		panic("gb.db doesn't have the tables that I expect. expected '" + expectedTables + "' but got '" + tables + "'")
 	}
 	indexes := query("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
-	if indexes != "blob_entries_by_blob_id,blob_entries_by_hash,blob_storage_by_blob_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3," {
-		panic("gb.db doesn't have the indexes that I expect. expected 'blob_entries_by_blob_id,blob_entries_by_hash,blob_storage_by_blob_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,' but got '" + indexes + "'")
+	expectedIndexes := "blob_entries_by_blob_id,blob_entries_by_hash,blob_storage_by_blob_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
+	if indexes != expectedIndexes {
+		panic("gb.db doesn't have the indexes that I expect. expected '" + expectedIndexes + "' but got '" + indexes + "'")
 	}
 
 	blob_cols := query("SELECT name FROM PRAGMA_TABLE_INFO('blobs')")
 	if blob_cols == "blob_id,encryption_key,size,hash_pre_enc,hash_post_enc," {
 		return DATABASE_LAYER_1
 	}
-	if blob_cols != "blob_id,padding_key,size,final_hash," {
-		panic("the 'blobs' table doesn't have the columns that I expect. expected 'blob_id,padding_key,size,final_hash,' but got '" + blob_cols + "'")
+	expectedBlobCols := "blob_id,padding_key,size,final_hash,"
+	if blob_cols != expectedBlobCols {
+		panic("the 'blobs' table doesn't have the columns that I expect. expected '" + expectedBlobCols + "' but got '" + blob_cols + "'")
 	}
 	return DATABASE_LAYER_2
 }

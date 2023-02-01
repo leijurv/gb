@@ -34,21 +34,17 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	}
 
 	blobID := crypto.RandBytes(32)
-	out := serv.Begin(blobID)
+	rawServOut := serv.Begin(blobID)
 
 	postEncInfo := utils.NewSHA256HasherSizer()
-	out = io.MultiWriter(out, &postEncInfo)
+	postEncOut := io.MultiWriter(rawServOut, &postEncInfo)
 
-	out, key := crypto.EncryptBlob(out)
-
-	preEncInfo := utils.NewSHA256HasherSizer()
-	out = io.MultiWriter(out, &preEncInfo)
-
-	stats.Add(&preEncInfo)
+	stats.Add(&postEncInfo)
 
 	type blobEntry struct {
 		originalPlan        Planned
 		hash                []byte
+		key                 []byte
 		offset              int64
 		postCompressionSize int64
 		preCompressionSize  int64
@@ -58,7 +54,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 
 	for _, planned := range plan {
 		log.Println("Adding", planned.File)
-		startOffset := preEncInfo.Size()
+		startOffset := postEncInfo.Size()
 		verify := utils.NewSHA256HasherSizer()
 
 		f, err := os.Open(planned.path)
@@ -73,14 +69,15 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			continue
 		}
 		stats.AddCurrentlyUploading(planned.path)
-		compAlg := compression.Compress(planned.path, out, io.TeeReader(f, &verify), &verify)
+		encryptedOut, key := crypto.EncryptBlob(postEncOut, startOffset)
+		compAlg := compression.Compress(planned.path, encryptedOut, io.TeeReader(f, &verify), &verify)
 		stats.FinishedUploading(planned.path)
 		f.Close()
 		realHash, realSize := verify.HashAndSize()
 		if len(planned.hash) > 0 && !bytes.Equal(realHash, planned.hash) {
 			log.Println("File copied successfully, but hash was", hex.EncodeToString(realHash), "when we expected", hex.EncodeToString(planned.hash))
 		}
-		length := preEncInfo.Size() - startOffset
+		length := postEncInfo.Size() - startOffset
 		if compAlg == "" {
 			log.Println("File length was", utils.FormatCommas(realSize), "and was not compressed")
 		} else {
@@ -89,6 +86,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		entries = append(entries, blobEntry{
 			originalPlan:        planned,
 			hash:                realHash,
+			key:                 key,
 			offset:              startOffset,
 			preCompressionSize:  realSize,
 			postCompressionSize: length,
@@ -99,16 +97,14 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		log.Println("Exiting because nothing wrote")
 		return
 	}
-	_, err := out.Write(make([]byte, samplePaddingLength(postEncInfo.Size()))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
+	paddingOffset := postEncInfo.Size()
+	paddingOut, paddingKey := crypto.EncryptBlob(postEncOut, paddingOffset)
+	_, err := paddingOut.Write(make([]byte, samplePaddingLength(paddingOffset))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	if err != nil {
 		panic(err)
 	}
-	hashPreEnc, sizePreEnc := preEncInfo.HashAndSize()
 	hashPostEnc, sizePostEnc := postEncInfo.HashAndSize()
-	if sizePreEnc != sizePostEnc {
-		panic("what??")
-	}
-	totalSize := sizePreEnc
+	totalSize := sizePostEnc
 	log.Println("All bytes written")
 	completeds := serv.End(hashPostEnc, totalSize)
 	log.Println("All bytes flushed")
@@ -119,16 +115,9 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		log.Println("Uploader committing to database")
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Committed uploaded blob")
-	}()
+	defer tx.Rollback()
 	// **obviously** all this needs to be in a tx
-	_, err = tx.Exec("INSERT INTO blobs (blob_id, encryption_key, size, hash_pre_enc, hash_post_enc) VALUES (?, ?, ?, ?, ?)", blobID, key, totalSize, hashPreEnc, hashPostEnc)
+	_, err = tx.Exec("INSERT INTO blobs (blob_id, padding_key, size, final_hash) VALUES (?, ?, ?, ?)", blobID, paddingKey, totalSize, hashPostEnc)
 	if err != nil {
 		panic(err)
 	}
@@ -173,12 +162,18 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			fileHasKnownData(tx, entry.originalPlan.path, entry.originalPlan.info, entry.hash)
 		}
 		// and either way, make a note of what hash is stored in this blob at this location
-		_, err = tx.Exec("INSERT INTO blob_entries (hash, blob_id, final_size, offset, compression_alg) VALUES (?, ?, ?, ?, ?)", entry.hash, blobID, entry.postCompressionSize, entry.offset, entry.compression)
+		_, err = tx.Exec("INSERT INTO blob_entries (hash, blob_id, encryption_key, final_size, offset, compression_alg) VALUES (?, ?, ?, ?, ?, ?)", entry.hash, blobID, entry.key, entry.postCompressionSize, entry.offset, entry.compression)
 		if err != nil {
 			panic(err)
 		}
 	}
 	log.Println("Uploader done with blob", plan)
+	log.Println("Uploader committing to database")
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Committed uploaded blob")
 }
 
 func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {

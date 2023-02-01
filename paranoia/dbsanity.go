@@ -17,7 +17,8 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN blob_storage ON blobs.blob_id = blob_storage.blob_id WHERE blob_storage.blob_id IS NULL",                                                        // know of a blob that isn't stored anywhere
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN (SELECT * FROM blob_entries WHERE offset = 0) initial_entries ON blobs.blob_id = initial_entries.blob_id WHERE initial_entries.blob_id IS NULL", // know of a blob with no entry at offset 0
 
-	"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL", // i really should have made this a NOT NULL. my mistake.
+	// no longer possible with database layer 2 (the column is now NOT NULL)
+	//"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL",
 
 	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND compression_alg != ''",
 
@@ -79,6 +80,7 @@ var queriesThatShouldHaveNoRows = []string{
 	// nothing was ever backed up twice
 	// "SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1",
 	// NEVER MIND this has happened a few times when another program was modifying files at the same time, such as creating two empty files that get backed up
+	// it also happens if you run `gb backup` on the same folder in two different windows at the same time
 
 	// if the same blob has been uploaded to two storages of the same type (such as S3), make sure that the path and checksum matches
 	// this is a good sanity check after doing a `gb replicate`!
@@ -102,6 +104,36 @@ var queriesThatShouldHaveNoRows = []string{
 	WHERE
 		a.storage_id < b.storage_id
 		AND (a.path != b.path OR a.checksum != b.checksum)
+	`,
+
+	// blobs should have all the same encryption key for all entries (older blobs), or all different encryption keys (newer blobs)
+	`
+	WITH distinct_keys AS (
+		SELECT
+			blob_id,
+			COUNT(DISTINCT encryption_key) AS cnt
+		FROM
+			blob_entries
+		GROUP BY
+			blob_id
+	),
+	entry_counts AS (
+		SELECT
+			blob_id,
+			COUNT(*) AS cnt
+		FROM
+			blob_entries
+		GROUP BY
+			blob_id
+	)
+	SELECT
+		blob_id
+	FROM
+		distinct_keys
+		INNER JOIN entry_counts USING (blob_id)
+	WHERE
+		distinct_keys.cnt != 1
+		AND distinct_keys.cnt != entry_counts.cnt
 	`,
 
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2

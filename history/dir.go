@@ -1,11 +1,12 @@
 package history
 
 import (
-	"github.com/leijurv/gb/utils"
 	"log"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/leijurv/gb/utils"
 
 	"github.com/leijurv/gb/db"
 )

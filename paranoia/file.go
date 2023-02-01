@@ -116,7 +116,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 				blob_entries.offset, 
 				blob_entries.final_size,
 				blob_entries.compression_alg,
-				blobs.encryption_key,
+				blob_entries.encryption_key,
 				blobs.size,
 				blob_storage.path,
 				blob_storage.checksum,

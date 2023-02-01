@@ -67,47 +67,44 @@ func DownloadEntireBlob(blobID []byte, storage storage_base.Storage) io.Reader {
 	return utils.ReadCloserToReader(storage.DownloadSection(path, 0, blobSize))
 }
 
-func BlobReaderParanoia(reader io.Reader, blobID []byte, storage storage_base.Storage) int64 {
+func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_base.Storage) int64 {
 	log.Println("Running paranoia on", hex.EncodeToString(blobID), "in storage", storage)
 	if len(blobID) != 32 {
 		panic("sanity check")
 	}
-	var key []byte
+	var paddingKey []byte
 	var blobSize int64
-	var hashPreEnc []byte
 	var hashPostEnc []byte
-	err := db.DB.QueryRow("SELECT encryption_key, size, hash_pre_enc, hash_post_enc FROM blobs WHERE blob_id = ?", blobID).Scan(&key, &blobSize, &hashPreEnc, &hashPostEnc)
+	err := db.DB.QueryRow("SELECT padding_key, size, final_hash FROM blobs WHERE blob_id = ?", blobID).Scan(&paddingKey, &blobSize, &hashPostEnc)
 	if err != nil {
 		log.Println("This blob id does not exist")
 		panic(err)
 	}
 	hasherPostEnc := utils.NewSHA256HasherSizer()
-	reader = io.TeeReader(reader, &hasherPostEnc)
-	reader = crypto.DecryptBlobEntry(reader, 0, key)
-	hasherPreEnc := utils.NewSHA256HasherSizer()
-	reader = io.TeeReader(reader, &hasherPreEnc)
+	encReader := io.TeeReader(outerReader, &hasherPostEnc)
 
-	rows, err := db.DB.Query(`SELECT hash, final_size, offset, compression_alg FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size`, blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
+	rows, err := db.DB.Query(`SELECT hash, encryption_key, final_size, offset, compression_alg FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size`, blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var hash []byte
+		var key []byte
 		var entrySize int64
 		var offset int64
 		var compressionAlg string
-		err := rows.Scan(&hash, &entrySize, &offset, &compressionAlg)
+		err := rows.Scan(&hash, &key, &entrySize, &offset, &compressionAlg)
 		if err != nil {
 			panic(err)
 		}
-		if hasherPreEnc.Size() != offset {
+		if hasherPostEnc.Size() != offset {
 			panic("got misaligned somehow. gap between entries??")
 		}
 		log.Println("Expected hash for this entry is " + hex.EncodeToString(hash) + ", decompressing...")
 		verify := utils.NewSHA256HasherSizer()
-		utils.Copy(&verify, utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(io.LimitReader(reader, entrySize))))
-		if hasherPreEnc.Size() != offset+entrySize {
+		utils.Copy(&verify, utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(io.LimitReader(crypto.DecryptBlobEntry(encReader, offset, key), entrySize))))
+		if hasherPostEnc.Size() != offset+entrySize {
 			panic("entry was wrong size")
 		}
 		realHash, realSize := verify.HashAndSize()
@@ -121,20 +118,14 @@ func BlobReaderParanoia(reader io.Reader, blobID []byte, storage storage_base.St
 	if err != nil {
 		panic(err)
 	}
-	remain, err := ioutil.ReadAll(reader)
+	remain, err := ioutil.ReadAll(crypto.DecryptBlobEntry(encReader, hasherPostEnc.Size(), paddingKey))
 	if err != nil {
 		panic(err)
 	}
 	if !bytes.Equal(remain, make([]byte, len(remain))) {
 		panic("end padding was not all zeros!")
 	}
-	if hasherPreEnc.Size() != hasherPostEnc.Size() {
-		panic("sanity check")
-	}
-	if hasherPreEnc.Size() != blobSize {
-		panic("sanity check")
-	}
-	if !bytes.Equal(hashPreEnc, hasherPreEnc.Hash()) {
+	if hasherPostEnc.Size() != blobSize {
 		panic("sanity check")
 	}
 	if !bytes.Equal(hashPostEnc, hasherPostEnc.Hash()) {

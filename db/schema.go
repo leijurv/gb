@@ -27,6 +27,24 @@ func initialSetup() {
 	}
 }
 
+/*
+
+
+
+
+
+Refer to schema.sql for the up-to-date schema of the gb database.
+
+This file creates the schema "one layer at a time", starting with the original schema as it was in 2019, then applying updates on at a time.
+For that reason, this file is less readable because of the incremental updates.
+To see the final schema that gb actually uses today, refer to schema.sql
+
+
+
+
+
+*/
+
 func schemaVersionOne() error {
 	tx, err := DB.Begin()
 	if err != nil {
@@ -174,51 +192,51 @@ func schemaVersionTwo() error {
 	// defer rollback BUT commit after successful execution
 	defer tx.Rollback() // !!!intended to NOT actually rollback!!!
 	_, err = tx.Exec(`
-		CREATE TABLE blobs_temp (
+	CREATE TABLE blobs_temp (
 
-			blob_id     BLOB    NOT NULL PRIMARY KEY, /* random bytes */
-			padding_key BLOB    NOT NULL, /* random bytes, previously used to encrypt entire blob, now only used for the final padding bytes (for verification and reproducibility of blob creation) */
-			size        INTEGER NOT NULL, /* size in bytes. will be equal to padding + sum of entries sizes. size is the same pre and post encryption */
-			final_hash  BLOB    NOT NULL, /* hash after encryption */
+		blob_id     BLOB    NOT NULL PRIMARY KEY, /* random bytes */
+		padding_key BLOB    NOT NULL, /* random bytes, previously used to encrypt entire blob, now only used for the final padding bytes (for verification and reproducibility of blob creation) */
+		size        INTEGER NOT NULL, /* size in bytes. will be equal to padding + sum of entries sizes. size is the same pre and post encryption */
+		final_hash  BLOB    NOT NULL, /* hash after encryption */
 
-			UNIQUE(padding_key), /* paranoia */
-			CHECK(LENGTH(blob_id) == 32),
-			CHECK(LENGTH(padding_key) == 16),
-			CHECK(size > 0),
-			CHECK(LENGTH(final_hash) == 32)
-		);
+		UNIQUE(padding_key), /* paranoia */
+		CHECK(LENGTH(blob_id) == 32),
+		CHECK(LENGTH(padding_key) == 16),
+		CHECK(size > 0),
+		CHECK(LENGTH(final_hash) == 32)
+	);
 
-		CREATE TABLE blob_entries_temp (
+	CREATE TABLE blob_entries_temp (
 
-			hash            BLOB    NOT NULL, /* hash of what this is storing */
-			blob_id         BLOB    NOT NULL, /* blob this is in */
-			encryption_key  BLOB    NOT NULL, /* random bytes. old blobs will have the same key for each entry (compatibility); new blobs will have different keys for each entry */
-			final_size      INTEGER NOT NULL, /* the length of this entry in bytes, i.e. size after compression, if any, has taken place */
-			offset          INTEGER NOT NULL, /* where in the blob does this start. also, for compatibility reasons, where in the AES CTR stream does this entry's encryption begin */
-			compression_alg TEXT    NOT NULL, /* what kind of compression was done (empty string if not compressed) */
+		hash            BLOB    NOT NULL, /* hash of what this is storing */
+		blob_id         BLOB    NOT NULL, /* blob this is in */
+		encryption_key  BLOB    NOT NULL, /* random bytes. old blobs will have the same key for each entry (compatibility); new blobs will have different keys for each entry */
+		final_size      INTEGER NOT NULL, /* the length of this entry in bytes, i.e. size after compression, if any, has taken place */
+		offset          INTEGER NOT NULL, /* where in the blob does this start. also, for compatibility reasons, where in the AES CTR stream does this entry's encryption begin */
+		compression_alg TEXT    NOT NULL, /* what kind of compression was done (empty string if not compressed) */
 
-			CHECK(final_size >= 0),
-			CHECK(offset >= 0),
-			CHECK(LENGTH(encryption_key) == 16),
+		CHECK(final_size >= 0),
+		CHECK(offset >= 0),
+		CHECK(LENGTH(encryption_key) == 16),
 
-			FOREIGN KEY(hash)    REFERENCES sizes(hash)    ON UPDATE RESTRICT ON DELETE RESTRICT,
-			FOREIGN KEY(blob_id) REFERENCES blobs(blob_id) ON UPDATE CASCADE  ON DELETE CASCADE
-		);
+		FOREIGN KEY(hash)    REFERENCES sizes(hash)    ON UPDATE RESTRICT ON DELETE RESTRICT,
+		FOREIGN KEY(blob_id) REFERENCES blobs(blob_id) ON UPDATE CASCADE  ON DELETE CASCADE
+	);
 
-		INSERT INTO blobs_temp(blob_id, padding_key, size, final_hash) SELECT blob_id, encryption_key, size, hash_post_enc FROM blobs;
+	INSERT INTO blobs_temp(blob_id, padding_key, size, final_hash) SELECT blob_id, encryption_key, size, hash_post_enc FROM blobs;
 
-		INSERT INTO blob_entries_temp(hash, blob_id, encryption_key, final_size, offset, compression_alg) SELECT hash, blob_id, blobs.encryption_key, final_size, offset, compression_alg FROM blob_entries INNER JOIN blobs USING (blob_id);
+	INSERT INTO blob_entries_temp(hash, blob_id, encryption_key, final_size, offset, compression_alg) SELECT hash, blob_id, blobs.encryption_key, final_size, offset, compression_alg FROM blob_entries INNER JOIN blobs USING (blob_id);
 
-		DROP INDEX blob_entries_by_blob_id;
-		DROP INDEX blob_entries_by_hash;
-		DROP TABLE blobs;
-		DROP TABLE blob_entries;
+	DROP INDEX blob_entries_by_blob_id;
+	DROP INDEX blob_entries_by_hash;
+	DROP TABLE blobs;
+	DROP TABLE blob_entries;
 
-		ALTER TABLE blobs_temp RENAME TO blobs;
-		ALTER TABLE blob_entries_temp RENAME TO blob_entries;
+	ALTER TABLE blobs_temp RENAME TO blobs;
+	ALTER TABLE blob_entries_temp RENAME TO blob_entries;
 
-		CREATE INDEX blob_entries_by_blob_id ON blob_entries(blob_id);
-		CREATE INDEX blob_entries_by_hash    ON blob_entries(hash);
+	CREATE INDEX blob_entries_by_blob_id ON blob_entries(blob_id);
+	CREATE INDEX blob_entries_by_hash    ON blob_entries(hash);
 	`)
 	if err != nil {
 		return err

@@ -13,11 +13,9 @@ import (
 	"strings"
 
 	"github.com/leijurv/gb/compression"
-
-	"github.com/leijurv/gb/storage"
-
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 )
 

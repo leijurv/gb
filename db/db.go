@@ -17,7 +17,6 @@ const databaseTestPath = "file::memory:?mode=memory&cache=shared&_foreign_keys=1
 var ErrNoRows = sql.ErrNoRows
 
 var DB *sql.DB
-var connectionPath *string
 
 func SetupDatabase() {
 	var db string
@@ -43,7 +42,10 @@ func setupDatabase(fullPath string, setupSchema bool) {
 	if err != nil {
 		panic(err)
 	}
-	connectionPath = &fullPath
+	_, err = DB.Exec("PRAGMA journal_size_limit = 100000000") // 100 megabytes
+	if err != nil {
+		panic(err)
+	}
 	//log.Println("Database connection created")
 	//DB.SetMaxOpenConns(1) // 100x better to block for a few hundred ms than to panic with SQLITE_BUSY!!!!
 	// commenting out until i actually hit a sqlite_busy

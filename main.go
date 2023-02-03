@@ -62,10 +62,16 @@ func main() {
 		{
 			Name:  "backup",
 			Usage: "backup a directory (or file)",
-			Flags: []cli.Flag{&cli.BoolFlag{
-				Name:  "no-backup-database",
-				Usage: "do not upload the database",
-			}},
+			Flags: []cli.Flag{
+				&cli.BoolFlag{
+					Name:  "no-backup-database",
+					Usage: "do not upload the database",
+				},
+				&cli.BoolFlag{
+					Name:  "no-database-history",
+					Usage: "upload the database without timestamp appended to the file name",
+				},
+			},
 			Action: func(c *cli.Context) error {
 				if len(storage.GetAll()) == 0 {
 					return errors.New("make a storage first")
@@ -77,7 +83,7 @@ func main() {
 				paths := append([]string{c.Args().First()}, c.Args().Tail()...) // even if no argument (like: "gb backup"), backup current directory by passing one empty string arg
 				backup.Backup(paths, ch)
 				if !c.Bool("no-backup-database") {
-					backup.BackupDB()
+					backup.BackupDB(c.Bool("no-database-history"))
 				}
 				return nil
 			},

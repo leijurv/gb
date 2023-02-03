@@ -16,7 +16,7 @@ import (
 	bip39 "github.com/tyler-smith/go-bip39"
 )
 
-func BackupDB() {
+func BackupDB(noFileTimestamp bool) {
 	log.Println("Backing up the database itself")
 
 	key := DBKey()               // before shutdown since it's saved in the db
@@ -61,7 +61,13 @@ func BackupDB() {
 	log.Println("Decrypt and decompress paranoia verification succeeded")
 	// </paranoia>
 
-	name := "db-backup-" + strconv.FormatInt(now, 10)
+	var name string
+	if !noFileTimestamp {
+		name = "db-backup-" + strconv.FormatInt(now, 10)
+	} else {
+		// old database will be overwritten
+		name = "db-backup"
+	}
 	for _, s := range storages {
 		s.UploadDatabaseBackup(enc, name)
 	}

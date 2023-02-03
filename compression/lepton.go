@@ -39,7 +39,7 @@ func (n *LeptonCompression) Compress(out io.Writer, in io.Reader) error {
 
 type WrappedReadCloserHackToAvoidZombieProcess struct {
 	cmd *exec.Cmd
-	in io.ReadCloser
+	in  io.ReadCloser
 }
 
 func (w *WrappedReadCloserHackToAvoidZombieProcess) Read(p []byte) (int, error) {

@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"crypto/tls"
-	"github.com/leijurv/gb/compression"
 	"html/template"
 	"io"
 	"log"
@@ -13,11 +12,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/leijurv/gb/storage"
-
+	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 )
 
 func Proxy(label string, base string, listen string) {
@@ -98,7 +98,7 @@ func escapePath(path string) string {
 }
 
 func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
-	globPath := strings.Replace(strings.Replace(path, "[", "?", -1), "]", "?", -1) + "*"
+	globPath := utils.FormatForSqliteGlob(path) + "*"
 	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
 	if err != nil {
 		panic(err)
@@ -216,7 +216,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	var offsetIntoBlob int64
 	var comp string
 	err = db.DB.QueryRow(
-		"SELECT blob_entries.blob_id, blobs.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
+		"SELECT blob_entries.blob_id, blob_entries.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
 		hash, storage.GetID()).Scan(&blobID, &key, &path, &compressedSize, &offsetIntoBlob, &comp)
 	if err != nil {
 		panic(err)

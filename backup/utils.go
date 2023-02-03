@@ -224,18 +224,64 @@ func (du *directUpload) Begin(blobID []byte) io.Writer {
 	for _, upload := range du.uploads {
 		writers = append(writers, upload.Writer())
 	}
-	return io.MultiWriter(writers...)
+	return &multithreadedMultiWriter{writers}
 }
 
 func (du *directUpload) End(sha256 []byte, size int64) []storage_base.UploadedBlob {
-	completeds := make([]storage_base.UploadedBlob, 0)
-	for _, upload := range du.uploads {
-		c := upload.End()
+	completeds := make([]storage_base.UploadedBlob, len(du.uploads))
+	var wg sync.WaitGroup
+	for i := range completeds {
+		i := i
+		wg.Add(1)
+		go func() {
+			completeds[i] = du.uploads[i].End()
+			wg.Done() // don't use defer because we only want to call wg.Done if .End didn't panic
+		}()
+	}
+	wg.Wait()
+	for _, c := range completeds {
 		if c.Size != size {
 			log.Println(c.Size, size)
 			panic("sanity check")
 		}
-		completeds = append(completeds, c)
 	}
 	return completeds
+}
+
+type multithreadedMultiWriter struct {
+	writers []io.Writer
+}
+
+func (t *multithreadedMultiWriter) Write(p []byte) (n int, err error) {
+	if len(t.writers) == 1 {
+		// fast case for gb users with only one storage
+		n, err = t.writers[0].Write(p)
+		return
+	}
+	errs := make([]error, len(t.writers))
+	ns := make([]int, len(t.writers))
+	var wg sync.WaitGroup
+	for i := range t.writers {
+		i := i
+		wg.Add(1)
+		go func() {
+			n, err = t.writers[i].Write(p)
+			if err == nil && n != len(p) { // a short write is still an error
+				err = io.ErrShortWrite
+			}
+			errs[i] = err
+			ns[i] = n
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	for i := range errs {
+		if errs[i] != nil {
+			return ns[i], errs[i]
+		}
+		if ns[i] != len(p) {
+			panic("sanity check failed")
+		}
+	}
+	return len(p), nil
 }

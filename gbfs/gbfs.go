@@ -4,22 +4,23 @@
 package gbfs
 
 import (
-	"bazil.org/fuse"
-	fuseFs "bazil.org/fuse/fs"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"os"
+	"strings"
+	"syscall"
+	"time"
+
+	"bazil.org/fuse"
+	fuseFs "bazil.org/fuse/fs"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
-	"io"
-	"os"
-	"strings"
-	"syscall"
-	"time"
 )
 
 type File struct {
@@ -140,7 +141,7 @@ func newUncompressedHandle(hash []byte, tx *sql.Tx) UncompressedFileHandle {
 				blob_entries.blob_id,
 				blob_entries.offset, 
 				blob_entries.final_size,
-				blobs.encryption_key,
+				blob_entries.encryption_key,
 				blob_storage.path,
 				storage.storage_id,
 				storage.type,
@@ -306,7 +307,7 @@ func queryAllFiles(path string, timestamp int64) []File {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	rows, err := tx.Query(QUERY, timestamp, timestamp, path+"*")
+	rows, err := tx.Query(QUERY, timestamp, timestamp, utils.FormatForSqliteGlob(path+"*"))
 	if err != nil {
 		panic(err)
 	}

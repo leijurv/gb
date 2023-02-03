@@ -107,6 +107,6 @@ func Mnemonic(key []byte) {
 	if text == "y\n" {
 		log.Println("ok")
 	} else {
-		log.Println("That wasn't a 'y' but I'm going to accept it anyway lmao")
+		panic("must confirm")
 	}
 }

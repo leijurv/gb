@@ -64,7 +64,7 @@ func hashOneFile(plan HashPlan) {
 			panic(err)
 		}
 		defer func() {
-			err = tx.Commit()
+			err = tx.Commit() // this is ok since shouldn't ever panic
 			if err != nil {
 				panic(err)
 			}

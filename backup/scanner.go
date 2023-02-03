@@ -124,20 +124,12 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		log.Println("Pruner committing")
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Pruner committed")
-	}()
 	if !strings.HasSuffix(backupPath, "/") {
 		panic(backupPath) // sanity check, should have already been completed
 	}
 	log.Println("Finally, handling deleted files!")
 	// anything that was in this directory but is no longer can be deleted
-	pattern := backupPath + "*"
+	pattern := utils.FormatForSqliteGlob(backupPath + "*")
 	rows, err := tx.Query("SELECT path FROM files WHERE path GLOB ? AND end IS NULL", pattern)
 	if err != nil {
 		panic(err)
@@ -167,4 +159,10 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 	if err != nil {
 		panic(err)
 	}
+	log.Println("Pruner committing")
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Pruner committed")
 }

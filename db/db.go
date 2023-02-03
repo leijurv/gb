@@ -3,9 +3,10 @@ package db
 import (
 	"database/sql"
 	"errors"
-	"github.com/leijurv/gb/config"
 	"log"
 	"os"
+
+	"github.com/leijurv/gb/config"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -27,24 +28,30 @@ func SetupDatabase() {
 	} else {
 		db = config.Config().DatabaseLocation
 	}
-	setupDatabase("file:" + db + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=20000")
+	setupDatabase("file:"+db+"?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=20000", true)
 }
 
-func SetupDatabaseTestMode() {
-	setupDatabase(databaseTestPath)
+func SetupDatabaseTestMode(setupSchema bool) {
+	setupDatabase(databaseTestPath, setupSchema)
 }
 
-func setupDatabase(fullPath string) {
+func setupDatabase(fullPath string, setupSchema bool) {
 	//log.Println("Opening database file", fullPath)
 	var err error
 	DB, err = sql.Open("sqlite3", fullPath)
 	if err != nil {
 		panic(err)
 	}
+	_, err = DB.Exec("PRAGMA journal_size_limit = 100000000") // 100 megabytes
+	if err != nil {
+		panic(err)
+	}
 	//log.Println("Database connection created")
 	//DB.SetMaxOpenConns(1) // 100x better to block for a few hundred ms than to panic with SQLITE_BUSY!!!!
 	// commenting out until i actually hit a sqlite_busy
-	initialSetup()
+	if setupSchema {
+		initialSetup()
+	}
 }
 
 func ShutdownDatabase() {

@@ -54,11 +54,10 @@ func DecryptDatabaseV2(data []byte, dbKey []byte) []byte {
 	decr := make([]byte, len(data)-16)
 	createCipherStream(iv, dbKey).XORKeyStream(decr, data[16:])
 	msg := decr[:len(decr)-32]
-	msgHash := sha256.New()
-	msgHash.Write(msg)
-	expectedMAC := ComputeMAC(msgHash.Sum(nil), dbKey)
+	msgHash := sha256.Sum256(msg)
+	expectedMAC := ComputeMAC(msgHash[:], dbKey)
 	if !bytes.Equal(expectedMAC, decr[len(decr)-32:]) {
-		panic("wrong mac")
+		panic("mac did not match. this means the database backup is corrupted or modified and cannot be decrypted")
 	}
 	return msg
 }

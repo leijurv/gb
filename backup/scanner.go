@@ -28,10 +28,7 @@ func getDirectoriesToScan(inputPath string, includePaths []string) []string {
 }
 
 func scannerThread(inputs []File) {
-	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	var ctx ScannerTransactionContext
 	log.Println("Beginning scan now!")
 	for _, input := range inputs {
 		if input.info.IsDir() {
@@ -46,7 +43,7 @@ func scannerThread(inputs []File) {
 			for _, path := range pathsToBackup {
 				utils.WalkFiles(path, func(path string, info os.FileInfo) {
 					filesMap[path] = info
-					scanFile(File{path, info}, tx)
+					scanFile(File{path, info}, ctx.Tx())
 				})
 			}
 			defer func() {
@@ -55,14 +52,11 @@ func scannerThread(inputs []File) {
 				}
 			}()
 		} else {
-			scanFile(input, tx)
+			scanFile(input, ctx.Tx())
 		}
 	}
 	log.Println("Scanner committing")
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	ctx.Close() // do this before wg.Wait
 	log.Println("Scanner committed")
 	go func() {
 		for {
@@ -165,4 +159,41 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 		panic(err)
 	}
 	log.Println("Pruner committed")
+}
+
+type ScannerTransactionContext struct {
+	tx             *sql.Tx
+	recreateTicker *time.Ticker
+}
+
+func (ctx *ScannerTransactionContext) Tx() *sql.Tx {
+	if ctx.tx == nil {
+		tx, err := db.DB.Begin()
+		if err != nil {
+			panic(err)
+		}
+		ctx.tx = tx
+		return tx
+	}
+	if ctx.recreateTicker == nil {
+		ctx.recreateTicker = time.NewTicker(1 * time.Second)
+	}
+	select {
+	case <-ctx.recreateTicker.C:
+		log.Println("Committing and recreating scanner transaction to prevent WAL from growing too large")
+		ctx.Close()
+		return ctx.Tx()
+	default:
+		return ctx.tx
+	}
+}
+
+func (ctx *ScannerTransactionContext) Close() {
+	if ctx.tx != nil {
+		err := ctx.tx.Commit()
+		if err != nil {
+			panic(err)
+		}
+		ctx.tx = nil
+	}
 }

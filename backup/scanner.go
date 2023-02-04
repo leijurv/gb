@@ -166,6 +166,9 @@ type ScannerTransactionContext struct {
 	recreateTicker *time.Ticker
 }
 
+// leaving a single transaction open for the entire backup process causes the WAL to grow unboundedly
+// see issue #31
+// this fixes that issue by committing and reopening the transaction once a second
 func (ctx *ScannerTransactionContext) Tx() *sql.Tx {
 	if ctx.tx == nil {
 		tx, err := db.DB.Begin()
@@ -173,7 +176,6 @@ func (ctx *ScannerTransactionContext) Tx() *sql.Tx {
 			panic(err)
 		}
 		ctx.tx = tx
-		return tx
 	}
 	if ctx.recreateTicker == nil {
 		ctx.recreateTicker = time.NewTicker(1 * time.Second)

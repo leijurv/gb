@@ -57,6 +57,7 @@ func BackupDB() {
 	if err != nil {
 		panic(err)
 	}
+	log.Println("Database", rawDB.Size(), "bytes, compressed encrypted to", afterCompression.Size(), "bytes")
 	for _, upload := range uploads {
 		upl := upload.End()
 		log.Println("DB uploaded to", upl.Path)

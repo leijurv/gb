@@ -2,7 +2,6 @@ package gdrive
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,17 +37,24 @@ func (gds *gDriveStorage) GetID() []byte {
 	return gds.storageID
 }
 
+func (gds *gDriveStorage) BeginDatabaseUpload(filename string) storage_base.StorageUpload {
+	return gds.beginUpload(nil, filename)
+}
+
 func (gds *gDriveStorage) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
+	return gds.beginUpload(blobID, hex.EncodeToString(blobID))
+}
+
+func (gds *gDriveStorage) beginUpload(blobIDOptional []byte, filename string) *gDriveUpload {
 	pipeR, pipeW := io.Pipe()
 	resultCh := make(chan gDriveResult)
 	go func() {
 		defer pipeR.Close()
-		f := &drive.File{
+		file, err := gds.srv.Files.Create(&drive.File{
 			MimeType: "application/x-binary",
-			Name:     hex.EncodeToString(blobID),
+			Name:     filename,
 			Parents:  []string{gds.root},
-		}
-		file, err := gds.srv.Files.Create(f).Fields("id, md5Checksum, size").Media(pipeR).Do()
+		}).Fields("id, md5Checksum, size, name").Media(pipeR).Do()
 		if err != nil {
 			pipeR.CloseWithError(err)
 			log.Println("gdrive error", err)
@@ -61,27 +67,8 @@ func (gds *gDriveStorage) BeginBlobUpload(blobID []byte) storage_base.StorageUpl
 		hasher: &hs,
 		result: resultCh,
 		gds:    gds,
-		blobID: blobID,
+		blobID: blobIDOptional,
 	}
-}
-
-func (gds *gDriveStorage) UploadDatabaseBackup(encryptedDatabase []byte, name string) {
-	file, err := gds.srv.Files.Create(&drive.File{
-		MimeType: "application/x-binary",
-		Name:     name,
-		Parents:  []string{gds.root},
-	}).Fields("id, md5Checksum, size, name").Media(bytes.NewReader(encryptedDatabase)).Do()
-	if err != nil {
-		panic(err)
-	}
-	if file.Size != int64(len(encryptedDatabase)) {
-		panic("upload length failed")
-	}
-	hash := md5.Sum(encryptedDatabase)
-	if file.Md5Checksum != hex.EncodeToString(hash[:]) {
-		panic("upload hash failed")
-	}
-	log.Println("Database backed up to Google Drive. Name:", file.Name, "ID:", file.Id)
 }
 
 func (gds *gDriveStorage) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
@@ -129,7 +116,7 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 			panic(err)
 		}
 		for _, i := range r.Files {
-			if strings.HasPrefix(i.Name, "db-backup-") {
+			if strings.HasPrefix(i.Name, "db-backup-") || strings.HasPrefix(i.Name, "db-v2backup-") {
 				continue // this is not a blob
 			}
 			blobID, err := hex.DecodeString(i.Name)
@@ -171,7 +158,7 @@ func (up *gDriveUpload) End() storage_base.UploadedBlob {
 	}
 	file := result.file
 	hash, size := up.hasher.HashAndSize()
-	log.Println("Upload output", file.Id)
+	log.Println("Upload output: Name:", file.Name, "ID:", file.Id)
 	if size != file.Size {
 		log.Println("Expecting size", size, "actual size", file.Size)
 		panic("gdrive broke the size lmao")

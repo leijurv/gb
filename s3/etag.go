@@ -7,14 +7,19 @@ import (
 	"strconv"
 )
 
+type ETagResult struct {
+	ETag string
+	Size int64
+}
+
 type ETagCalculator struct {
 	Writer *io.PipeWriter
-	Result chan string
+	Result chan ETagResult
 }
 
 func CreateETagCalculator() *ETagCalculator {
 	reader, writer := io.Pipe()
-	result := make(chan string)
+	result := make(chan ETagResult)
 	calc := &ETagCalculator{
 		Writer: writer,
 		Result: result,
@@ -22,6 +27,7 @@ func CreateETagCalculator() *ETagCalculator {
 	go func() {
 		numParts := 0
 		var allSums []byte
+		var totalSz int64
 		for {
 			lr := io.LimitReader(reader, s3PartSize)
 			h := md5.New()
@@ -34,13 +40,14 @@ func CreateETagCalculator() *ETagCalculator {
 				break
 			}
 			allSums = append(allSums, h.Sum(nil)...)
+			totalSz += n
 			numParts++
 		}
 		if numParts == 1 {
-			result <- hex.EncodeToString(allSums)
+			result <- ETagResult{hex.EncodeToString(allSums), totalSz}
 		} else {
 			sum := md5.Sum(allSums)
-			result <- hex.EncodeToString(sum[:]) + "-" + strconv.Itoa(numParts)
+			result <- ETagResult{hex.EncodeToString(sum[:]) + "-" + strconv.Itoa(numParts), totalSz}
 		}
 		close(result)
 		reader.Close()

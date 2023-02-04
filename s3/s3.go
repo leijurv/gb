@@ -1,7 +1,6 @@
 package s3
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -129,8 +128,15 @@ func (remote *S3) makeUploader() *s3manager.Uploader {
 	})
 }
 
+func (remote *S3) BeginDatabaseUpload(filename string) storage_base.StorageUpload {
+	return remote.beginUpload(nil, remote.niceRootPath()+filename)
+}
+
 func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
-	path := remote.niceRootPath() + formatPath(blobID)
+	return remote.beginUpload(blobID, remote.niceRootPath()+formatPath(blobID))
+}
+
+func (remote *S3) beginUpload(blobIDOptional []byte, path string) *s3Upload {
 	log.Println("Path is", path)
 	pipeR, pipeW := io.Pipe()
 	resultCh := make(chan s3Result)
@@ -153,32 +159,8 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 		result: resultCh,
 		path:   path,
 		s3:     remote,
-		blobID: blobID,
+		blobID: blobIDOptional,
 	}
-}
-
-func (remote *S3) UploadDatabaseBackup(encryptedDatabase []byte, name string) {
-	path := remote.niceRootPath() + name
-	result, err := remote.makeUploader().Upload(&s3manager.UploadInput{
-		Bucket: aws.String(remote.Data.Bucket),
-		Key:    aws.String(path),
-		Body:   bytes.NewReader(encryptedDatabase),
-	})
-	if err != nil {
-		panic(err)
-	}
-	calc := CreateETagCalculator()
-	calc.Writer.Write(encryptedDatabase)
-	calc.Writer.Close()
-	etag := <-calc.Result
-	realEtag, realSize := fetchETagAndSize(remote, path)
-	if realSize != int64(len(encryptedDatabase)) {
-		panic("upload length failed")
-	}
-	if realEtag != etag {
-		panic("upload hash failed")
-	}
-	log.Println("Database backed up to S3. Location:", result.Location)
 }
 
 func (remote *S3) Metadata(path string) (string, int64) {
@@ -213,7 +195,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 	},
 		func(page *s3.ListObjectsOutput, lastPage bool) bool {
 			for _, obj := range page.Contents {
-				if strings.Contains(*obj.Key, "db-backup-") {
+				if strings.Contains(*obj.Key, "db-backup-") || strings.Contains(*obj.Key, "db-v2backup-") {
 					continue // this is not a blob
 				}
 				etag := *obj.ETag
@@ -257,19 +239,19 @@ func (up *s3Upload) End() storage_base.UploadedBlob {
 	if result.err != nil {
 		panic(result.err)
 	}
-	log.Println("Upload output", result.result.Location)
+	log.Println("Upload output:", result.result.Location)
 	etag := <-up.calc.Result
-	log.Println("Expecting etag", etag)
+	log.Println("Expecting etag", etag.ETag)
 	realEtag, realSize := fetchETagAndSize(up.s3, up.path)
 	log.Println("Real etag was", realEtag)
-	if etag != realEtag {
-		panic("aws broke the etag lmao")
+	if etag.ETag != realEtag || etag.Size != realSize {
+		panic("aws broke the etag or size lmao")
 	}
 	return storage_base.UploadedBlob{
 		StorageID: up.s3.StorageID,
 		BlobID:    up.blobID,
 		Path:      up.path,
-		Checksum:  etag,
+		Checksum:  etag.ETag,
 		Size:      realSize,
 	}
 }

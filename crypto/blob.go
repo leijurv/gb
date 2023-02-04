@@ -14,22 +14,26 @@ func EncryptBlob(out io.Writer, seekOffset int64) (io.Writer, []byte) {
 }
 
 func EncryptBlobWithKey(out io.Writer, seekOffset int64, key []byte) io.Writer {
-	return &cipher.StreamWriter{S: createCipherStream(seekOffset, key), W: out}
+	return &cipher.StreamWriter{S: createOffsetCipherStream(seekOffset, key), W: out}
 }
 
 // take advantage of AES-CTR by seeking
 // assume seekOffset is where this reader is "starting", and the seeking has *already taken place* (e.g. by a Range query to s3)
 func DecryptBlobEntry(in io.Reader, seekOffset int64, key []byte) io.Reader {
-	return &cipher.StreamReader{S: createCipherStream(seekOffset, key), R: in}
+	return &cipher.StreamReader{S: createOffsetCipherStream(seekOffset, key), R: in}
 }
 
-func createCipherStream(seekOffset int64, key []byte) cipher.Stream {
+func createCipherStream(iv []byte, key []byte) cipher.Stream {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		panic(err)
 	}
+	return cipher.NewCTR(block, iv)
+}
+
+func createOffsetCipherStream(seekOffset int64, key []byte) cipher.Stream {
 	iv, remainingSeek := CalcIVAndSeek(seekOffset)
-	stream := cipher.NewCTR(block, iv)
+	stream := createCipherStream(iv, key)
 	// hack to advance, xor the right amount of garbage with the right amount of garbage
 	stream.XORKeyStream(make([]byte, remainingSeek), make([]byte, remainingSeek))
 	return stream

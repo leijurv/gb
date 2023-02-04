@@ -3,16 +3,18 @@ package backup
 import (
 	"bufio"
 	"bytes"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"strconv"
 
-	"github.com/DataDog/zstd"
+	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
+	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 	bip39 "github.com/tyler-smith/go-bip39"
 )
 
@@ -33,37 +35,31 @@ func BackupDB() {
 		panic("closed the database but " + loc + "-shm still exists?!")
 	}
 
-	log.Println("Reading database file")
-	dbBytes, err := ioutil.ReadFile(loc)
+	f, err := os.Open(loc)
 	if err != nil {
 		panic(err)
 	}
+	defer f.Close()
 
-	log.Println("Done reading, now compressing database file")
-	compressed, err := zstd.Compress(nil, dbBytes)
-	if err != nil {
-		panic(err)
-	}
-
-	log.Println("Done compressing, now encrypting database file")
-	enc := crypto.EncryptDatabase(compressed, key)
-	log.Println("Database", len(dbBytes), "bytes, compressed encrypted to", len(enc), "bytes")
-
-	// <paranoia>
-	testDec := crypto.DecryptDatabase(enc, key)
-	testDecomp, err := zstd.Decompress(nil, testDec)
-	if err != nil {
-		panic(err)
-	}
-	if !bytes.Equal(testDecomp, dbBytes) {
-		panic("gcm and/or zstd have failed me")
-	}
-	log.Println("Decrypt and decompress paranoia verification succeeded")
-	// </paranoia>
-
-	name := "db-backup-" + strconv.FormatInt(now, 10)
+	fname := "db-v2backup-" + strconv.FormatInt(now, 10)
+	uploads := make([]storage_base.StorageUpload, 0)
+	writers := make([]io.Writer, 0)
 	for _, s := range storages {
-		s.UploadDatabaseBackup(enc, name)
+		upload := s.BeginDatabaseUpload(fname)
+		uploads = append(uploads, upload)
+		writers = append(writers, upload.Writer())
+	}
+	rawDB := utils.NewSHA256HasherSizer()
+	out := crypto.EncryptDatabaseV2(io.MultiWriter(writers...), key)
+	afterCompression := utils.NewSHA256HasherSizer()
+	compression.VerifiedCompression(&compression.ZstdCompression{}, io.MultiWriter(&afterCompression, out), io.TeeReader(f, &rawDB), &rawDB)
+	_, err = out.Write(crypto.ComputeMAC(afterCompression.Hash(), key))
+	if err != nil {
+		panic(err)
+	}
+	for _, upload := range uploads {
+		upl := upload.End()
+		log.Println("DB uploaded to", upl.Path)
 	}
 	log.Println("Exiting process since database is closed and backed up")
 	os.Exit(0)

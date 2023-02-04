@@ -37,7 +37,7 @@ func TestV2Enc(t *testing.T) {
 	}
 
 	enc := buf.Bytes()
-	if len(enc) != len(data)+16+32 {
+	if len(enc) != 16+len(data)+32 {
 		t.Error("wrong length")
 	}
 

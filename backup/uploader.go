@@ -205,10 +205,11 @@ func uploadFailure(planned Planned) {
 	if len(late) > 0 {
 		hashLateMap[expected] = late
 		// confirmed, another file was relying on this
+		newSource := late[0] // enqueue THAT file to be uploaded
 		wg.Add(1)
 		go func() {
 			// obviously, only write ONE of the other files we know to have this hash, not all
-			bucketerCh <- Planned{planned.File, plannedHash, planned.confirmedSize, nil}
+			bucketerCh <- Planned{newSource, plannedHash, planned.confirmedSize, nil}
 		}() // we will upload the next file on the list with the same hash so they don't get left stranded (hashed, planned, but not actually uploaded)
 	} else {
 		delete(hashLateMap, expected) // important! otherwise the ok / len(late) > 0 check would panic lmao

@@ -228,18 +228,19 @@ func IsDatabaseFile(path string) bool {
 	return path == dbPath || path == dbPath+"-wal" || path == dbPath+"-shm"
 }
 
-func FormatForSqliteGlob(pattern string) string {
-	// https://stackoverflow.com/questions/12934671/how-to-use-glob-and-find-brace-brackets-in-sqlite
+func EscapeGlobChars(pattern string) string {
+	// https://stackoverflow.com/questions/12934671/how-to-use-glob-and-find-brace-brackets-in-sqlite (not really relevant but helpful)
+	// this allows us to match characters that have special meaning to glob by putting them into a character list by themselves
 	var ret strings.Builder
 	for _, ch := range pattern {
-		switch string(ch) {
-		case "[":
+		switch ch {
+		case '[':
 			ret.WriteString("[[]")
-		case "]":
-			ret.WriteString("[]]") // technically all my unit tests pass without this "]" case, but it feels weird to have unmatched brackets like that, so I'm leaving this in
-		case "?":
+		case ']':
+			ret.WriteString("[]]") // not necessary but here for symmetry
+		case '?':
 			ret.WriteString("[?]")
-		case "*":
+		case '*':
 			ret.WriteString("[*]")
 		default:
 			ret.WriteRune(ch)

@@ -118,8 +118,8 @@ func TestGlob(t *testing.T) {
 			if strings.Contains(pattern, "[") && globs(t, pattern, pattern) {
 				t.Errorf(pattern + " shouldn't glob itself on its own, since it has a [")
 			}
-			if !globs(t, pattern, utils.FormatForSqliteGlob(pattern)) {
-				t.Errorf(pattern + " should glob itself when converted to " + utils.FormatForSqliteGlob(pattern))
+			if !globs(t, pattern, utils.EscapeGlobChars(pattern)) {
+				t.Errorf(pattern + " should glob itself when converted to " + utils.EscapeGlobChars(pattern))
 			}
 		}
 	})

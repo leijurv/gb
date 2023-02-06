@@ -22,7 +22,7 @@ func DirHistory(basePath string) {
 	}
 	log.Println("Fetching history of", basePath)
 	log.Println("This will only work on directories. For files, use \"history\" instead of \"ls\".")
-	rows, err := db.DB.Query(`SELECT path, COUNT(*) AS num_revisions, MIN(start) AS first_backup, MAX(fs_modified) AS max_fs_modified, MIN(COALESCE(end, 0)) AS min_end FROM files WHERE path GLOB ? GROUP BY path`, utils.FormatForSqliteGlob(basePath)+"*")
+	rows, err := db.DB.Query(`SELECT path, COUNT(*) AS num_revisions, MIN(start) AS first_backup, MAX(fs_modified) AS max_fs_modified, MIN(COALESCE(end, 0)) AS min_end FROM files WHERE path GLOB ? GROUP BY path`, utils.EscapeGlobChars(basePath)+"*")
 	if err != nil {
 		panic(err)
 	}

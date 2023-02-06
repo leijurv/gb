@@ -98,7 +98,7 @@ func escapePath(path string) string {
 }
 
 func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
-	globPath := utils.FormatForSqliteGlob(path) + "*"
+	globPath := utils.EscapeGlobChars(path) + "*"
 	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
 	if err != nil {
 		panic(err)

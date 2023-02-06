@@ -143,7 +143,6 @@ func DryBackup(rawPaths []string) {
 		size += f.file.info.Size()
 	}
 
-	log.Printf("%d paths to be backed up (%s bytes)", len(statuses), utils.FormatCommas(size))
 	for _, f := range statuses {
 		var why string
 		if f.modified {
@@ -154,4 +153,5 @@ func DryBackup(rawPaths []string) {
 		}
 		log.Printf("%s (%s, %s)", f.file.path, utils.FormatCommas(f.file.info.Size()), why)
 	}
+	log.Printf("%d paths to be backed up (%s bytes)", len(statuses), utils.FormatCommas(size))
 }

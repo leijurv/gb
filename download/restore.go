@@ -3,6 +3,7 @@ package download
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -77,11 +78,11 @@ func Restore(src string, dest string, timestamp int64) {
 	log.Println("dest:", dest)
 	log.Println("timestamp:", timestamp)
 
-	assumingFile := generatePlanAssumingFile(src, timestamp)
+	assumingFile := generatePlan(src, timestamp, true)
 	if len(assumingFile) > 1 {
 		panic("database should not allow this?")
 	}
-	assumingDir := generatePlanAssumingDir(src, timestamp)
+	assumingDir := generatePlan(src, timestamp, false)
 	srcFile := len(assumingFile) > 0
 	srcDir := len(assumingDir) > 0
 	if !srcFile && !srcDir {
@@ -461,21 +462,20 @@ func maxstart(items []Item) int64 {
 	return m
 }
 
-func generatePlanAssumingFile(path string, timestamp int64) []Item {
-	return generatePlanUsingQuery(QUERY_BASE+" = ?", path, timestamp, path)
-}
-
-func generatePlanAssumingDir(path string, timestamp int64) []Item {
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
+func generatePlan(path string, timestamp int64, assumingFile bool) []Item {
+	var rows *sql.Rows
+	var err error
+	if assumingFile {
+		rows, err = db.DB.Query(QUERY_BASE+" = ?", timestamp, timestamp, path)
+	} else {
+		if !strings.HasSuffix(path, "/") {
+			path += "/"
+		}
+		rows, err = db.DB.Query(QUERY_BASE+db.StartsWithPattern, timestamp, timestamp, path, path)
 	}
-	return generatePlanUsingQuery(QUERY_BASE+" GLOB ?", utils.EscapeGlobChars(path)+"*", timestamp, path)
-}
 
-func generatePlanUsingQuery(query string, path string, timestamp int64, prefixChk string) []Item {
 	plan := make([]Item, 0)
-	log.Println(query, path, timestamp)
-	rows, err := db.DB.Query(query, timestamp, timestamp, path)
+	log.Println(path, timestamp, assumingFile)
 	if err != nil {
 		panic(err)
 	}
@@ -485,10 +485,6 @@ func generatePlanUsingQuery(query string, path string, timestamp int64, prefixCh
 		err = rows.Scan(&item.hash, &item.origPath, &item.fsModified, &item.permissions, &item.start, &item.size)
 		if err != nil {
 			panic(err)
-		}
-		if !strings.HasPrefix(item.origPath, prefixChk) {
-			// handle the case where a directory actually has a * in its name smh
-			continue
 		}
 		plan = append(plan, item)
 	}

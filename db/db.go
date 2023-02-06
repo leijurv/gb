@@ -18,6 +18,8 @@ var ErrNoRows = sql.ErrNoRows
 
 var DB *sql.DB
 
+const StartsWithPattern = " BETWEEN (?) AND (? || CHAR(0x10FFFF)) "
+
 func SetupDatabase() {
 	var db string
 	if config.DatabaseLocation != "" {

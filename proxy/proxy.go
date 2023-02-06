@@ -17,7 +17,6 @@ import (
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
-	"github.com/leijurv/gb/utils"
 )
 
 func Proxy(label string, base string, listen string) {
@@ -98,8 +97,7 @@ func escapePath(path string) string {
 }
 
 func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
-	globPath := utils.EscapeGlobChars(path) + "*"
-	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path GLOB ?", globPath)
+	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path "+db.StartsWithPattern, path, path)
 	if err != nil {
 		panic(err)
 	}

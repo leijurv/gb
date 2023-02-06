@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -226,25 +225,4 @@ func FormatCommas(num int64) string {
 func IsDatabaseFile(path string) bool {
 	dbPath := config.Config().DatabaseLocation
 	return path == dbPath || path == dbPath+"-wal" || path == dbPath+"-shm"
-}
-
-func EscapeGlobChars(pattern string) string {
-	// https://stackoverflow.com/questions/12934671/how-to-use-glob-and-find-brace-brackets-in-sqlite (not really relevant but helpful)
-	// this allows us to match characters that have special meaning to glob by putting them into a character list by themselves
-	var ret strings.Builder
-	for _, ch := range pattern {
-		switch ch {
-		case '[':
-			ret.WriteString("[[]")
-		case ']':
-			ret.WriteString("[]]") // not necessary but here for symmetry
-		case '?':
-			ret.WriteString("[?]")
-		case '*':
-			ret.WriteString("[*]")
-		default:
-			ret.WriteRune(ch)
-		}
-	}
-	return ret.String()
 }

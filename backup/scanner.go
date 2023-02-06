@@ -123,7 +123,7 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 	}
 	log.Println("Finally, handling deleted files!")
 	// anything that was in this directory but is no longer can be deleted
-	pattern := utils.FormatForSqliteGlob(backupPath + "*")
+	pattern := utils.FormatForSqliteGlob(backupPath) + "*"
 	rows, err := tx.Query("SELECT path FROM files WHERE path GLOB ? AND end IS NULL", pattern)
 	if err != nil {
 		panic(err)

@@ -237,6 +237,10 @@ func FormatForSqliteGlob(pattern string) string {
 			ret.WriteString("[[]")
 		case "]":
 			ret.WriteString("[]]") // technically all my unit tests pass without this "]" case, but it feels weird to have unmatched brackets like that, so I'm leaving this in
+		case "?":
+			ret.WriteString("[?]")
+		case "*":
+			ret.WriteString("[*]")
 		default:
 			ret.WriteRune(ch)
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -182,7 +183,11 @@ func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
 	if err != nil {
 		panic(err)
 	}
-	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, now, info.ModTime().Unix(), info.Mode()&os.ModePerm)
+	modTime := info.ModTime().Unix()
+	if modTime < 0 {
+		panic(fmt.Sprintf("Invalid modification time for %s: %d", path, modTime))
+	}
+	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, now, modTime, info.Mode()&os.ModePerm)
 	if err != nil {
 		panic(err)
 	}

@@ -134,12 +134,6 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 		if err != nil {
 			panic(err)
 		}
-		if !strings.HasPrefix(databasePath, backupPath) {
-			// if there's a *, sqlite will match too many rows (not too few), which is at least better than the alternative i guess
-			// but we do need to check it again like this
-			log.Println("Having a * in your folder name is really a bad idea, good thing I thought of this!")
-			continue
-		}
 		if _, ok := filesMap[databasePath]; !ok {
 			log.Println(databasePath, "used to exist but does not any longer. Marking as ended.")
 			_, err = tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", now, databasePath)

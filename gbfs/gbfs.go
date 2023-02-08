@@ -284,13 +284,11 @@ func (gb GBFS) Root() (fuseFs.Node, error) {
 	return &gb.root, nil
 }
 
-const (
-	QUERY = `SELECT files.path, files.hash, files.fs_modified, files.permissions, sizes.size, blob_entries.compression_alg 
-				FROM files 
+var QUERY = `SELECT files.path, files.hash, files.fs_modified, files.permissions, sizes.size, blob_entries.compression_alg
+				FROM files
 				    INNER JOIN sizes ON sizes.hash = files.hash
 					INNER JOIN blob_entries ON blob_entries.hash = files.hash
-				WHERE (? >= files.start AND (files.end > ? OR files.end IS NULL)) AND files.path GLOB ?`
-)
+				WHERE (?1 >= files.start AND (files.end > ?1 OR files.end IS NULL)) AND files.path ` + db.StartsWithPattern(2)
 
 func queryAllFiles(path string, timestamp int64) []File {
 	tx, err := db.DB.Begin()
@@ -307,7 +305,7 @@ func queryAllFiles(path string, timestamp int64) []File {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	rows, err := tx.Query(QUERY, timestamp, timestamp, utils.EscapeGlobChars(path)+"*")
+	rows, err := tx.Query(QUERY, timestamp, path)
 	if err != nil {
 		panic(err)
 	}

@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 
@@ -18,7 +19,9 @@ var ErrNoRows = sql.ErrNoRows
 
 var DB *sql.DB
 
-const StartsWithPattern = " BETWEEN (?) AND (? || CHAR(0x10FFFF)) "
+func StartsWithPattern(arg int32) string {
+	return fmt.Sprintf(" BETWEEN (?%d) AND (?%d || CHAR(0x10FFFF)) ", arg, arg)
+}
 
 func SetupDatabase() {
 	var db string

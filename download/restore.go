@@ -19,9 +19,9 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-const (
-	QUERY_BASE = "SELECT files.hash, files.path, files.fs_modified, files.permissions, files.start, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE (? >= files.start AND (files.end > ? OR files.end IS NULL)) AND files.path "
-)
+func QueryBase(arg int32) string {
+	return fmt.Sprintf("SELECT files.hash, files.path, files.fs_modified, files.permissions, files.start, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE (?%d >= files.start AND (files.end > ?%d OR files.end IS NULL)) AND files.path ", arg, arg)
+}
 
 // one path on disk we are going to write, and what should be written there
 type Item struct {
@@ -466,12 +466,12 @@ func generatePlan(path string, timestamp int64, assumingFile bool) []Item {
 	var rows *sql.Rows
 	var err error
 	if assumingFile {
-		rows, err = db.DB.Query(QUERY_BASE+" = ?", timestamp, timestamp, path)
+		rows, err = db.DB.Query(QueryBase(1)+" = ?", timestamp, path)
 	} else {
 		if !strings.HasSuffix(path, "/") {
 			path += "/"
 		}
-		rows, err = db.DB.Query(QUERY_BASE+db.StartsWithPattern, timestamp, timestamp, path, path)
+		rows, err = db.DB.Query(QueryBase(1)+db.StartsWithPattern(2), timestamp, path)
 	}
 
 	plan := make([]Item, 0)

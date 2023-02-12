@@ -21,7 +21,7 @@ var DB *sql.DB
 
 // see https://sqlite.org/forum/info/eabfcd13dcd71807
 func StartsWithPattern(arg int32) string {
-	return fmt.Sprintf(" BETWEEN (?%d) AND (?%d || CHAR(0x10FFFF)) ", arg, arg)
+	return fmt.Sprintf(" BETWEEN (?%d) AND (?%d || x'ff') ", arg, arg)
 }
 
 func SetupDatabase() {

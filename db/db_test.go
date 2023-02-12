@@ -218,6 +218,40 @@ func TestLayerTwoMigration(t *testing.T) {
 	})
 }
 
+func TestStartsWithPattern(t *testing.T) {
+	WithTestingDatabase(t, false, func() {
+		pattern := "abc"
+		if !startsWith(t, pattern, pattern) {
+			t.Errorf("string should start with itself")
+		}
+		prev := []byte(pattern)
+		prev[len(prev)-1]--
+		if startsWith(t, string(prev), pattern) {
+			t.Errorf("string should not start with prev string 'abb'")
+		}
+		next := []byte(pattern)
+		next[len(next)-1]++
+		if startsWith(t, string(next), pattern) {
+			t.Errorf("string should not start with next string 'abd'")
+		}
+		for ch := 0; ch < 256; ch++ {
+			longer := append([]byte(pattern), byte(ch))
+			if !startsWith(t, string(longer), pattern) {
+				t.Errorf("appending any byte to the pattern should still start with the pattern")
+			}
+		}
+	})
+}
+
+func startsWith(t *testing.T, str string, pattern string) bool {
+	var ret bool
+	err := DB.QueryRow("SELECT ?1 "+StartsWithPattern(2), str, pattern).Scan(&ret)
+	if err != nil {
+		t.Error(err)
+	}
+	return ret
+}
+
 func testingHash(usage string) []byte {
 	meme := sha256.Sum256([]byte(usage))
 	return meme[:]
@@ -265,15 +299,6 @@ func canSizesTableBeClearedWithoutError(t *testing.T) bool {
 func numSizes(t *testing.T) int {
 	var ret int
 	err := DB.QueryRow("SELECT COUNT(*) FROM sizes").Scan(&ret)
-	if err != nil {
-		t.Error(err)
-	}
-	return ret
-}
-
-func globs(t *testing.T, test string, pattern string) bool {
-	var ret bool
-	err := DB.QueryRow("SELECT ? GLOB ?", test, pattern).Scan(&ret)
 	if err != nil {
 		t.Error(err)
 	}

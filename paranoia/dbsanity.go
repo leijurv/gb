@@ -182,7 +182,7 @@ var queriesThatShouldHaveNoRows = []string{
 }
 
 func DBParanoia() {
-	sqliteVerifyQuick()
+	sqliteVerifyPragmaCheck("quick_check")
 	sqliteVerifyForeignKeys()
 	for _, q := range queriesThatShouldHaveNoRows {
 		log.Println("Running paranoia query:", q)
@@ -195,7 +195,7 @@ func DBParanoia() {
 		}
 	}
 	pathUtf8()
-	sqliteVerifyIntegrity()
+	sqliteVerifyPragmaCheck("integrity_check")
 	blobsCoherence()
 	log.Println("Done running database paranoia")
 }
@@ -217,7 +217,7 @@ func pathUtf8() {
 		if !utf8.ValidString(path) {
 			panic("invalid utf8 in the files database at path " + path)
 		}
-		cnt += 1
+		cnt++
 	}
 	err = rows.Err()
 	if err != nil {
@@ -226,13 +226,14 @@ func pathUtf8() {
 	log.Printf("Done running files path utf8 check on %d rows\n", cnt)
 }
 
-func sqliteVerifyIntegrity() {
-	log.Println("Running sqlite `PRAGMA integrity_check;`")
-	rows, err := db.DB.Query("PRAGMA integrity_check")
+func sqliteVerifyPragmaCheck(pragma string) {
+	log.Println("Running sqlite `PRAGMA " + pragma + ";`")
+	rows, err := db.DB.Query("PRAGMA " + pragma)
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
+	ok := false
 	for rows.Next() {
 		var result string
 		err = rows.Scan(&result)
@@ -240,38 +241,18 @@ func sqliteVerifyIntegrity() {
 			panic(err)
 		}
 		if result != "ok" {
-			panic("sqlite integrity check failed " + result)
+			panic("sqlite " + pragma + " failed " + result)
 		}
+		ok = true
 	}
 	err = rows.Err()
 	if err != nil {
 		panic(err)
 	}
-	log.Println("Done running sqlite `PRAGMA integrity_check;`")
-}
-
-func sqliteVerifyQuick() {
-	log.Println("Running sqlite `PRAGMA quick_check;`")
-	rows, err := db.DB.Query("PRAGMA quick_check")
-	if err != nil {
-		panic(err)
+	if !ok {
+		panic("`PRAGMA " + pragma + ";` returned no rows?")
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var result string
-		err = rows.Scan(&result)
-		if err != nil {
-			panic(err)
-		}
-		if result != "ok" {
-			panic("sqlite quick check failed " + result)
-		}
-	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
-	log.Println("Done running sqlite `PRAGMA quick_check;`")
+	log.Println("Done running sqlite `PRAGMA " + pragma + ";`")
 }
 
 func sqliteVerifyForeignKeys() {

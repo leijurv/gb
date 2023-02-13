@@ -3,6 +3,7 @@ package paranoia
 import (
 	"encoding/hex"
 	"log"
+	"unicode/utf8"
 
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
@@ -70,6 +71,7 @@ var queriesThatShouldHaveNoRows = []string{
 	`,
 
 	"SELECT hash FROM files WHERE path LIKE '%/'",
+	"SELECT hash FROM files WHERE path NOT LIKE '/%'",
 
 	// everything has been backed up to every destination
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage) -- if this one fails it means that there is a blob that is in some storages but not all of them. `gb replicate` can help with this!",
@@ -180,6 +182,8 @@ var queriesThatShouldHaveNoRows = []string{
 }
 
 func DBParanoia() {
+	sqliteVerifyQuick()
+	sqliteVerifyForeignKeys()
 	for _, q := range queriesThatShouldHaveNoRows {
 		log.Println("Running paranoia query:", q)
 		var result []byte
@@ -190,8 +194,114 @@ func DBParanoia() {
 			panic("sanity query should have no rows")
 		}
 	}
+	pathUtf8()
+	sqliteVerifyIntegrity()
 	blobsCoherence()
 	log.Println("Done running database paranoia")
+}
+
+func pathUtf8() {
+	log.Println("Running files path utf8 check")
+	rows, err := db.DB.Query("SELECT path FROM files")
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	cnt := 0
+	for rows.Next() {
+		var path string
+		err = rows.Scan(&path)
+		if err != nil {
+			panic(err)
+		}
+		if !utf8.ValidString(path) {
+			panic("invalid utf8 in the files database at path " + path)
+		}
+		cnt += 1
+	}
+	err = rows.Err()
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Done running files path utf8 check on %d rows\n", cnt)
+}
+
+func sqliteVerifyIntegrity() {
+	log.Println("Running sqlite `PRAGMA integrity_check;`")
+	rows, err := db.DB.Query("PRAGMA integrity_check")
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var result string
+		err = rows.Scan(&result)
+		if err != nil {
+			panic(err)
+		}
+		if result != "ok" {
+			panic("sqlite integrity check failed " + result)
+		}
+	}
+	err = rows.Err()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Done running sqlite `PRAGMA integrity_check;`")
+}
+
+func sqliteVerifyQuick() {
+	log.Println("Running sqlite `PRAGMA quick_check;`")
+	rows, err := db.DB.Query("PRAGMA quick_check")
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var result string
+		err = rows.Scan(&result)
+		if err != nil {
+			panic(err)
+		}
+		if result != "ok" {
+			panic("sqlite quick check failed " + result)
+		}
+	}
+	err = rows.Err()
+	if err != nil {
+		panic(err)
+	}
+	log.Println("Done running sqlite `PRAGMA quick_check;`")
+}
+
+func sqliteVerifyForeignKeys() {
+	log.Println("Running sqlite `PRAGMA foreign_key_check;`")
+	rows, err := db.DB.Query("PRAGMA foreign_key_check")
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+	failed := false
+	for rows.Next() {
+		var table string
+		var rowid int64
+		var referredTable string
+		var foreignIdx int
+		err = rows.Scan(&table, &rowid, &referredTable, &foreignIdx)
+		if err != nil {
+			panic(err)
+		}
+		log.Printf("Failed foreign key check: rowid %d in table `%s` wants to reference a matching row in table `%s` due to foreign key constraint index %d but there is none\n", rowid, table, referredTable, foreignIdx)
+		failed = true
+	}
+	err = rows.Err()
+	if err != nil {
+		panic(err)
+	}
+	if failed {
+		panic("`PRAGMA foreign_key_check;` failed, see above")
+	}
+	log.Println("Done running sqlite `PRAGMA foreign_key_check;`")
 }
 
 func blobsCoherence() {

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"syscall"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 
@@ -53,6 +54,9 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 		done <- struct{}{}
 	}()
 	err := filepath.Walk(startPath, func(path string, info os.FileInfo, err error) error {
+		if !utf8.ValidString(path) {
+			panic("invalid utf8 on your filesystem at " + path)
+		}
 		if config.ExcludeFromBackup(startPath, path) {
 			if info == nil {
 				log.Println("EXCLUDING & ERROR while reading path which is ignored by your configuration:", path, err)

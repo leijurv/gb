@@ -202,8 +202,12 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	if err != nil {
 		panic(err)
 	}
+	ServeHashOverHTTP(hash, w, req, storage)
+}
+
+func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, storage storage_base.Storage) {
 	var realContentLength int64
-	err = db.DB.QueryRow("SELECT size FROM sizes WHERE hash = ?", hash).Scan(&realContentLength)
+	err := db.DB.QueryRow("SELECT size FROM sizes WHERE hash = ?", hash).Scan(&realContentLength)
 	if err != nil {
 		panic(err)
 	}
@@ -288,7 +292,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 
 	decrypted := crypto.DecryptBlobEntry(io.LimitReader(data, claimedLength), seekStart, key)
 	reader := compression.ByAlgName(comp).Decompress(decrypted)
-	writeHttpResponse(w, reader, requestedStart, claimedLength, realContentLength, pathOnDisk, respondWithRange)
+	writeHttpResponse(w, reader, requestedStart, claimedLength, realContentLength, req.URL.Path, respondWithRange)
 }
 
 func writeHttpResponse(w http.ResponseWriter, reader io.ReadCloser, start int64, claimedLength int64, realLength int64, path string, respondWithRange bool) {

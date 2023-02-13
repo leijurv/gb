@@ -222,6 +222,8 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	log.Println(req)
 	log.Println("Offset into blob", offsetIntoBlob)
 	claimedLength := compressedSize
+	// ^ seems like a bit of a footgun, but since Range header isn't supported with compression, it doesn't cause any issues?
+	// for compressed files, it needs to be this way for storoage.DownloadSection and crypto.DecryptBlobEntry, but for Range queries it's user-defined
 	seekStart := offsetIntoBlob
 	var requestedStart int64
 	respondWithRange := false
@@ -261,7 +263,7 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 	}
 
 	var data io.ReadCloser
-	if path[:3] == "gb/" {
+	if path[:3] == "gb/" && os.Getenv("GB_HTTP_PROXY_PATTERN") != "" {
 		pattern := os.Getenv("GB_HTTP_PROXY_PATTERN")
 		log.Println("HTTP proxy pattern", pattern)
 		pattern = strings.Replace(pattern, "#", path, -1)

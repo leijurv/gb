@@ -22,6 +22,8 @@ var DB *sql.DB
 // see https://sqlite.org/forum/info/eabfcd13dcd71807
 func StartsWithPattern(arg int32) string {
 	return fmt.Sprintf(" BETWEEN (?%d) AND (?%d || x'ff') ", arg, arg)
+	// this works because 0xff is higher than any byte of any valid utf8 string. technically x'f8' or higher would work but it's more obviously correct to put x'ff'
+	// if you could have 0xff in a utf8 string then this wouldn't catch it (since `path || x'ff'` is less than `path || x'ff' || 'foo'`), but, that isn't valid utf8, and utils.WalkFiles checks for it and so does `gb paranoia db` so it's fine
 }
 
 func SetupDatabase() {

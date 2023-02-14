@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/endpoints"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
@@ -98,8 +100,31 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 			// which makes GB panic with "x509: certificate is valid for swiftobjectstorage.eu-zurich-1.oraclecloud.com, not your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com"
 			// this fixes that by forcing the S3 client to use path-style queries (i.e. it will hit "https://s3.amazonaws.com/BUCKET/KEY" instead of the default "https://BUCKET.s3.amazonaws.com/KEY")
 			// which Oracle Cloud DOES support SNI for, allowing the API requests to succeed
+			Retryer: GbCustomRetryer{
+				DefaultRetryer: client.DefaultRetryer{
+					NumMaxRetries: 10, // default is 3 retries but Backblaze IS TERRIBLE!!!
+					// GbCustomRetrying is a tattletale that reveals that Backblaze is constantly replying with 500 and 503
+					// S3 doesn't do it and Oracle Cloud doesn't do it, like, ever. when you're notably worse than Oracle Cloud then you're doing something wrong
+					// so we are doing 10 retries now
+					// also this https://www.backblaze.com/blog/b2-503-500-server-error/ is COPE
+				},
+			},
 		})),
 	}
+}
+
+type GbCustomRetryer struct {
+	client.DefaultRetryer
+}
+
+func (r GbCustomRetryer) ShouldRetry(req *request.Request) bool {
+	ret := r.DefaultRetryer.ShouldRetry(req)
+	msg := "Retrying"
+	if !ret {
+		msg = "NOT retrying"
+	}
+	log.Println(msg, "after attempt number", req.RetryCount+1 /* first failure+retry has RetryCount==0 */, "delay", req.RetryDelay, "because error", req.HTTPResponse.StatusCode, req.Error, "while trying to request", req.HTTPRequest.URL, req.HTTPResponse)
+	return ret
 }
 
 func (remote *S3) GetID() []byte {

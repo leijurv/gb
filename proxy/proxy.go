@@ -37,6 +37,7 @@ func Proxy(label string, base string, listen string) {
 		}),
 		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler)), // disables http/2
 	}
+	log.Println("Listening for HTTP on", listen)
 	log.Fatal(server.ListenAndServe())
 }
 

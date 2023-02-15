@@ -78,6 +78,9 @@ func DBKey() []byte {
 	if err != nil {
 		panic(err)
 	}
+	if len(key) != 16 {
+		panic("bad key")
+	}
 	return key
 }
 

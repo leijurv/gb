@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/leijurv/gb/share"
+
 	"github.com/leijurv/gb/proxy"
 
 	"github.com/araddon/dateparse"
@@ -324,8 +326,16 @@ func main() {
 					Usage: "ip and port to listen on",
 					Value: "127.0.0.1:7893",
 				},
+				cli.BoolFlag{
+					Name:  "iunderstandthisisnotauthenticated",
+					Usage: "confirm this is notauthenticated",
+				},
 			},
 			Action: func(c *cli.Context) error {
+				if !c.Bool("iunderstandthisisnotauthenticated") {
+					log.Println("This command is NOT authenticated. It allows ANYONE who can connect to " + c.String("listen") + " access to browse and download your files. Confirm this by adding the option `--iunderstandthisisnotauthenticated`")
+					return nil
+				}
 				proxy.Proxy(c.String("label"), c.String("base"), c.String("listen"))
 				return nil
 			},
@@ -384,6 +394,26 @@ func main() {
 			Action: func(c *cli.Context) error {
 				paths := append([]string{c.Args().First()}, c.Args().Tail()...) // even if no argument (like: "gb backup"), backup current directory by passing one empty string arg
 				backup.DryBackup(paths)
+				return nil
+			},
+		},
+		{
+			Name:  "shared",
+			Usage: "shared",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+				cli.StringFlag{
+					Name:  "listen",
+					Usage: "ip and port to listen on",
+					Value: "127.0.0.1:7894",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				share.Test()
+				share.Shared(c.String("label"), c.String("listen"))
 				return nil
 			},
 		},

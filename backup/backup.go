@@ -38,7 +38,7 @@ func statInputPaths(rawPaths []string) []File {
 			}
 			log.Println("Normalized to ensure trailing slash:", path)
 		} else {
-			if !NormalFile(stat) {
+			if !utils.NormalFile(stat) {
 				panic("This file is not normal. Perhaps a symlink or something? Not supported sorry!")
 			}
 			log.Println("This is a single file...?")
@@ -80,29 +80,39 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 	log.Println("Backup complete")
 }
 
-type file_status struct {
+type FileStatus struct {
 	file File
 	// no enums lol
 	modified bool
 	new      bool
+	size     int64 // store size as stat'd for accurate staked size claim relative to what's in db
 }
 
-func compareFileToDb(path string, info os.FileInfo, tx *sql.Tx) file_status {
+func CompareFileToDb(path string, info os.FileInfo, tx *sql.Tx, debugPrint bool) FileStatus {
 	var expectedLastModifiedTime int64
 	var expectedSize int64
-	size := info.Size()
+	ret := FileStatus{file: File{path, info}, size: info.Size()}
 	err := tx.QueryRow("SELECT files.fs_modified, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE files.path = ? AND files.end IS NULL", path).Scan(&expectedLastModifiedTime, &expectedSize)
 	if err == nil {
-		if expectedLastModifiedTime != info.ModTime().Unix() || expectedSize != size {
-			return file_status{file: File{path, info}, modified: true}
+		if expectedLastModifiedTime == info.ModTime().Unix() && expectedSize == ret.size { // only rescan on size change or modified change, NOT on permissions change lmao
+			if debugPrint {
+				log.Println("UNMODIFIED:", path, "ModTime is still", expectedLastModifiedTime, "and size is still", expectedSize)
+			}
+			return ret
 		} else {
-			return file_status{file: File{path, info}}
+			if debugPrint {
+				log.Println("MODIFIED:", path, "was previously stored, but I'm updating it since the last modified time has changed from", expectedLastModifiedTime, "to", info.ModTime().Unix(), "and/or the size has changed from", expectedSize, "to", size)
+			}
+			ret.modified = true
+			return ret
 		}
 	} else {
 		if err != db.ErrNoRows {
-			panic(err)
+			panic(err) // unexpected error, maybe sql syntax error?
 		}
-		return file_status{file: File{path, info}, new: true}
+		// ErrNoRows = file is brand new
+		ret.new = true
+		return ret
 	}
 }
 
@@ -114,7 +124,7 @@ func DryBackup(rawPaths []string) {
 	if err != nil {
 		panic(err)
 	}
-	statuses := make([]file_status, 0)
+	statuses := make([]FileStatus, 0)
 	for _, input := range inputs {
 		if input.info.IsDir() {
 			filesMap := make(map[string]os.FileInfo)
@@ -122,14 +132,14 @@ func DryBackup(rawPaths []string) {
 			for _, path := range pathsToBackup {
 				utils.WalkFiles(path, func(path string, info os.FileInfo) {
 					filesMap[path] = info
-					comparison := compareFileToDb(path, info, tx)
+					comparison := CompareFileToDb(path, info, tx, false)
 					if comparison.modified || comparison.new {
 						statuses = append(statuses, comparison)
 					}
 				})
 			}
 		} else {
-			comparison := compareFileToDb(input.path, input.info, tx)
+			comparison := CompareFileToDb(input.path, input.info, tx, false)
 			if comparison.modified || comparison.new {
 				statuses = append(statuses, comparison)
 			}

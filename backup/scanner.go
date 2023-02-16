@@ -69,27 +69,15 @@ func scannerThread(inputs []File) {
 }
 
 func scanFile(file File, tx *sql.Tx) {
-	var expectedLastModifiedTime int64
-	var expectedHash []byte
-	var expectedSize int64
-	size := file.info.Size()
-	err := tx.QueryRow("SELECT files.fs_modified, files.hash, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE files.path = ? AND files.end IS NULL", file.path).Scan(&expectedLastModifiedTime, &expectedHash, &expectedSize)
-	if err == nil {
-		if expectedLastModifiedTime == file.info.ModTime().Unix() && expectedSize == size { // only rescan on size change or modified change, NOT on permissions change lmao
-			log.Println("UNMODIFIED:", file.path, "ModTime is still", expectedLastModifiedTime, "and size is still", expectedSize)
-			return
-		}
-		log.Println("MODIFIED:", file.path, "was previously stored, but I'm updating it since the last modified time has changed from", expectedLastModifiedTime, "to", file.info.ModTime().Unix(), "and/or the size has changed from", expectedSize, "to", size)
-	} else {
-		if err != db.ErrNoRows {
-			panic(err) // unexpected error, maybe sql syntax error?
-		}
-		// ErrNoRows = file is brand new
+	status := CompareFileToDb(file.path, file.info, tx, true)
+	if !status.modified && !status.new {
+		return
 	}
 
 	// check if there is an existing file of this length
+	size := status.size
 	var otherHash []byte
-	err = tx.QueryRow("SELECT hash FROM sizes WHERE size = ?", size).Scan(&otherHash)
+	err := tx.QueryRow("SELECT hash FROM sizes WHERE size = ?", size).Scan(&otherHash)
 	if err != nil {
 		if err != db.ErrNoRows {
 			panic(err) // unexpected error, maybe sql syntax error?

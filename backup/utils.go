@@ -182,11 +182,6 @@ func hashAFile(path string) ([]byte, int64, error) {
 	return hash, size, nil // go is a BIGOT for not letting me do return hs.HashAndSize(), nil
 }
 
-// return true if and only if the provided FileInfo represents a completely normal file, and nothing weird like a directory, symlink, pipe, socket, block device, etc
-func NormalFile(info os.FileInfo) bool {
-	return info.Mode()&os.ModeType == 0
-}
-
 func MakeDefaultServiceFactory() UploadServiceFactory {
 	ch := make(UploadServiceFactory)
 	storage := storage.GetAll()

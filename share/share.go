@@ -5,11 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"github.com/leijurv/gb/utils"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/leijurv/gb/utils"
 
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"

@@ -70,7 +70,7 @@ func scannerThread(inputs []File) {
 
 func scanFile(file File, tx *sql.Tx) {
 	status := CompareFileToDb(file.path, file.info, tx, true)
-	if !status.modified && !status.new {
+	if !status.Modified && !status.New {
 		return
 	}
 

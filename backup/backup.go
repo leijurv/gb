@@ -83,16 +83,17 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 type FileStatus struct {
 	file File
 	// no enums lol
-	modified bool
-	new      bool
+	Modified bool
+	New      bool
 	size     int64 // store size as stat'd for accurate staked size claim relative to what's in db
+	Hash     []byte
 }
 
 func CompareFileToDb(path string, info os.FileInfo, tx *sql.Tx, debugPrint bool) FileStatus {
 	var expectedLastModifiedTime int64
 	var expectedSize int64
 	ret := FileStatus{file: File{path, info}, size: info.Size()}
-	err := tx.QueryRow("SELECT files.fs_modified, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE files.path = ? AND files.end IS NULL", path).Scan(&expectedLastModifiedTime, &expectedSize)
+	err := tx.QueryRow("SELECT files.fs_modified, sizes.size, files.hash FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE files.path = ? AND files.end IS NULL", path).Scan(&expectedLastModifiedTime, &expectedSize, &ret.Hash)
 	if err == nil {
 		if expectedLastModifiedTime == info.ModTime().Unix() && expectedSize == ret.size { // only rescan on size change or modified change, NOT on permissions change lmao
 			if debugPrint {
@@ -101,9 +102,9 @@ func CompareFileToDb(path string, info os.FileInfo, tx *sql.Tx, debugPrint bool)
 			return ret
 		} else {
 			if debugPrint {
-				log.Println("MODIFIED:", path, "was previously stored, but I'm updating it since the last modified time has changed from", expectedLastModifiedTime, "to", info.ModTime().Unix(), "and/or the size has changed from", expectedSize, "to", size)
+				log.Println("MODIFIED:", path, "was previously stored, but I'm updating it since the last modified time has changed from", expectedLastModifiedTime, "to", info.ModTime().Unix(), "and/or the size has changed from", expectedSize, "to", ret.size)
 			}
-			ret.modified = true
+			ret.Modified = true
 			return ret
 		}
 	} else {
@@ -111,7 +112,10 @@ func CompareFileToDb(path string, info os.FileInfo, tx *sql.Tx, debugPrint bool)
 			panic(err) // unexpected error, maybe sql syntax error?
 		}
 		// ErrNoRows = file is brand new
-		ret.new = true
+		ret.New = true
+		if debugPrint {
+			log.Println("NEW:", path)
+		}
 		return ret
 	}
 }
@@ -133,14 +137,14 @@ func DryBackup(rawPaths []string) {
 				utils.WalkFiles(path, func(path string, info os.FileInfo) {
 					filesMap[path] = info
 					comparison := CompareFileToDb(path, info, tx, false)
-					if comparison.modified || comparison.new {
+					if comparison.Modified || comparison.New {
 						statuses = append(statuses, comparison)
 					}
 				})
 			}
 		} else {
 			comparison := CompareFileToDb(input.path, input.info, tx, false)
-			if comparison.modified || comparison.new {
+			if comparison.Modified || comparison.New {
 				statuses = append(statuses, comparison)
 			}
 		}
@@ -155,10 +159,10 @@ func DryBackup(rawPaths []string) {
 
 	for _, f := range statuses {
 		var why string
-		if f.modified {
+		if f.Modified {
 			why = "modified"
 		}
-		if f.new {
+		if f.New {
 			why = "new"
 		}
 		log.Printf("%s (%s, %s)", f.file.path, utils.FormatCommas(f.file.info.Size()), why)

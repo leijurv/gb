@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/leijurv/gb/backup"
+
 	"github.com/leijurv/gb/utils"
 
 	"github.com/leijurv/gb/crypto"
@@ -31,7 +33,18 @@ func CreateShareURL(path string) {
 	if !utils.NormalFile(stat) {
 		panic("this is something weird")
 	}
-
+	tx, err := db.DB.Begin()
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	log.Println("Making sure this file is backed up")
+	status := backup.CompareFileToDb(path, stat, tx, true)
+	if status.New || status.Modified {
+		panic("backup the file before sharing it")
+	}
+	log.Println("ok it is backed up")
+	log.Println(MakeShareURL(status.Hash, filepath.Base(path)))
 	// check to make sure path is backed up and size and modtime match db
 	// get hash
 	// get share base from gb.conf and explain if not present

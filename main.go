@@ -417,6 +417,14 @@ func main() {
 				return nil
 			},
 		},
+		{
+			Name:  "share",
+			Usage: "create a shareable url for a file",
+			Action: func(c *cli.Context) error {
+				share.CreateShareURL(c.Args().First())
+				return nil
+			},
+		},
 	}
 	// relay must bypass all of this, because it has no config file nor database, so we should not harass the user about setting up those things
 	if len(os.Args) == 3 && os.Args[1] == "relay" {

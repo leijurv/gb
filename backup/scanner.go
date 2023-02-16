@@ -151,15 +151,16 @@ type ScannerTransactionContext struct {
 // see issue #31
 // this fixes that issue by committing and reopening the transaction once a second
 func (ctx *ScannerTransactionContext) Tx() *sql.Tx {
+	if ctx.recreateTicker == nil {
+		ctx.recreateTicker = time.NewTicker(1 * time.Second)
+	}
 	if ctx.tx == nil {
 		tx, err := db.DB.Begin()
 		if err != nil {
 			panic(err)
 		}
 		ctx.tx = tx
-	}
-	if ctx.recreateTicker == nil {
-		ctx.recreateTicker = time.NewTicker(1 * time.Second)
+		return tx
 	}
 	select {
 	case <-ctx.recreateTicker.C:

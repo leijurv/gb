@@ -31,10 +31,16 @@ func Shared(label string, listen string) {
 
 func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.Storage) {
 	path := req.URL.Path
-	if strings.HasPrefix(path, "/1/") {
+	if path == "/" {
+		w.WriteHeader(200)
+		w.Write([]byte("serving shared files using https://github.com/leijurv/gb"))
+		return
+	}
+	if strings.HasPrefix(path, "/1") {
 		log.Println("Request to", path, "is presumably for a v1 shared file")
 		hash, err := ValidateURL(path)
 		if err != nil {
+			log.Println(err)
 			w.WriteHeader(404)
 			w.Write([]byte("sorry"))
 			return

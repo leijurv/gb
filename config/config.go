@@ -33,6 +33,7 @@ type ConfigData struct {
 	ExcludePrefixes        []string `json:"exclude_prefixes"`
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
+	ShareBaseURL           string   `json:"share_base_url"`
 }
 
 func Config() ConfigData {
@@ -116,6 +117,7 @@ var config = ConfigData{
 		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
 	IgnorePermissionErrors: false,
+	ShareBaseURL:           "",
 }
 
 /*

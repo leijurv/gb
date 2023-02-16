@@ -334,6 +334,7 @@ func main() {
 			Action: func(c *cli.Context) error {
 				if !c.Bool("iunderstandthisisnotauthenticated") {
 					log.Println("This command is NOT authenticated. It allows ANYONE who can connect to " + c.String("listen") + " access to browse and download your files. Confirm this by adding the option `--iunderstandthisisnotauthenticated`")
+					log.Println("To share individual files in an authenticated public-facing way, consider `gb share` and `gb shared` instead")
 					return nil
 				}
 				proxy.Proxy(c.String("label"), c.String("base"), c.String("listen"))
@@ -399,7 +400,7 @@ func main() {
 		},
 		{
 			Name:  "shared",
-			Usage: "shared",
+			Usage: "run a server that fulfills requests for files shared with `gb share`. files are served proxied from storage, not locally",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "label",
@@ -408,20 +409,26 @@ func main() {
 				cli.StringFlag{
 					Name:  "listen",
 					Usage: "ip and port to listen on",
-					Value: "127.0.0.1:7894",
+					Value: ":7894",
 				},
 			},
 			Action: func(c *cli.Context) error {
-				share.Test()
 				share.Shared(c.String("label"), c.String("listen"))
 				return nil
 			},
 		},
 		{
 			Name:  "share",
-			Usage: "create a shareable url for a file",
+			Usage: "create a shareable url for a file or hash",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "name",
+					Usage: "override the filename",
+					Value: "",
+				},
+			},
 			Action: func(c *cli.Context) error {
-				share.CreateShareURL(c.Args().First())
+				share.CreateShareURL(c.Args().First(), c.String("name"))
 				return nil
 			},
 		},

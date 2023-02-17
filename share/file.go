@@ -44,6 +44,9 @@ func ValidateURL(url string) ([]byte, error) {
 	url = url[8:]
 	signature64 := url[:12]
 	url = url[12:]
+	if url[0] != '/' {
+		return nil, errors.New("slash not in right place")
+	}
 	suffix := url[1:]
 	if "/1"+hash64+signature64+"/"+suffix != origURL {
 		panic("mistake")
@@ -67,6 +70,7 @@ func pickCorrectHash(hashPrefix []byte, testSignature func([]byte) int) []byte {
 	// to achieve this, it should be impossible to detect whether the hashPrefix is correct (i.e. it's the beginning of an actual hash in the database)
 	// in short, hash and signature both being correct should result in one behavior, and either/both being wrong should result in another
 	// put in the simplest terms: "hash correct signature wrong" should take the same amount of time as "hash wrong signature wrong"
+	// (this also prevents another possible attack: now you can't figure out whether I have a given hash backed up by looking at these timings)
 	selectedHash := make([]byte, 32)
 	for _, hash := range getCandidateHashes(hashPrefix) {
 		hashMatches := subtle.ConstantTimeCompare(hash[:len(hashPrefix)], hashPrefix) // this will probably be "0" for 15 of the 16 iterations of this loop in the case where the URL is correct, and 16 of 16 when the URL is bad

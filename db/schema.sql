@@ -16,7 +16,7 @@ This file is solely for reference of what the most recent version of the schema 
 CREATE TABLE sizes (
 
 	hash BLOB    NOT NULL PRIMARY KEY, /* sha256 of contents */
-	size INTEGER NOT NULL,             /* timestamp of the first time this file existed with these contents */
+	size INTEGER NOT NULL,             /* length in bytes of the data that has this sha256 */
 
 	CHECK(LENGTH(hash) == 32), /* sha256 length */
 	CHECK(size >= 0) /* i am not making this mistake again. sadly google takeout has dozens of empty files as markers. we cannot assume size > 0 */

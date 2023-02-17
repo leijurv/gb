@@ -33,14 +33,13 @@ type Compression interface {
 var compressionMap = make(map[string]Compression)
 
 func init() {
-	if !isLeptonInPath() {
-		panic("lepton is not installed")
-	}
 
 	compressions := []Compression{
 		&NoCompression{},
 		&ZstdCompression{},
-		&LeptonCompression{},
+	}
+	if isLeptonInPath() {
+		compressions = append(compressions, &LeptonCompression{})
 	}
 	for _, c := range compressions {
 		n := c.AlgName()
@@ -52,12 +51,21 @@ func init() {
 	}
 }
 
+func CheckCompression() {
+	if !isLeptonInPath() && !config.Config().DisableLepton {
+		panic("lepton is not installed to your $PATH. gb uses https://github.com/dropbox/lepton/ to losslessly compress JPG files. if you'd rather not bother, set `\"disable_lepton\": true` in your .gb.conf")
+	}
+}
+
 func isLeptonInPath() bool {
 	_, err := exec.LookPath("lepton")
 	return err == nil
 }
 
 func ByAlgName(algName string) Compression {
+	if algName == "lepton" && config.Config().DisableLepton {
+		panic("lepton has been disabled in your .gb.conf, it must be reenabled before i can decompress a file compressed using lepton")
+	}
 	// map is only written to on init, so no need to synchronize on read
 	return compressionMap[algName]
 }
@@ -68,7 +76,7 @@ func howToCompress(path string) []Compression {
 	if err == nil && stat.Size() < config.Config().MinCompressSize {
 		return []Compression{&NoCompression{}}
 	}
-	if strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg") {
+	if !config.Config().DisableLepton && (strings.HasSuffix(path, ".jpg") || strings.HasSuffix(path, ".jpeg")) {
 		return []Compression{&LeptonCompression{}, &NoCompression{}}
 	}
 	for _, ext := range config.Config().NoCompressionExts {

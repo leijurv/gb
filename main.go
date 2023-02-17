@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/leijurv/gb/compression"
+
 	"github.com/leijurv/gb/share"
 
 	"github.com/leijurv/gb/proxy"
@@ -58,6 +60,7 @@ func main() {
 
 		// we don't know where the database should be read from until after the "config-file" flag is parsed
 		db.SetupDatabase()
+		compression.CheckCompression()
 		return nil
 	}
 	app.Commands = []cli.Command{

@@ -2,6 +2,7 @@ package share
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -55,7 +56,11 @@ func ValidateURL(url string) ([]byte, error) {
 		panic("length should have been checked alreday")
 	}
 	realHash := pickCorrectHash(hashPrefix, func(candidateHash []byte) bool {
-		return signature64 == signatureShouldBe(candidateHash, suffix)
+		// at least we can defend the signature against timing attacks
+		// its a bit halfhearted because we've just previously done a big SQLite select which is not resistant against timing attacks
+		// the worry is whether an attacker could test what sha256 prefixes you have in your .gb.db
+		// with a timing attack against SQLite, maybe they could narrow down the hash prefix faster than guessing 1 out of 2^48? idk how to protect against this
+		return subtle.ConstantTimeCompare([]byte(signature64), []byte(signatureShouldBe(candidateHash, suffix))) == 1
 	})
 	if realHash == nil {
 		return nil, errors.New("no candidate hashes matched signature")

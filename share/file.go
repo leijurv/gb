@@ -52,15 +52,8 @@ func ValidateURL(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(hashPrefix) != 6 {
-		panic("length should have been checked alreday")
-	}
-	realHash := pickCorrectHash(hashPrefix, func(candidateHash []byte) bool {
-		// at least we can defend the signature against timing attacks
-		// its a bit halfhearted because we've just previously done a big SQLite select which is not resistant against timing attacks
-		// the worry is whether an attacker could test what sha256 prefixes you have in your .gb.db
-		// with a timing attack against SQLite, maybe they could narrow down the hash prefix faster than guessing 1 out of 2^48? idk how to protect against this
-		return subtle.ConstantTimeCompare([]byte(signature64), []byte(signatureShouldBe(candidateHash, suffix))) == 1
+	realHash := pickCorrectHash(hashPrefix, func(candidateHash []byte) int {
+		return subtle.ConstantTimeCompare([]byte(signature64), []byte(signatureShouldBe(candidateHash, suffix)))
 	})
 	if realHash == nil {
 		return nil, errors.New("no candidate hashes matched signature")
@@ -69,35 +62,59 @@ func ValidateURL(url string) ([]byte, error) {
 	return realHash, nil
 }
 
-func pickCorrectHash(hashPrefix []byte, test func([]byte) bool) []byte {
-	// this query doesn't load the entire sizes table into ram (neither on the sqlite library side nor on the golang driver side) - I checked by putting a long sleep right here and noting that RAM usage did not increase afterwards
-	// (if I replace `ORDER BY hash` with something like `ORDER BY ltrim(hex(hash), 'ABC')` then EXPLAIN QUERY PLAN says that a temp B-tree is now used, and RAM usage does increase by 5MB over the course of running the following line)
-	rows, err := db.DB.Query("SELECT hash FROM sizes WHERE hash >= ? ORDER BY hash", hashPrefix)
+func pickCorrectHash(hashPrefix []byte, testSignature func([]byte) int) []byte {
+	// the big picture idea here is that an attacker shouldn't be able to "break down" the 120 bit security into a separate 48 bit security step and then a 72 bit security step
+	// to achieve this, it should be impossible to detect whether the hashPrefix is correct (i.e. it's the beginning of an actual hash in the database)
+	// in short, hash and signature both being correct should result in one behavior, and either/both being wrong should result in another
+	// put in the simplest terms: "hash correct signature wrong" should take the same amount of time as "hash wrong signature wrong"
+	selectedHash := make([]byte, 32)
+	for _, hash := range getCandidateHashes(hashPrefix) {
+		hashMatches := subtle.ConstantTimeCompare(hash[:len(hashPrefix)], hashPrefix) // this will probably be "0" for 15 of the 16 iterations of this loop in the case where the URL is correct, and 16 of 16 when the URL is bad
+		signatureMatches := testSignature(hash)
+		// test the signature and the hash every time. don't skip the signature check if the hash is wrong, obviously
+		bothMatch := subtle.ConstantTimeByteEq(uint8(hashMatches+signatureMatches), 2) // don't use an if statement because something like "hashMatches && signatureMatches" will short circuit when hashMatches is true
+		subtle.ConstantTimeCopy(bothMatch, selectedHash, hash)
+		// if both match, this is the selectedHash
+		//log.Println(hashMatches, signatureMatches, bothMatch, hash, selectedHash)
+	}
+	if bytes.Equal(selectedHash, make([]byte, 32)) { // ok because at this point the decision has already been made
+		return nil
+	} else {
+		return selectedHash
+	}
+}
+
+// the idea is that this function will always take essentially the exact same amount of time no matter whether there actually is any hash that begins with hashPrefix
+// either way (whether there is or isn't), it traverses the sizes-by-hash index (technically "sqlite_autoindex_sizes_1") and grabs the next sixteen hashes without even checking if they begin with the prefix
+// look, you can't exactly trust SQLite to be perfectly constant-time and resistant to timing attacks, but I think this is the best we can reasonably get lol
+func getCandidateHashes(hashPrefix []byte) [][]byte {
+	if len(hashPrefix) != 6 {
+		panic("length should have been checked already")
+	}
+	// note that a 6 byte prefix is 2^48 which is 281,474,976,710,656
+	// so the odds of having another file that matches the same leading 48 bits of the sha256 is very very low (one in 281 trillion for a random pair of files to match up in this way)
+	// according to https://www.bdayprob.com/ the odds of having even just one pair of files with a colliding 48-bit prefix goes over 50% once you have about 20 million files
+	// and EVEN IF you have such a pair, and you share one of them, everything still works because the pickCorrectHash loop doesn't need the correct signature to be first (i.e. it works even if several have hashMatches, because only one of those will also have signatureMatches)
+	// having more than 16 hashes that share a 1/281,474,976,710,656 chance collision is practically impossible
+	// so, it's fine to just grab the next 16
+	// honestly I'd be confident with grabbing like 3 or 4 rows but let's just be on the safe side
+	rows, err := db.DB.Query("SELECT hash FROM sizes WHERE hash >= ? ORDER BY hash LIMIT 16", hashPrefix /* note: do hashPrefix[:2] or something to see the correct hash not being first still work */)
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
+	ret := make([][]byte, 0)
 	for rows.Next() {
 		var hash []byte
 		err = rows.Scan(&hash)
 		if err != nil {
 			panic(err)
 		}
-		if !bytes.HasPrefix(hash, hashPrefix) {
-			// this will bail out early (and run the defer rows.Close()) after just one row basically always
-			// note that a 6 byte prefix is 2^48 which is 281,474,976,710,656
-			// so the odds of having another file that matches the same leading 48 bits of the sha256 is very very low (one in 281 trillion for a random pair of files to match up in this way)
-			// according to https://www.bdayprob.com/ the odds of having even just one pair of files with a colliding 48-bit prefix goes over 50% once you have about 20 million files
-			// and EVEN IF you have such a pair, and you share one of them, all that happens is this loop runs for two iterations instead of one, which is no big deal at all
-			break
-		}
-		if test(hash) {
-			return hash
-		}
+		ret = append(ret, hash)
 	}
 	err = rows.Err()
 	if err != nil {
 		panic(err)
 	}
-	return nil
+	return ret
 }

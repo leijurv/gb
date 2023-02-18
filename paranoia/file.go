@@ -158,10 +158,21 @@ func paranoia(path string, info os.FileInfo, level int) {
 		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", pathInStorage, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decompressing using", compressionAlg)
 		log.Println("For example, to verify this, download the file into", hex.EncodeToString(blobID), "and run")
 		cmd := ""
+
+		// the idea behind all this trickery to follow is that:
+		// 1. we should efficiently actually seek into the correct offset into the blob. we shouldn't cat the entire thing and discard bytes until we get to where we want (that's slow)
+		// 2. it should work on both bash and zsh
+		// 3. it should work on both mac and linux
+		// with these three put together, we end up with the sillyness below :)
+
+		// note that in most cases, for large files that get a blob all to themselves, this is exceedingly simple (just a `cat | openssl | head`)
+		// the weird seeking is just for when the file is not located at the start of the blob (aka when offset != 0)
+
 		if offset == 0 {
 			cmd += "cat " + hex.EncodeToString(blobID) + " | "
 		} else {
-			cmd += "<" + hex.EncodeToString(blobID) + " { dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 2>/dev/null; cat; } | "
+			// would look better if the blob was at the beginning, but, `<file { cmd }` doesn't work in bash on mac (it works in zsh on mac, bash on linux, and zsh on linux though)
+			cmd += "{ dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 2>/dev/null; cat; } <" + hex.EncodeToString(blobID) + " | "
 		}
 		iv, remainingSeek := crypto.CalcIVAndSeek(offset)
 		cmd += "openssl enc -aes-128-ctr -d -K " + hex.EncodeToString(key) + " -iv " + hex.EncodeToString(iv) + " 2>/dev/null | "

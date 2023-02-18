@@ -161,12 +161,12 @@ func paranoia(path string, info os.FileInfo, level int) {
 		if offset == 0 {
 			cmd += "cat " + hex.EncodeToString(blobID) + " | "
 		} else {
-			cmd += "<" + hex.EncodeToString(blobID) + " { dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0; cat; } | "
+			cmd += "<" + hex.EncodeToString(blobID) + " { dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 2>/dev/null; cat; } | "
 		}
 		iv, remainingSeek := crypto.CalcIVAndSeek(offset)
 		cmd += "openssl enc -aes-128-ctr -d -K " + hex.EncodeToString(key) + " -iv " + hex.EncodeToString(iv) + " 2>/dev/null | "
 		if remainingSeek != 0 {
-			cmd += "{ dd bs=" + strconv.FormatInt(remainingSeek, 10) + " skip=1 count=0; cat; } | "
+			cmd += "{ dd bs=" + strconv.FormatInt(remainingSeek, 10) + " skip=1 count=0 2>/dev/null; cat; } | "
 		}
 		cmd += "head -c " + strconv.FormatInt(length, 10) + compression.ByAlgName(compressionAlg).DecompressionTrollBashCommandIncludingThePipe() + " | shasum -a 256"
 		log.Println(cmd)

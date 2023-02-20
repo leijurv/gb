@@ -172,12 +172,12 @@ func paranoia(path string, info os.FileInfo, level int) {
 			cmd += "cat " + hex.EncodeToString(blobID) + " | "
 		} else {
 			// would look better if the blob was at the beginning, but, `<file { cmd }` doesn't work in bash on mac (it works in zsh on mac, bash on linux, and zsh on linux though)
-			cmd += "{ dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 2>/dev/null; cat; } <" + hex.EncodeToString(blobID) + " | "
+			cmd += "{ dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 status=none; cat; } <" + hex.EncodeToString(blobID) + " | "
 		}
 		iv, remainingSeek := crypto.CalcIVAndSeek(offset)
 		cmd += "openssl enc -aes-128-ctr -d -K " + hex.EncodeToString(key) + " -iv " + hex.EncodeToString(iv) + " 2>/dev/null | "
 		if remainingSeek != 0 {
-			cmd += "{ dd bs=" + strconv.FormatInt(remainingSeek, 10) + " skip=1 count=0 2>/dev/null; cat; } | "
+			cmd += "{ dd bs=" + strconv.FormatInt(remainingSeek, 10) + " skip=1 count=0 status=none; cat; } | "
 		}
 		cmd += "head -c " + strconv.FormatInt(length, 10) + compression.ByAlgName(compressionAlg).DecompressionTrollBashCommandIncludingThePipe() + " | shasum -a 256"
 		log.Println(cmd)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/client"
@@ -107,6 +108,8 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 					// S3 doesn't do it and Oracle Cloud doesn't do it, like, ever. when you're notably worse than Oracle Cloud then you're doing something wrong
 					// so we are doing 10 retries now
 					// also this https://www.backblaze.com/blog/b2-503-500-server-error/ is COPE
+					MaxRetryDelay:    10 * time.Second, // keep retrying at 10 second intervals or less (default is to increase delay up to 5 minutes, which is way too high)
+					MaxThrottleDelay: 10 * time.Second, // aws sdk treats error 502, 503, and 504 as a throttle delay rather than a retry delay, so we have to set MaxThrottleDelay too, because backblaze likes to respond with 503
 				},
 			},
 		})),

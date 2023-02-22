@@ -1,7 +1,6 @@
 package share
 
 import (
-	"bytes"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
@@ -81,7 +80,7 @@ func pickCorrectHash(hashPrefix []byte, testSignature func([]byte) int) []byte {
 		// if both match, this is the selectedHash
 		//log.Println(hashMatches, signatureMatches, bothMatch, hash, selectedHash)
 	}
-	if bytes.Equal(selectedHash, make([]byte, 32)) { // ok because at this point the decision has already been made
+	if subtle.ConstantTimeCompare(selectedHash, make([]byte, 32)) == 1 { // ok because at this point the decision has already been made
 		return nil
 	} else {
 		return selectedHash

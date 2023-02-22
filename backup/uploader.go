@@ -69,7 +69,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			}()
 			continue
 		}
-		stats.AddCurrentlyUploading(planned.path)
+		stats.AddCurrentlyUploading(planned.path, &verify)
 		encryptedOut, key := crypto.EncryptBlob(postEncOut, startOffset)
 		compAlg := compression.Compress(planned.path, encryptedOut, io.TeeReader(f, &verify), &verify)
 		stats.FinishedUploading(planned.path)

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"math/rand"
@@ -46,7 +47,7 @@ type BlobPlan []Planned
 
 type Stats struct {
 	inProgress         []*utils.HasherSizer
-	currentlyUploading map[string]struct{}
+	currentlyUploading map[string]*utils.HasherSizer
 	lock               sync.Mutex
 }
 
@@ -78,7 +79,7 @@ var uploaderCh = make(chan BlobPlan)
 var wg sync.WaitGroup // files + threads
 
 var stats = Stats{
-	currentlyUploading: make(map[string]struct{}),
+	currentlyUploading: make(map[string]*utils.HasherSizer),
 }
 
 func (s *Stats) Add(hs *utils.HasherSizer) {
@@ -101,16 +102,22 @@ func (s *Stats) CurrentlyUploading() []string {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	keys := make([]string, 0, len(s.currentlyUploading))
-	for k := range s.currentlyUploading {
+	for k, v := range s.currentlyUploading {
+		stat, err := os.Stat(k)
+		if err == nil {
+			sz := stat.Size()
+			progress := v.Size()
+			k += fmt.Sprintf(" %.2f%% done", float64(progress)/float64(sz)*100)
+		}
 		keys = append(keys, k)
 	}
 	return keys
 }
 
-func (s *Stats) AddCurrentlyUploading(path string) {
+func (s *Stats) AddCurrentlyUploading(path string, sizer *utils.HasherSizer) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.currentlyUploading[path] = struct{}{}
+	s.currentlyUploading[path] = sizer
 }
 
 func (s *Stats) FinishedUploading(path string) {

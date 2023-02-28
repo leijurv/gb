@@ -34,7 +34,8 @@ type ConfigData struct {
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
 	ShareBaseURL           string   `json:"share_base_url"`
-	DisableLepton          bool     `json:"disable_lepton""`
+	DisableLepton          bool     `json:"disable_lepton"`
+	SkipHashFailures       bool     `json:"skip_hash_failures"`
 }
 
 func Config() ConfigData {
@@ -120,6 +121,7 @@ var config = ConfigData{
 	IgnorePermissionErrors: false,
 	ShareBaseURL:           "",
 	DisableLepton:          false,
+	SkipHashFailures:       false,
 }
 
 /*

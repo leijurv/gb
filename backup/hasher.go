@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/utils"
 )
@@ -27,10 +28,12 @@ func hashOneFile(plan HashPlan) {
 
 	hash, size, err := hashAFile(path)
 	if err != nil {
-		// thought about this, and well
-		// honestly I'd rather have the whole thing throw a big error when a file fails to be backed up
-		// insetad of just continuing...
-		panic(err)
+		if config.Config().SkipHashFailures {
+			log.Println("Skipping", path, "due to", err, "(maybe it was deleted?) because skip_hash_failures is true")
+		} else {
+			log.Println(path, "couldn't be backed up due to", err, "and skip_hash_failures is false, so, panicking now")
+			panic(err)
+		}
 	}
 	if size != info.Size() {
 		// wtf

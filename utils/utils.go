@@ -4,12 +4,15 @@ import (
 	"crypto/md5"
 	"crypto/sha256"
 	"database/sql"
+	ignore "github.com/sabhiram/go-gitignore"
 	"hash"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -41,13 +44,132 @@ func HaveReadPermission(path string) bool {
 	return err != syscall.EACCES
 }
 
+// pretend an error didn't happen if it was a permission error and we chose to ignore permission errors
+func filterFsErr(path string, err error) error {
+	if err != nil {
+		if oserr, ok := err.(*os.PathError); ok && config.Config().IgnorePermissionErrors {
+			if oserr.Err == syscall.EACCES {
+				log.Printf("permission error for %s, skipping...", path)
+				return nil
+			}
+		}
+		log.Println("While traversing those files, I got this error:")
+		log.Println(err)
+		log.Println("while looking at this path:")
+		log.Println(path)
+	}
+	return err
+}
+
+type pathAndInfo struct {
+	path string
+	info os.FileInfo
+}
+
+func visitFile(path string, entry fs.DirEntry, filesCh chan pathAndInfo) {
+	info, err := entry.Info()
+	err = filterFsErr(path, err)
+	if err != nil {
+		panic(err)
+	}
+	filesCh <- pathAndInfo{path, info}
+}
+
+func shouldSkipPath(startPath string, path string, entry fs.DirEntry) bool {
+	if !entry.IsDir() && !entry.Type().IsRegular() {
+		return true
+	}
+	if entry.IsDir() {
+		// ReadDir returns directory paths without a trailing / and if an exclude prefix does end in a trailing / it will
+		// not match the directory causing us to unnecessarily visit all the children.
+		// Appending a / will make sure we match the exclude prefix whether or not it has a trailing /
+		path += "/"
+	}
+	if config.ExcludeFromBackup(startPath, path) {
+		log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
+		return true
+	}
+	if IsDatabaseFile(path) {
+		log.Println("EXCLUDING this path because it is the gb database:", path)
+		return true
+	}
+	return false
+}
+
+func checkUtf8(path string) {
+	if !utf8.ValidString(path) {
+		panic("invalid utf8 on your filesystem at " + path)
+	}
+}
+
+func walkFilesWithGitignore(startPath string, gitBasePath string, path string, ignore *ignore.GitIgnore, filesCh chan pathAndInfo) {
+	checkUtf8(path)
+	ls, err := os.ReadDir(path)
+	err = filterFsErr(path, err)
+	if err != nil {
+		panic(err)
+	}
+	for _, entry := range ls {
+		fullPath := path + "/" + entry.Name()
+		checkUtf8(path)
+		relativePath, err := filepath.Rel(gitBasePath, fullPath)
+		if err != nil {
+			panic(err)
+		}
+		// make sure the dir itself matches so we don't unnecessarily recurse
+		if entry.IsDir() {
+			relativePath += "/"
+		}
+		if !ignore.MatchesPath(relativePath) && !shouldSkipPath(startPath, fullPath, entry) {
+			if entry.IsDir() {
+				walkFilesWithGitignore(startPath, gitBasePath, fullPath, ignore, filesCh)
+			} else {
+				visitFile(fullPath, entry, filesCh)
+			}
+		}
+	}
+}
+
+func walkFiles(startPath string, path string, filesCh chan pathAndInfo) {
+	checkUtf8(path)
+	ls, err := os.ReadDir(path)
+	err = filterFsErr(path, err)
+	if err != nil {
+		panic(err)
+	}
+	if config.Config().UseGitignore {
+		// binary search because ReadDir sorts
+		gitignoreIdx := sort.Search(len(ls), func(i int) bool {
+			return ls[i].Name() >= ".gitignore"
+		})
+		if gitignoreIdx < len(ls) && ls[gitignoreIdx].Name() == ".gitignore" {
+			gitignorePath := path + "/.gitignore"
+			gitignore, err := ignore.CompileIgnoreFile(gitignorePath)
+			err = filterFsErr(gitignorePath, err) // most likely not necessary
+			if err != nil {
+				panic(err)
+			}
+			walkFilesWithGitignore(startPath, path, path, gitignore, filesCh)
+			return
+		}
+	}
+
+	for _, entry := range ls {
+		fullPath := path + "/" + entry.Name()
+		checkUtf8(path)
+		if !shouldSkipPath(startPath, fullPath, entry) {
+			if entry.IsDir() {
+				walkFiles(startPath, fullPath, filesCh)
+			} else {
+				visitFile(fullPath, entry, filesCh)
+			}
+		}
+	}
+}
+
 // walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
 func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
-	type PathAndInfo struct {
-		path string
-		info os.FileInfo
-	}
-	filesCh := make(chan PathAndInfo, 32)
+	filesCh := make(chan pathAndInfo, 32)
 	done := make(chan struct{})
 	go func() {
 		for file := range filesCh {
@@ -56,56 +178,8 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 		log.Println("Scan processor signaling done")
 		done <- struct{}{}
 	}()
-	err := filepath.Walk(startPath, func(path string, info os.FileInfo, err error) error {
-		if !utf8.ValidString(path) {
-			panic("invalid utf8 on your filesystem at " + path)
-		}
-		if config.ExcludeFromBackup(startPath, path) {
-			if info == nil {
-				log.Println("EXCLUDING & ERROR while reading path which is ignored by your configuration:", path, err)
-				return nil
-			}
 
-			log.Println("EXCLUDING this path and pretending it doesn't exist, due to your exclude config:", path)
-
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if IsDatabaseFile(path) {
-			log.Println("EXCLUDING this path because it is the gb database:", path)
-			return nil
-		}
-		ignoreErrors := config.Config().IgnorePermissionErrors
-		if err != nil {
-			if oserr, ok := err.(*os.PathError); ok && ignoreErrors {
-				if oserr.Err == syscall.EACCES {
-					log.Printf("permission error for %s, skipping...", path)
-					return nil
-				}
-			}
-			log.Println("While traversing those files, I got this error:")
-			log.Println(err)
-			log.Println("while looking at this path:")
-			log.Println(path)
-			return err
-		}
-		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
-			return nil
-		}
-		if ignoreErrors && !HaveReadPermission(path) {
-			return nil // skip this file
-		}
-		filesCh <- PathAndInfo{path, info}
-		return nil
-	})
-	if err != nil {
-		// permission error while traversing
-		// we should *not* continue, because that would mark all further files as "deleted"
-		// aka, do not continue with a partially complete traversal of the directory lmao
-		panic(err)
-	}
+	walkFiles(startPath, filepath.Clean(startPath), filesCh)
 	log.Println("Walker thread done")
 	close(filesCh)
 	<-done

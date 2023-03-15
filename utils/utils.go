@@ -102,35 +102,38 @@ func checkUtf8(path string) {
 	}
 }
 
-func walkFilesWithGitignore(startPath string, gitBasePath string, path string, ignore *ignore.GitIgnore, filesCh chan pathAndInfo) {
-	checkUtf8(path)
-	ls, err := os.ReadDir(path)
-	err = filterFsErr(path, err)
-	if err != nil {
-		panic(err)
+func findGitignore(ls []fs.DirEntry) int {
+	gitignoreIdx := sort.Search(len(ls), func(i int) bool {
+		return ls[i].Name() >= ".gitignore"
+	})
+	if gitignoreIdx < len(ls) && ls[gitignoreIdx].Name() == ".gitignore" {
+		return gitignoreIdx
 	}
-	for _, entry := range ls {
-		fullPath := path + "/" + entry.Name()
-		checkUtf8(path)
-		relativePath, err := filepath.Rel(gitBasePath, fullPath)
-		if err != nil {
-			panic(err)
-		}
-		// make sure the dir itself matches so we don't unnecessarily recurse
-		if entry.IsDir() {
-			relativePath += "/"
-		}
-		if !ignore.MatchesPath(relativePath) && !shouldSkipPath(startPath, fullPath, entry) {
-			if entry.IsDir() {
-				walkFilesWithGitignore(startPath, gitBasePath, fullPath, ignore, filesCh)
-			} else {
-				visitFile(fullPath, entry, filesCh)
-			}
-		}
-	}
+	return -1
 }
 
-func walkFiles(startPath string, path string, filesCh chan pathAndInfo) {
+type ignoreWrapper struct {
+	basePath string
+	*ignore.GitIgnore
+}
+
+func isIgnored(absPath string, isDir bool, gitIgnores []ignoreWrapper) bool {
+	// make sure the dir itself matches so we don't unnecessarily recurse
+	if isDir {
+		absPath += "/"
+	}
+	ignored := false
+	for _, gitIgnore := range gitIgnores {
+		relative := absPath[len(gitIgnore.basePath)+1:]
+		matches, pattern := gitIgnore.MatchesPathHow(relative)
+		if matches {
+			ignored = !pattern.Negate
+		}
+	}
+	return ignored
+}
+
+func walkFiles(startPath string, path string, gitIgnores []ignoreWrapper, filesCh chan pathAndInfo) {
 	checkUtf8(path)
 	ls, err := os.ReadDir(path)
 	err = filterFsErr(path, err)
@@ -139,27 +142,24 @@ func walkFiles(startPath string, path string, filesCh chan pathAndInfo) {
 	}
 	if config.Config().UseGitignore {
 		// binary search because ReadDir sorts
-		gitignoreIdx := sort.Search(len(ls), func(i int) bool {
-			return ls[i].Name() >= ".gitignore"
-		})
-		if gitignoreIdx < len(ls) && ls[gitignoreIdx].Name() == ".gitignore" {
+		gitignoreIdx := findGitignore(ls)
+		if gitignoreIdx != -1 {
 			gitignorePath := path + "/.gitignore"
 			gitignore, err := ignore.CompileIgnoreFile(gitignorePath)
 			err = filterFsErr(gitignorePath, err) // most likely not necessary
 			if err != nil {
 				panic(err)
 			}
-			walkFilesWithGitignore(startPath, path, path, gitignore, filesCh)
-			return
+			gitIgnores = append(gitIgnores, ignoreWrapper{path, gitignore})
 		}
 	}
 
 	for _, entry := range ls {
 		fullPath := path + "/" + entry.Name()
 		checkUtf8(path)
-		if !shouldSkipPath(startPath, fullPath, entry) {
+		if !isIgnored(fullPath, entry.IsDir(), gitIgnores) && !shouldSkipPath(startPath, fullPath, entry) {
 			if entry.IsDir() {
-				walkFiles(startPath, fullPath, filesCh)
+				walkFiles(startPath, fullPath, gitIgnores, filesCh)
 			} else {
 				visitFile(fullPath, entry, filesCh)
 			}
@@ -179,7 +179,7 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 		done <- struct{}{}
 	}()
 
-	walkFiles(startPath, filepath.Clean(startPath), filesCh)
+	walkFiles(startPath, filepath.Clean(startPath), []ignoreWrapper{}, filesCh)
 	log.Println("Walker thread done")
 	close(filesCh)
 	<-done

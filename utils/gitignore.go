@@ -121,14 +121,14 @@ func getPatternFromLine(line string) (*regexp.Regexp, bool) {
 	}
 	line = regexp.MustCompile(`/\*\*/`).ReplaceAllString(line, `(/|/.+/)`)
 	line = regexp.MustCompile(`\*\*/`).ReplaceAllString(line, `(|.`+magicStar+`/)`)
-	line = regexp.MustCompile(`/\*\*`).ReplaceAllString(line, `(|/.`+magicStar+`)`)
+	line = regexp.MustCompile(`/\*\*`).ReplaceAllString(line, `/(|/.`+magicStar+`)`)
 
 	// Handle escaping the "*" char
 	line = regexp.MustCompile(`\\\*`).ReplaceAllString(line, `\`+magicStar)
 	line = regexp.MustCompile(`\*`).ReplaceAllString(line, `([^/]*)`)
 
-	// Handle escaping the "?" char
-	line = strings.Replace(line, "?", `\?`, -1)
+	// "?" matches a single char except "/"
+	line = strings.Replace(line, "?", `[^/]`, -1)
 
 	line = strings.Replace(line, magicStar, "*", -1)
 

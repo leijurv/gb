@@ -36,6 +36,7 @@ type ConfigData struct {
 	ShareBaseURL           string   `json:"share_base_url"`
 	DisableLepton          bool     `json:"disable_lepton"`
 	SkipHashFailures       bool     `json:"skip_hash_failures"`
+	UseGitignore           bool     `json:"use_gitignore"`
 }
 
 func Config() ConfigData {
@@ -122,6 +123,7 @@ var config = ConfigData{
 	ShareBaseURL:           "",
 	DisableLepton:          false,
 	SkipHashFailures:       false,
+	UseGitignore:           false,
 }
 
 /*

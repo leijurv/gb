@@ -66,6 +66,10 @@ type pathAndDirent struct {
 	path  string
 	entry fs.DirEntry
 }
+type pathAndInfo struct {
+	path string
+	info os.FileInfo
+}
 
 func shouldSkipPath(startPath string, path string, entry fs.DirEntry) bool {
 	if !entry.IsDir() && !entry.Type().IsRegular() {
@@ -218,6 +222,7 @@ dothething:
 // walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
 func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 	filesCh := make(chan pathAndDirent, 32)
+	outputCh := make(chan pathAndInfo, 32)
 	done := make(chan struct{})
 	go func() {
 		for file := range filesCh {
@@ -228,7 +233,13 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 			if err != nil {
 				panic(err)
 			}
-			fn(file.path, info)
+			outputCh <- pathAndInfo{file.path, info}
+		}
+		close(outputCh)
+	}()
+	go func() {
+		for file := range outputCh {
+			fn(file.path, file.info)
 		}
 		log.Println("Scan processor signaling done")
 		done <- struct{}{}

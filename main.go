@@ -120,11 +120,17 @@ func main() {
 				{
 					Name:  "storage",
 					Usage: "fetch all metadata (aka: list all blobs) in storage and ensure their size and checksum is what we expect",
+					Flags: []cli.Flag{
+						&cli.BoolFlag{
+							Name:  "delete-unknown-files",
+							Usage: "delete any files found in storage that are not in the local database",
+						},
+					},
 					Action: func(c *cli.Context) error {
 						if len(storage.GetAll()) == 0 {
 							return errors.New("make a storage first")
 						}
-						paranoia.StorageParanoia()
+						paranoia.StorageParanoia(c.Bool("delete-unknown-files"))
 						return nil
 					},
 				},

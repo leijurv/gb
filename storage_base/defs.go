@@ -15,6 +15,9 @@ type Storage interface {
 
 	Metadata(path string) (string, int64) // checksum (can be empty) and size
 
+	// delete a blob by its path
+	DeleteBlob(path string)
+
 	GetID() []byte
 
 	String() string

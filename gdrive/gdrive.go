@@ -142,6 +142,15 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 	return files
 }
 
+func (gds *gDriveStorage) DeleteBlob(path string) {
+	log.Println("Deleting Google Drive file at path:", path)
+	err := gds.srv.Files.Delete(path).Do()
+	if err != nil {
+		panic("Error deleting Google Drive file: " + err.Error())
+	}
+	log.Println("Successfully deleted Google Drive file:", path)
+}
+
 func (gds *gDriveStorage) String() string {
 	return "Google Drive StorageID " + hex.EncodeToString(gds.storageID[:])
 }

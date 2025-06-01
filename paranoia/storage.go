@@ -2,6 +2,7 @@ package paranoia
 
 import (
 	"encoding/hex"
+	"fmt"
 	"log"
 
 	"github.com/leijurv/gb/db"
@@ -15,7 +16,7 @@ type storageAndPath struct { // can be used as a map key
 	path      string
 }
 
-func StorageParanoia() {
+func StorageParanoia(deleteUnknownFiles bool) {
 	expected := fetchAllExpected()
 	actual := fetchAllActual()
 	log.Println("Comparing expected against actual")
@@ -35,6 +36,9 @@ func StorageParanoia() {
 			log.Println("Expected: ", v)
 		}
 	}
+
+	unknownFiles := make([]storageAndPath, 0)
+	var totalBytes int64
 	for k, v := range actual {
 		_, ok := expected[k] // already checked keys that exist in both maps, so this is just keys that aren't present in expected
 		if !ok {
@@ -42,8 +46,30 @@ func StorageParanoia() {
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Info:", v)
 			log.Println("Blob ID:", v.BlobID, hex.EncodeToString(v.BlobID))
+			unknownFiles = append(unknownFiles, k)
+			totalBytes += v.Size
 		}
 	}
+
+	if deleteUnknownFiles && len(unknownFiles) > 0 {
+		log.Printf("Are you sure you want to delete those %d files totaling %d bytes? Type 'yes' to continue: ", len(unknownFiles), totalBytes)
+		var response string
+		_, err := fmt.Scanln(&response)
+		if err != nil || response != "yes" {
+			log.Println("Deletion cancelled")
+			return
+		}
+
+		log.Println("Deleting", len(unknownFiles), "unknown files...")
+
+		for _, k := range unknownFiles {
+			stor := storage.GetByID(k.storageID[:])
+			stor.DeleteBlob(k.path)
+		}
+
+		log.Printf("Deletion complete: %d files deleted", len(unknownFiles))
+	}
+
 	log.Println("Done")
 }
 

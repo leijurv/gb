@@ -256,6 +256,18 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 	return files
 }
 
+func (remote *S3) DeleteBlob(path string) {
+	log.Println("Deleting S3 object at path:", path)
+	_, err := s3.New(remote.sess).DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(remote.Data.Bucket),
+		Key:    aws.String(path),
+	})
+	if err != nil {
+		panic("Error deleting S3 object: " + err.Error())
+	}
+	log.Println("Successfully deleted S3 object:", path)
+}
+
 func (remote *S3) String() string {
 	return "S3 bucket " + remote.Data.Bucket + " at path " + remote.RootPath + " at endpoint " + remote.Data.Endpoint + " StorageID " + hex.EncodeToString(remote.StorageID[:])
 }

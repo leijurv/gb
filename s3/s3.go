@@ -123,6 +123,10 @@ type GbCustomRetryer struct {
 func (r GbCustomRetryer) ShouldRetry(req *request.Request) bool {
 	ret := r.DefaultRetryer.ShouldRetry(req)
 	msg := "Retrying"
+	if req.HTTPResponse.StatusCode == 400 {
+		msg += " because status code is 400 and backblaze has a TERRIBLE API"
+		ret = true
+	}
 	if !ret {
 		msg = "NOT retrying"
 	}

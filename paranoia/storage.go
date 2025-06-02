@@ -45,7 +45,8 @@ func StorageParanoia(deleteUnknownFiles bool) {
 			log.Println("UNKNOWN / UNEXPECTED FILE!!")
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Info:", v)
-			log.Println("Blob ID:", v.BlobID, hex.EncodeToString(v.BlobID))
+			log.Println("Blob ID:", hex.EncodeToString(v.BlobID))
+			log.Println("Size (bytes):", utils.FormatCommas(v.Size))
 			unknownFiles = append(unknownFiles, k)
 			totalBytes += v.Size
 		}

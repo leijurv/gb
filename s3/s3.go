@@ -220,38 +220,52 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 
 func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 	log.Println("Listing blobs in", remote)
-	files := make([]storage_base.UploadedBlob, 0)
-	err := s3.New(remote.sess).ListObjectsPages(&s3.ListObjectsInput{
-		Bucket: aws.String(remote.Data.Bucket),
-		Prefix: aws.String(remote.niceRootPath()),
-	},
-		func(page *s3.ListObjectsOutput, lastPage bool) bool {
-			for _, obj := range page.Contents {
-				if strings.Contains(*obj.Key, "db-backup-") || strings.Contains(*obj.Key, "db-v2backup-") {
-					continue // this is not a blob
-				}
-				etag := *obj.ETag
-				etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
-				blobID, err := hex.DecodeString((*obj.Key)[len(remote.RootPath+"XX/XX/"):])
-				if err != nil || len(blobID) != 32 {
-					panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
-				}
-				files = append(files, storage_base.UploadedBlob{
-					StorageID: remote.StorageID,
-					Path:      *obj.Key,
-					Checksum:  etag,
-					Size:      *obj.Size,
-					BlobID:    blobID,
+
+	resultsCh := make(chan []storage_base.UploadedBlob)
+
+	for prefix := 0; prefix < 256; prefix++ {
+		go func(prefix int) {
+			workerFiles := make([]storage_base.UploadedBlob, 0)
+
+			err := s3.New(remote.sess).ListObjectsPages(&s3.ListObjectsInput{
+				Bucket: aws.String(remote.Data.Bucket),
+				Prefix: aws.String(remote.niceRootPath() + hex.EncodeToString([]byte{byte(prefix)}) + "/"),
+			},
+				func(page *s3.ListObjectsOutput, lastPage bool) bool {
+					for _, obj := range page.Contents {
+						if strings.Contains(*obj.Key, "db-backup-") || strings.Contains(*obj.Key, "db-v2backup-") {
+							continue // this is not a blob
+						}
+						etag := *obj.ETag
+						etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
+						blobID, err := hex.DecodeString((*obj.Key)[len(remote.niceRootPath()+"XX/XX/"):])
+						if err != nil || len(blobID) != 32 {
+							panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
+						}
+						workerFiles = append(workerFiles, storage_base.UploadedBlob{
+							StorageID: remote.StorageID,
+							Path:      *obj.Key,
+							Checksum:  etag,
+							Size:      *obj.Size,
+							BlobID:    blobID,
+						})
+					}
+					return true
 				})
+			if err != nil {
+				panic(err)
 			}
-			if !lastPage {
-				log.Println("Fetched page from S3. Have", len(files), "blobs so far")
-			}
-			return true
-		})
-	if err != nil {
-		panic(err)
+
+			resultsCh <- workerFiles
+		}(prefix)
 	}
+
+	files := make([]storage_base.UploadedBlob, 0)
+	for i := 0; i < 256; i++ {
+		workerFiles := <-resultsCh
+		files = append(files, workerFiles...)
+	}
+
 	log.Println("Listed", len(files), "blobs in S3")
 	return files
 }

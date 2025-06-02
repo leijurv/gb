@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -8,14 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/client"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
@@ -31,11 +30,11 @@ type S3 struct {
 	StorageID []byte
 	RootPath  string
 	Data      S3DatabaseIdentifier
-	sess      *session.Session
+	client    *s3.Client
 }
 
 type s3Result struct {
-	result *s3manager.UploadOutput
+	result *manager.UploadOutput
 	err    error
 }
 
@@ -76,62 +75,52 @@ func LoadS3StorageInfoFromDatabase(storageID []byte, identifier string, rootPath
 	if !strings.HasSuffix(normalizedEndpoint, "/") {
 		panic("S3 endpoint must end with a slash")
 	}
+	retryer := retry.NewStandard(func(o *retry.StandardOptions) {
+		o.MaxAttempts = 11 // 10 retries + 1 initial attempt
+		o.MaxBackoff = 10 * time.Second
+		o.Retryables = append(o.Retryables, retry.IsErrorRetryableFunc(func(err error) aws.Ternary {
+			// Check if the error is retryable using the default retry logic
+			for _, retryable := range retry.DefaultRetryables {
+				if result := retryable.IsErrorRetryable(err); result != aws.UnknownTernary {
+					if result == aws.TrueTernary {
+						log.Println("Retrying because error", err, "is retryable to", normalizedEndpoint)
+						return aws.TrueTernary
+					}
+				}
+			}
+			log.Println("NOT retrying because error", err, "is not retryable to", normalizedEndpoint)
+			return aws.FalseTernary
+		}))
+	})
+
+	cfg := aws.Config{
+		Region:      ident.Region,
+		Credentials: credentials.NewStaticCredentialsProvider(ident.KeyID, ident.SecretKey, ""),
+		Retryer:     func() aws.Retryer { return retryer },
+	}
+
+	if normalizedEndpoint != "https://s3."+ident.Region+".amazonaws.com/" {
+		cfg.BaseEndpoint = aws.String(strings.TrimSuffix(normalizedEndpoint, "/"))
+	}
+
+	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+		// I hate Oracle Cloud! I hate Oracle Cloud!
+		o.UsePathStyle = strings.Contains(ident.Endpoint, "oraclecloud")
+		// ^ this is needed because of https://stackoverflow.com/questions/55236708/how-to-config-oracle-cloud-certificate
+		// without this, it attempts to connect to https://your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com
+		// AWS and Backblaze B2 can correctly provide a TLS certificate for the bucket-specific subdomain via SNI... but Oracle Cloud cannot
+		// so, when requesting that, it provides the default TLS certificate for Oracle's Swift Object Storage
+		// which makes GB panic with "x509: certificate is valid for swiftobjectstorage.eu-zurich-1.oraclecloud.com, not your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com"
+		// this fixes that by forcing the S3 client to use path-style queries (i.e. it will hit "https://s3.amazonaws.com/BUCKET/KEY" instead of the default "https://BUCKET.s3.amazonaws.com/KEY")
+		// which Oracle Cloud DOES support SNI for, allowing the API requests to succeed
+	})
+
 	return &S3{
 		StorageID: storageID,
 		Data:      *ident,
 		RootPath:  rootPath,
-		sess: session.Must(session.NewSession(&aws.Config{
-			Region:      aws.String(ident.Region),
-			Credentials: credentials.NewStaticCredentials(ident.KeyID, ident.SecretKey, ""),
-			EndpointResolver: endpoints.ResolverFunc(func(service, region string, optFns ...func(*endpoints.Options)) (endpoints.ResolvedEndpoint, error) {
-				if service == endpoints.S3ServiceID {
-					return endpoints.ResolvedEndpoint{
-						URL:           normalizedEndpoint,
-						SigningRegion: ident.Region,
-					}, nil
-				}
-				return endpoints.DefaultResolver().EndpointFor(service, region, optFns...)
-			}),
-			// I hate Oracle Cloud! I hate Oracle Cloud!
-			S3ForcePathStyle: aws.Bool(strings.Contains(normalizedEndpoint, "oraclecloud")),
-			// ^ this is needed because of https://stackoverflow.com/questions/55236708/how-to-config-oracle-cloud-certificate
-			// without this, it attempts to connect to https://your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com
-			// AWS and Backblaze B2 can correctly provide a TLS certificate for the bucket-specific subdomain via SNI... but Oracle Cloud cannot
-			// so, when requesting that, it provides the default TLS certificate for Oracle's Swift Object Storage
-			// which makes GB panic with "x509: certificate is valid for swiftobjectstorage.eu-zurich-1.oraclecloud.com, not your-bucket-name.abc123redactedabc123.compat.objectstorage.eu-zurich-1.oraclecloud.com"
-			// this fixes that by forcing the S3 client to use path-style queries (i.e. it will hit "https://s3.amazonaws.com/BUCKET/KEY" instead of the default "https://BUCKET.s3.amazonaws.com/KEY")
-			// which Oracle Cloud DOES support SNI for, allowing the API requests to succeed
-			Retryer: GbCustomRetryer{
-				DefaultRetryer: client.DefaultRetryer{
-					NumMaxRetries: 10, // default is 3 retries but Backblaze IS TERRIBLE!!!
-					// GbCustomRetrying is a tattletale that reveals that Backblaze is constantly replying with 500 and 503
-					// S3 doesn't do it and Oracle Cloud doesn't do it, like, ever. when you're notably worse than Oracle Cloud then you're doing something wrong
-					// so we are doing 10 retries now
-					// also this https://www.backblaze.com/blog/b2-503-500-server-error/ is COPE
-					MaxRetryDelay:    10 * time.Second, // keep retrying at 10 second intervals or less (default is to increase delay up to 5 minutes, which is way too high)
-					MaxThrottleDelay: 10 * time.Second, // aws sdk treats error 502, 503, and 504 as a throttle delay rather than a retry delay, so we have to set MaxThrottleDelay too, because backblaze likes to respond with 503
-				},
-			},
-		})),
+		client:    client,
 	}
-}
-
-type GbCustomRetryer struct {
-	client.DefaultRetryer
-}
-
-func (r GbCustomRetryer) ShouldRetry(req *request.Request) bool {
-	ret := r.DefaultRetryer.ShouldRetry(req)
-	msg := "Retrying"
-	if req.HTTPResponse.StatusCode == 400 {
-		msg += " because status code is 400 and backblaze has a TERRIBLE API"
-		ret = true
-	}
-	if !ret {
-		msg = "NOT retrying"
-	}
-	log.Println(msg, "after attempt number", req.RetryCount+1 /* first failure+retry has RetryCount==0 */, "delay", req.RetryDelay, "because error", req.HTTPResponse.StatusCode, req.Error, "while trying to request", req.HTTPRequest.URL, req.HTTPResponse)
-	return ret
 }
 
 func (remote *S3) GetID() []byte {
@@ -154,12 +143,6 @@ func formatPath(blobID []byte) string {
 	return h[:2] + "/" + h[2:4] + "/" + h
 }
 
-func (remote *S3) makeUploader() *s3manager.Uploader {
-	return s3manager.NewUploader(remote.sess, func(u *s3manager.Uploader) {
-		u.PartSize = s3PartSize
-	})
-}
-
 func (remote *S3) BeginDatabaseUpload(filename string) storage_base.StorageUpload {
 	return remote.beginUpload(nil, remote.niceRootPath()+filename)
 }
@@ -174,10 +157,18 @@ func (remote *S3) beginUpload(blobIDOptional []byte, path string) *s3Upload {
 	resultCh := make(chan s3Result)
 	go func() {
 		defer pipeR.Close()
-		result, err := remote.makeUploader().Upload(&s3manager.UploadInput{
-			Bucket: aws.String(remote.Data.Bucket),
-			Key:    aws.String(path),
-			Body:   pipeR,
+		checksumSelection := types.ChecksumAlgorithmSha256
+		if strings.Contains(remote.Data.Endpoint, "oraclecloud") || strings.Contains(remote.Data.Endpoint, "backblaze") {
+			// the checksum thing is a new feature in v2 of the go sdk. it's not (yet) supported by oracle or backblaze
+			checksumSelection = ""
+		}
+		result, err := manager.NewUploader(remote.client, func(u *manager.Uploader) {
+			u.PartSize = s3PartSize
+		}).Upload(context.Background(), &s3.PutObjectInput{
+			Bucket:            aws.String(remote.Data.Bucket),
+			Key:               aws.String(path),
+			Body:              pipeR,
+			ChecksumAlgorithm: checksumSelection,
 		})
 		if err != nil {
 			log.Println("s3 error", err)
@@ -207,7 +198,7 @@ func (remote *S3) DownloadSection(path string, offset int64, length int64) io.Re
 	log.Println("S3 key is", path)
 	rangeStr := utils.FormatHTTPRange(offset, length)
 	log.Println("S3 range is", rangeStr)
-	result, err := s3.New(remote.sess).GetObject(&s3.GetObjectInput{
+	result, err := remote.client.GetObject(context.Background(), &s3.GetObjectInput{
 		Bucket: aws.String(remote.Data.Bucket),
 		Key:    aws.String(path),
 		Range:  aws.String(rangeStr),
@@ -227,33 +218,34 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 		go func(prefix int) {
 			workerFiles := make([]storage_base.UploadedBlob, 0)
 
-			err := s3.New(remote.sess).ListObjectsPages(&s3.ListObjectsInput{
+			paginator := s3.NewListObjectsV2Paginator(remote.client, &s3.ListObjectsV2Input{
 				Bucket: aws.String(remote.Data.Bucket),
 				Prefix: aws.String(remote.niceRootPath() + hex.EncodeToString([]byte{byte(prefix)}) + "/"),
-			},
-				func(page *s3.ListObjectsOutput, lastPage bool) bool {
-					for _, obj := range page.Contents {
-						if strings.Contains(*obj.Key, "db-backup-") || strings.Contains(*obj.Key, "db-v2backup-") {
-							continue // this is not a blob
-						}
-						etag := *obj.ETag
-						etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
-						blobID, err := hex.DecodeString((*obj.Key)[len(remote.niceRootPath()+"XX/XX/"):])
-						if err != nil || len(blobID) != 32 {
-							panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
-						}
-						workerFiles = append(workerFiles, storage_base.UploadedBlob{
-							StorageID: remote.StorageID,
-							Path:      *obj.Key,
-							Checksum:  etag,
-							Size:      *obj.Size,
-							BlobID:    blobID,
-						})
+			})
+
+			for paginator.HasMorePages() {
+				page, err := paginator.NextPage(context.Background())
+				if err != nil {
+					panic(err)
+				}
+				for _, obj := range page.Contents {
+					if strings.Contains(*obj.Key, "db-backup-") || strings.Contains(*obj.Key, "db-v2backup-") {
+						continue // this is not a blob
 					}
-					return true
-				})
-			if err != nil {
-				panic(err)
+					etag := *obj.ETag
+					etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
+					blobID, err := hex.DecodeString((*obj.Key)[len(remote.niceRootPath()+"XX/XX/"):])
+					if err != nil || len(blobID) != 32 {
+						panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
+					}
+					workerFiles = append(workerFiles, storage_base.UploadedBlob{
+						StorageID: remote.StorageID,
+						Path:      *obj.Key,
+						Checksum:  etag,
+						Size:      *obj.Size,
+						BlobID:    blobID,
+					})
+				}
 			}
 
 			resultsCh <- workerFiles
@@ -272,7 +264,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 
 func (remote *S3) DeleteBlob(path string) {
 	log.Println("Deleting S3 object at path:", path)
-	_, err := s3.New(remote.sess).DeleteObject(&s3.DeleteObjectInput{
+	_, err := remote.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
 		Bucket: aws.String(remote.Data.Bucket),
 		Key:    aws.String(path),
 	})
@@ -315,7 +307,7 @@ func (up *s3Upload) End() storage_base.UploadedBlob {
 }
 
 func fetchETagAndSize(remote *S3, path string) (string, int64) {
-	result, err := s3.New(remote.sess).HeadObject(&s3.HeadObjectInput{
+	result, err := remote.client.HeadObject(context.Background(), &s3.HeadObjectInput{
 		Bucket: aws.String(remote.Data.Bucket),
 		Key:    aws.String(path),
 	})

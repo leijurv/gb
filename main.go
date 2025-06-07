@@ -25,6 +25,7 @@ import (
 	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/relay"
 	"github.com/leijurv/gb/replicate"
+	"github.com/leijurv/gb/stats"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
 	"github.com/urfave/cli"
@@ -438,6 +439,14 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				share.CreateShareURL(c.Args().First(), c.String("name"))
+				return nil
+			},
+		},
+		{
+			Name:  "stats",
+			Usage: "show comprehensive backup statistics",
+			Action: func(c *cli.Context) error {
+				stats.ShowStats()
 				return nil
 			},
 		},

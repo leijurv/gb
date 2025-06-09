@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
+	"github.com/leijurv/gb/utils"
 )
 
 func Proxy(label string, base string, listen string) {
@@ -60,11 +62,14 @@ h1 {padding: 0.1em; background-color: #777; color: white; border-bottom: thin wh
 
 <body>
 <h1>Paths beginning with {{.Match}}</h1>
+{{if .Parent}}<a href="{{.Parent}}">Back up to {{.Parent}}</a>{{end}}
 <table>
     <thead>
         <tr>
             <th>Filename</th>
             <th>Size</th>
+            <th>Last modified time (filesystem)</th>
+            <th>Backed up</th>
         </tr>
     </thead>
     <tbody>
@@ -75,7 +80,9 @@ h1 {padding: 0.1em; background-color: #777; color: white; border-bottom: thin wh
 		<tr class="even">
 		{{end}}
 			<td><a href="{{$a.EscapedName}}">{{$a.Name}}</a></td>
-			<td>{{if eq $a.Size -1}}{{else}}{{$a.Size}}{{end}}</td>
+			<td>{{$a.SizeStr}}</td>
+			<td>{{$a.FsModifiedStr}}</td>
+			<td>{{$a.BackedUpStr}}</td>
 		</tr>
 	{{end}}
 	</tbody>
@@ -92,42 +99,30 @@ func escapePath(path string) string {
 }
 
 func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base string) {
-	rows, err := db.DB.Query("SELECT path, size FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE end IS NULL AND path "+db.StartsWithPattern(1), path)
-	if err != nil {
-		panic(err)
-	}
-	defer rows.Close()
 	type Entry struct {
-		Name        string
-		Size        int64
-		Odd         bool
-		EscapedName string
+		Name          string
+		SizeStr       string
+		Odd           bool
+		EscapedName   string
+		FsModifiedStr string
+		BackedUpStr   string
 	}
 	entries := make(map[Entry]struct{})
-	for rows.Next() {
-		var match string
-		var size int64
-		err := rows.Scan(&match, &size)
-		if err != nil {
-			panic(err)
-		}
+	for _, dirent := range utils.ListDirectory(path) {
 		entry := Entry{
-			Name: match,
-			Size: size,
+			Name: dirent.Path,
 		}
 		entry.Name = entry.Name[len(path):]
 		if strings.Contains(entry.Name, "/") {
 			entry.Name = strings.Split(entry.Name, "/")[0] + "/"
-			entry.Size = -1
 			entry.EscapedName = "/" + escapePath(path[1+len(base):]+entry.Name)
 		} else {
-			entry.EscapedName = "/" + escapePath(match[1+len(base):])
+			entry.EscapedName = "/" + escapePath(dirent.Path[1+len(base):])
+			entry.SizeStr = utils.FormatCommas(dirent.Size)
+			entry.FsModifiedStr = time.Unix(dirent.FsModified, 0).Format(time.RFC3339)
+			entry.BackedUpStr = time.Unix(dirent.Start, 0).Format(time.RFC3339)
 		}
 		entries[entry] = struct{}{}
-	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
 	}
 	keys := make([]Entry, 0)
 	for k := range entries {
@@ -139,10 +134,19 @@ func handleDirMaybe(w http.ResponseWriter, req *http.Request, path string, base 
 	for i := range keys {
 		keys[i].Odd = i%2 == 1
 	}
-	err = listTemplate.Execute(w, struct {
-		Match string
-		Rows  []Entry
-	}{path, keys})
+	parent := ""
+	current := path[len(base):]
+	for strings.HasSuffix(current, "/") {
+		current = current[:len(current)-1]
+	}
+	if strings.Contains(current, "/") {
+		parent = current[:strings.LastIndex(current, "/")] + "/"
+	}
+	err := listTemplate.Execute(w, struct {
+		Match  string
+		Parent string
+		Rows   []Entry
+	}{path, parent, keys})
 	if err != nil {
 		panic(err)
 	}

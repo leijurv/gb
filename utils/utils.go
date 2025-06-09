@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"unicode/utf8"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/leijurv/gb/config"
+	"github.com/leijurv/gb/db"
 )
 
 func SliceToArr(in []byte) [32]byte {
@@ -216,12 +218,13 @@ func Copy(out io.Writer, in io.Reader) {
 	}
 }
 
+var commaRegex = regexp.MustCompile("(\\d+)(\\d{3})")
+
 func FormatCommas(num int64) string {
 	str := strconv.FormatInt(num, 10)
-	re := regexp.MustCompile("(\\d+)(\\d{3})")
 	for n := ""; n != str; {
 		n = str
-		str = re.ReplaceAllString(str, "$1,$2")
+		str = commaRegex.ReplaceAllString(str, "$1,$2")
 	}
 	return str
 }
@@ -229,4 +232,64 @@ func FormatCommas(num int64) string {
 func IsDatabaseFile(path string) bool {
 	dbPath := config.Config().DatabaseLocation
 	return path == dbPath || path == dbPath+"-wal" || path == dbPath+"-shm"
+}
+
+type GBdirent struct {
+	IsDirectory bool
+	Path        string
+	Size        int64
+	FsModified  int64
+	Start       int64
+}
+
+func ListDirectory(dir string) []GBdirent {
+	ret := make([]GBdirent, 0)
+	directoriesSeen := make(map[string]struct{})
+	cursor := dir
+	for {
+		// note that we query for paths strictly greater than the cursor
+		rows, err := db.DB.Query("SELECT path, size, fs_modified, start FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE end IS NULL AND path > ? AND path < (? || x'ff') ORDER BY path ASC LIMIT 100", cursor, dir)
+		if err != nil {
+			panic(err)
+		}
+		defer rows.Close()
+		any := false
+		for rows.Next() {
+			var path string
+			var size int64
+			var fsModified int64
+			var start int64
+			err = rows.Scan(&path, &size, &fsModified, &start)
+			if err != nil {
+				panic(err)
+			}
+			name := path[len(dir):]
+			if strings.Contains(name, "/") {
+				// this is a directory
+				subdir := dir + strings.Split(name, "/")[0] + "/"
+				if _, ok := directoriesSeen[subdir]; !ok {
+					ret = append(ret, GBdirent{IsDirectory: true, Path: subdir})
+					directoriesSeen[subdir] = struct{}{}
+				}
+				cursor = subdir + string([]byte{0xff}) // advance to after this entire subdir (this is the important line that makes this function run quickly even on "/")
+			} else {
+				// this is a file
+				ret = append(ret, GBdirent{IsDirectory: false, Path: path, Size: size, FsModified: fsModified, Start: start})
+				cursor = path
+			}
+			any = true
+		}
+		err = rows.Err()
+		if err != nil {
+			panic(err)
+		}
+		err = rows.Close()
+		if err != nil {
+			panic(err)
+		}
+		if !any {
+			break
+		}
+	}
+	return ret
 }

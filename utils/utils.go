@@ -3,6 +3,7 @@ package utils
 import (
 	"crypto/md5"
 	"crypto/sha256"
+	"database/sql"
 	"hash"
 	"io"
 	"log"
@@ -240,15 +241,28 @@ type GBdirent struct {
 	Size        int64
 	FsModified  int64
 	Start       int64
+	Hash        []byte
+	Permissions int32
+	CompAlgo    string
 }
 
 func ListDirectory(dir string) []GBdirent {
+	return ListDirectoryAtTime(dir, 0) // 0 means current time
+}
+
+func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 	ret := make([]GBdirent, 0)
 	directoriesSeen := make(map[string]struct{})
 	cursor := dir
 	for {
 		// note that we query for paths strictly greater than the cursor
-		rows, err := db.DB.Query("SELECT path, size, fs_modified, start FROM files INNER JOIN sizes ON files.hash = sizes.hash WHERE end IS NULL AND path > ? AND path < (? || x'ff') ORDER BY path ASC LIMIT 100", cursor, dir)
+		var rows *sql.Rows
+		var err error
+		if timestamp == 0 {
+			rows, err = db.DB.Query("SELECT files.path, sizes.size, files.fs_modified, files.start, files.hash, files.permissions, COALESCE(blob_entries.compression_alg, '') FROM files INNER JOIN sizes ON files.hash = sizes.hash INNER JOIN blob_entries ON blob_entries.hash = files.hash WHERE end IS NULL AND path > ? AND path < (? || x'ff') ORDER BY path ASC LIMIT 100", cursor, dir)
+		} else {
+			rows, err = db.DB.Query("SELECT files.path, sizes.size, files.fs_modified, files.start, files.hash, files.permissions, COALESCE(blob_entries.compression_alg, '') FROM files INNER JOIN sizes ON files.hash = sizes.hash INNER JOIN blob_entries ON blob_entries.hash = files.hash WHERE (? >= start AND (end > ? OR end IS NULL)) AND path > ? AND path < (? || x'ff') ORDER BY path ASC LIMIT 100", timestamp, timestamp, cursor, dir)
+		}
 		if err != nil {
 			panic(err)
 		}
@@ -259,7 +273,10 @@ func ListDirectory(dir string) []GBdirent {
 			var size int64
 			var fsModified int64
 			var start int64
-			err = rows.Scan(&path, &size, &fsModified, &start)
+			var hash []byte
+			var permissions int32
+			var compAlgo string
+			err = rows.Scan(&path, &size, &fsModified, &start, &hash, &permissions, &compAlgo)
 			if err != nil {
 				panic(err)
 			}
@@ -274,7 +291,7 @@ func ListDirectory(dir string) []GBdirent {
 				cursor = subdir + string([]byte{0xff}) // advance to after this entire subdir (this is the important line that makes this function run quickly even on "/")
 			} else {
 				// this is a file
-				ret = append(ret, GBdirent{IsDirectory: false, Path: path, Size: size, FsModified: fsModified, Start: start})
+				ret = append(ret, GBdirent{IsDirectory: false, Path: path, Size: size, FsModified: fsModified, Start: start, Hash: hash, Permissions: permissions, CompAlgo: compAlgo})
 				cursor = path
 			}
 			any = true

@@ -5,10 +5,14 @@ package gbfs
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"os/signal"
 	"strings"
 	"syscall"
 	"time"
@@ -39,14 +43,14 @@ func (f File) name() string {
 }
 
 type Dir struct {
-	name  string // empty for the root dir
-	files map[string]File
-	dirs  map[string]*Dir
-	inode uint64 // generated
+	path      string // full path including trailing slash
+	timestamp int64  // for querying historical data
+	inode     uint64 // generated
 }
 
 type GBFS struct {
-	root Dir
+	root      Dir
+	timestamp int64
 }
 
 type FileHandle interface{}
@@ -70,7 +74,7 @@ func timeMillis(millis int64) time.Time {
 }
 
 func (d *Dir) Attr(ctx context.Context, attr *fuse.Attr) error {
-	//attr.Inode = d.inode
+	attr.Inode = pathToInode(d.path)
 	attr.Uid = 1000
 	attr.Gid = 100
 	attr.Mode = os.ModeDir | 0o555
@@ -79,10 +83,9 @@ func (d *Dir) Attr(ctx context.Context, attr *fuse.Attr) error {
 }
 
 func (f *File) Attr(ctx context.Context, attr *fuse.Attr) error {
-	//attr.Inode = f.inode
+	attr.Inode = pathToInode(f.path)
 	attr.Uid = 1000
 	attr.Gid = 100
-	//attr.Mode = 0o444
 	mtime := timeMillis(int64(f.modifiedTime))
 	attr.Mtime = mtime
 	attr.Mode = os.FileMode(f.flags)
@@ -91,32 +94,49 @@ func (f *File) Attr(ctx context.Context, attr *fuse.Attr) error {
 }
 
 func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
-	out := make([]fuse.Dirent, 0, len(d.dirs)+len(d.files)+2)
+	entries := utils.ListDirectoryAtTime(d.path, d.timestamp)
+	out := make([]fuse.Dirent, 0, len(entries)+2)
 
 	out = append(out, fuse.Dirent{
-		//Inode: d.inode,
-		Name: ".",
-		Type: fuse.DT_Dir,
+		Inode: pathToInode(d.path),
+		Name:  ".",
+		Type:  fuse.DT_Dir,
 	})
-	out = append(out, fuse.Dirent{
-		Name: "..",
-		Type: fuse.DT_Dir,
-	})
-
-	for _, subdir := range d.dirs {
-		out = append(out, fuse.Dirent{
-			//Inode: subdir.inode,
-			Name: subdir.name,
-			Type: fuse.DT_Dir,
-		})
+	// Calculate parent directory path for ".."
+	parentPath := d.path
+	if parentPath != "/" {
+		parentPath = strings.TrimSuffix(parentPath, "/")
+		lastSlash := strings.LastIndex(parentPath, "/")
+		if lastSlash >= 0 {
+			parentPath = parentPath[:lastSlash+1]
+		} else {
+			parentPath = "/"
+		}
 	}
-	for _, f := range d.files {
-		name := f.name()
-		out = append(out, fuse.Dirent{
-			//Inode: f.inode,
-			Name: name,
-			Type: fuse.DT_File,
-		})
+	out = append(out, fuse.Dirent{
+		Inode: pathToInode(parentPath),
+		Name:  "..",
+		Type:  fuse.DT_Dir,
+	})
+
+	for _, entry := range entries {
+		if entry.IsDirectory {
+			// Extract just the directory name from the full path
+			name := strings.TrimSuffix(entry.Path[len(d.path):], "/")
+			out = append(out, fuse.Dirent{
+				Inode: pathToInode(entry.Path),
+				Name:  name,
+				Type:  fuse.DT_Dir,
+			})
+		} else {
+			// Extract just the filename from the full path
+			name := entry.Path[strings.LastIndex(entry.Path, "/")+1:]
+			out = append(out, fuse.Dirent{
+				Inode: pathToInode(entry.Path),
+				Name:  name,
+				Type:  fuse.DT_File,
+			})
+		}
 	}
 
 	return out, nil
@@ -243,20 +263,35 @@ func (fh *UncompressedFileHandle) Read(ctx context.Context, req *fuse.ReadReques
 }
 
 func (d *Dir) Lookup(ctx context.Context, name string) (fuseFs.Node, error) {
-	if subdir, ok := d.dirs[name]; ok {
-		return subdir, nil
+	// First check if it's a directory
+	subdirPath := d.path + name + "/"
+	if directoryExists(subdirPath, d.timestamp) {
+		return &Dir{
+			path:      subdirPath,
+			timestamp: d.timestamp,
+			inode:     pathToInode(subdirPath),
+		}, nil
 	}
-	if f, ok := d.files[name]; ok {
-		return &f, nil
+
+	// Then check if it's a file
+	filePath := d.path + name
+	if file := lookupFile(filePath, d.timestamp); file != nil {
+		return file, nil
 	}
 
 	return nil, syscall.ENOENT
 }
 
 func Mount(mountpoint string, path string, timestamp int64) {
-	root := parseDirectoryStructure(queryAllFiles(path, timestamp))
-	// TODO: store blob info so we don't need to query it later
-	//db.ShutdownDatabase()
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+
+	root := Dir{
+		path:      path,
+		timestamp: timestamp,
+		inode:     pathToInode(path),
+	}
 
 	conn, err := fuse.Mount(mountpoint,
 		fuse.ReadOnly(),
@@ -267,16 +302,43 @@ func Mount(mountpoint string, path string, timestamp int64) {
 	if err != nil {
 		panic(err)
 	}
-	defer func(conn *fuse.Conn) {
-		err := conn.Close()
-		if err != nil {
-			panic(err)
-		}
-	}(conn)
 
-	err = fuseFs.Serve(conn, GBFS{root})
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start serving in a goroutine
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- fuseFs.Serve(conn, GBFS{root, timestamp})
+	}()
+
+	// Wait for either a signal or serve to complete
+	for {
+		select {
+		case sig := <-sigChan:
+			log.Printf("Received signal %v, attempting to unmount...", sig)
+			err = fuse.Unmount(mountpoint)
+			if err != nil {
+				log.Printf("Cannot unmount: %v (filesystem may be busy, files still open, or in use)", err)
+				log.Printf("GBFS will continue running. Try closing all files and press Ctrl+C again, or use 'fusermount -u %s' to force unmount.", mountpoint)
+				continue // Stay in the loop, don't exit
+			}
+			log.Println("GBFS unmounted cleanly")
+			goto cleanup
+		case err = <-serveDone:
+			if err != nil {
+				log.Printf("FUSE serve error: %v", err)
+			}
+			goto cleanup
+		}
+	}
+
+cleanup:
+	// Close the connection
+	err = conn.Close()
 	if err != nil {
-		panic(err)
+		log.Printf("Error closing FUSE connection: %v", err)
 	}
 }
 
@@ -284,82 +346,43 @@ func (gb GBFS) Root() (fuseFs.Node, error) {
 	return &gb.root, nil
 }
 
-var QUERY = `SELECT files.path, files.hash, files.fs_modified, files.permissions, sizes.size, blob_entries.compression_alg
-				FROM files
-				    INNER JOIN sizes ON sizes.hash = files.hash
-					INNER JOIN blob_entries ON blob_entries.hash = files.hash
-				WHERE (?1 >= files.start AND (files.end > ?1 OR files.end IS NULL)) AND files.path ` + db.StartsWithPattern(2)
-
-func queryAllFiles(path string, timestamp int64) []File {
-	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
+// Generate a consistent inode from a path by hashing it
+func pathToInode(path string) uint64 {
+	h := sha256.Sum256([]byte(path))
+	// Use the first 8 bytes as a uint64, but ensure it's never 0 or 1 (reserved for . and ..)
+	inode := binary.LittleEndian.Uint64(h[:8])
+	if inode <= 1 {
+		inode = 2
 	}
-	defer func() {
-		err = tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
-	}
-	rows, err := tx.Query(QUERY, timestamp, path)
-	if err != nil {
-		panic(err)
-	}
-	var files []File
-	for rows.Next() {
-		var file File
-		err = rows.Scan(&file.path, &file.hash, &file.modifiedTime, &file.flags, &file.size, &file.compAlgo)
-		if err != nil {
-			panic(err)
-		}
-		files = append(files, file)
-	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
-	return files
+	return inode
 }
 
-func makeDir(name string, inode uint64) Dir {
-	return Dir{
-		name:  name,
-		files: make(map[string]File),
-		dirs:  make(map[string]*Dir),
-		inode: inode,
-	}
+func directoryExists(path string, timestamp int64) bool {
+	// Check if any files exist that start with this path
+	row := db.DB.QueryRow("SELECT 1 FROM files WHERE (? >= start AND (end > ? OR end IS NULL)) AND path "+db.StartsWithPattern(3)+" LIMIT 1", timestamp, timestamp, path)
+	var exists int
+	err := row.Scan(&exists)
+	return err == nil
 }
 
-func parseDirectoryStructure(files []File) Dir {
-	root := makeDir("", 0)
-	nextInode := uint64(1)
-	for _, f := range files {
-		dir := &root
-		parts := strings.Split(f.path, "/")
-		for i := 1; i < len(parts); i++ {
-			element := parts[i]
+func lookupFile(path string, timestamp int64) *File {
+	row := db.DB.QueryRow(`SELECT files.path, files.hash, files.fs_modified, files.permissions, sizes.size, COALESCE(blob_entries.compression_alg, '')
+		FROM files
+		INNER JOIN sizes ON sizes.hash = files.hash
+		INNER JOIN blob_entries ON blob_entries.hash = files.hash
+		WHERE (? >= files.start AND (files.end > ? OR files.end IS NULL)) AND files.path = ?`, timestamp, timestamp, path)
 
-			if i == len(parts)-1 {
-				f.inode = nextInode
-				nextInode++
-				dir.files[element] = f
-			} else {
-				if val, ok := dir.dirs[element]; ok {
-					dir = val
-				} else {
-					cringe := makeDir(element, nextInode)
-					nextInode++
-					newDir := &cringe
-					dir.dirs[element] = newDir
-					dir = newDir
-				}
-			}
+	var file File
+	var hash []byte
+	err := row.Scan(&file.path, &hash, &file.modifiedTime, &file.flags, &file.size, &file.compAlgo)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
 		}
+		panic(err)
 	}
 
-	return root
+	file.hash = &hash
+	file.inode = pathToInode(file.path)
+	return &file
 }

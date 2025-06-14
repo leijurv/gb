@@ -19,6 +19,7 @@ import (
 
 	"bazil.org/fuse"
 	fuseFs "bazil.org/fuse/fs"
+	"github.com/leijurv/gb/cache"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
@@ -208,12 +209,10 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 	}()
 
 	if f.compAlgo != "" {
-		fmt.Println("Made CompressedFileHandle for", f.path)
 		reader := download.CatReadCloser(*f.hash, tx)
 		resp.Flags |= fuse.OpenNonSeekable
 		return &CompressedFileHandle{reader, 0}, nil
 	} else {
-		fmt.Println("Made UncompressedFileHandle for", f.path)
 		handle := newUncompressedHandle(*f.hash, tx)
 		return &handle, nil
 	}
@@ -246,14 +245,12 @@ func (fh *CompressedFileHandle) Read(ctx context.Context, req *fuse.ReadRequest,
 }
 
 func (fh *UncompressedFileHandle) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
-	fmt.Println("UncompressedFileHandle.Read()")
 	buf := make([]byte, req.Size)
 	offset := fh.blobOffset + req.Offset
-	reader := fh.storage.DownloadSection(fh.storagePath, offset, int64(req.Size))
+	reader := cache.DownloadSection(fh.storage, fh.storagePath, offset, int64(req.Size))
 	decrypted := crypto.DecryptBlobEntry(reader, offset, *fh.key)
 	defer reader.Close()
 	n, err := io.ReadFull(decrypted, buf)
-
 	// same as above
 	if err == io.ErrUnexpectedEOF || err == io.EOF {
 		err = nil

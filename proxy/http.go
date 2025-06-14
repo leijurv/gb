@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/leijurv/gb/cache"
 	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
@@ -96,7 +97,9 @@ func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, st
 		}
 		data = resp.Body
 	} else {
-		data = storage.DownloadSection(path, seekStart, claimedLength)
+		data = cache.DownloadSection(storage, path, seekStart, claimedLength)
+		//data = storage.DownloadSection(path, seekStart, claimedLength)
+
 	}
 	defer data.Close()
 

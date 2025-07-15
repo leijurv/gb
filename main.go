@@ -297,6 +297,10 @@ func main() {
 					Name:  "at, to, timestamp",
 					Usage: "timestamp to which this should be restored",
 				},
+				cli.BoolFlag{
+					Name:  "latest",
+					Usage: "restore latest backup",
+				},
 			},
 			Action: func(c *cli.Context) error {
 				timestamp, err := parseTimestamp(c.String("at"))
@@ -304,7 +308,7 @@ func main() {
 					return err
 				}
 				// restore prints out the timestamp for confirmation, no need to do it twice
-				download.Restore(c.Args().Get(0), c.Args().Get(1), timestamp)
+				download.Restore(c.Args().Get(0), c.Args().Get(1), timestamp, c.Bool("latest"))
 				return nil
 			},
 		},

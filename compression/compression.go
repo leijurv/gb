@@ -43,8 +43,7 @@ func init() {
 	}
 	for _, c := range compressions {
 		n := c.AlgName()
-		_, ok := compressionMap[n]
-		if ok {
+		if _, ok := compressionMap[n]; ok {
 			panic("duplicate alg name " + n)
 		}
 		compressionMap[n] = c
@@ -70,7 +69,7 @@ func ByAlgName(algName string) Compression {
 	return compressionMap[algName]
 }
 
-func howToCompress(path string) []Compression {
+func SelectCompressionForPath(path string) []Compression {
 	path = strings.ToLower(path)
 	stat, err := os.Stat(path)
 	if err == nil && stat.Size() < config.Config().MinCompressSize {
@@ -87,10 +86,10 @@ func howToCompress(path string) []Compression {
 	return []Compression{&ZstdCompression{}, &NoCompression{}}
 }
 
-func Compress(path string, out io.Writer, in io.Reader, hs *utils.HasherSizer) string {
+func Compress(compOptions []Compression, out io.Writer, in io.Reader, hs *utils.HasherSizer) string {
 	var inData []byte
 	buffered := false
-	for _, c := range howToCompress(path) {
+	for _, c := range compOptions {
 		if c.Fallible() {
 			if !buffered {
 				var inBuf bytes.Buffer
@@ -101,7 +100,7 @@ func Compress(path string, out io.Writer, in io.Reader, hs *utils.HasherSizer) s
 			var outBuf bytes.Buffer
 			err := c.Compress(&outBuf, bytes.NewReader(inData))
 			if err != nil {
-				log.Println(c.AlgName(), "compression FAILED on", path, "due to", err, "so FALLING BACK to next compression option")
+				log.Println(c.AlgName(), "compression FAILED due to", err, "so FALLING BACK to next compression option")
 				continue
 			}
 			outData := outBuf.Bytes()

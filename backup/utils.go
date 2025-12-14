@@ -77,6 +77,27 @@ var stats = Stats{
 	currentlyUploading: make(map[string]*utils.HasherSizer),
 }
 
+func ResetForTesting() {
+	newNow := time.Now().Unix()
+	if newNow <= now {
+		newNow = now + 1
+	}
+	now = newNow
+	sizeClaimMap = make(map[int64]*sync.Mutex)
+	hashLateMap = make(map[[32]byte][]File)
+	hasherCh = make(chan HashPlan)
+	bucketerCh = make(chan Planned)
+	uploaderCh = make(chan BlobPlan)
+	wg = sync.WaitGroup{}
+	stats = Stats{
+		currentlyUploading: make(map[string]*utils.HasherSizer),
+	}
+}
+
+func GetTestingTimestamp() int64 {
+	return now
+}
+
 func (s *Stats) Add(hs *utils.HasherSizer) {
 	s.lock.Lock()
 	defer s.lock.Unlock()

@@ -51,6 +51,15 @@ func statInputPaths(rawPaths []string) []File {
 
 func Backup(rawPaths []string) {
 	DBKey()
+	backupImpl(rawPaths)
+}
+
+func BackupNonInteractive(rawPaths []string) {
+	DBKeyNonInteractive()
+	backupImpl(rawPaths)
+}
+
+func backupImpl(rawPaths []string) {
 	inputs := statInputPaths(rawPaths)
 
 	for i := 0; i < config.Config().NumHasherThreads; i++ {

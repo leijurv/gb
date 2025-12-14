@@ -270,3 +270,13 @@ func ExcludeFromDedupe(path string) bool {
 	}
 	return false
 }
+
+func SetTestConfig(databaseLocation string) {
+	inited = true
+	config.DatabaseLocation = databaseLocation
+	config.NumHasherThreads = 1
+	config.NumUploaderThreads = 1
+	config.UploadStatusInterval = -1
+	config.MinBlobSize = 1000
+	config.DisableLepton = true
+}

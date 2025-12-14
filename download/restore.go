@@ -50,6 +50,14 @@ type Restoration struct {
 }
 
 func Restore(src string, dest string, timestamp int64, stor storage_base.Storage) {
+	restoreImpl(src, dest, timestamp, stor, true)
+}
+
+func RestoreNonInteractive(src string, dest string, timestamp int64, stor storage_base.Storage) {
+	restoreImpl(src, dest, timestamp, stor, false)
+}
+
+func restoreImpl(src string, dest string, timestamp int64, stor storage_base.Storage, interactive bool) {
 	// concept: restore a directory
 	// src is where the directory was (is, in the database)
 	// dest is where the directory should be
@@ -189,8 +197,10 @@ func Restore(src string, dest string, timestamp int64, stor storage_base.Storage
 	m := maxstart(items)
 	log.Println("NOTE: I am restoring to timestamp", time.Unix(timestamp, 0).Format(time.RFC3339), "BUT the most recent gb backup in which this data had been updated was at", time.Unix(m, 0).Format(time.RFC3339))
 	log.Println("NOTE: That disparity is", timestamp-m, "seconds")
-	log.Println("Confirm? (yes: enter, no: ctrl+c) >")
-	bufio.NewReader(os.Stdin).ReadString('\n')
+	if interactive {
+		log.Println("Confirm? (yes: enter, no: ctrl+c) >")
+		bufio.NewReader(os.Stdin).ReadString('\n')
+	}
 
 	plan := make(map[[32]byte]*Restoration)
 	for _, item := range items {
@@ -245,8 +255,10 @@ func Restore(src string, dest string, timestamp int64, stor storage_base.Storage
 		}
 	}
 	log.Println("The answer is", sum, "bytes across", cnt, "distinct hashes, to be written to", cnt2, "places on disk")
-	log.Println("Confirm? (yes: enter, no: ctrl+c) >")
-	bufio.NewReader(os.Stdin).ReadString('\n')
+	if interactive {
+		log.Println("Confirm? (yes: enter, no: ctrl+c) >")
+		bufio.NewReader(os.Stdin).ReadString('\n')
+	}
 	for _, r := range plan {
 		execute(*r, stor)
 	}

@@ -134,6 +134,23 @@ func internalCreateStorage(storageID []byte, kind string, identifier string, roo
 	}
 }
 
+func RegisterMockStorage(stor storage_base.Storage, label string) {
+	storageID := stor.GetID()
+	cacheLock.Lock()
+	cache[utils.SliceToArr(storageID)] = stor
+	cacheLock.Unlock()
+	_, err := db.DB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, "Mock", "mock-identifier", "/mock", label)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func ClearCache() {
+	cacheLock.Lock()
+	cache = make(map[[32]byte]storage_base.Storage)
+	cacheLock.Unlock()
+}
+
 func StorageSelect(label string) (storage_base.Storage, bool) {
 	if label == "" {
 		log.Println("First, we need to pick a storage to fetch em from")

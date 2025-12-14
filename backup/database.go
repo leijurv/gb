@@ -67,12 +67,22 @@ func BackupDB() {
 }
 
 func DBKey() []byte {
+	return dbKeyImpl(true)
+}
+
+func DBKeyNonInteractive() []byte {
+	return dbKeyImpl(false)
+}
+
+func dbKeyImpl(interactive bool) []byte {
 	var key []byte
 	err := db.DB.QueryRow("SELECT key FROM db_key").Scan(&key)
 	if err == db.ErrNoRows {
 		log.Println("Randomly generating database encryption key")
 		key = crypto.RandBytes(16)
-		Mnemonic(key)
+		if interactive {
+			Mnemonic(key)
+		}
 		_, err = db.DB.Exec("INSERT INTO db_key (key, id) VALUES (?, 0)", key)
 	}
 	if err != nil {

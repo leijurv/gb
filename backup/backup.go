@@ -11,6 +11,7 @@ import (
 
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
 )
 
@@ -48,7 +49,7 @@ func statInputPaths(rawPaths []string) []File {
 	return files
 }
 
-func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
+func Backup(rawPaths []string) {
 	DBKey()
 	inputs := statInputPaths(rawPaths)
 
@@ -59,8 +60,9 @@ func Backup(rawPaths []string, serviceCh UploadServiceFactory) {
 
 	go bucketerThread()
 
+	storages := storage.GetAll()
 	for i := 0; i < config.Config().NumUploaderThreads; i++ {
-		go uploaderThread(<-serviceCh)
+		go uploaderThread(BeginDirectUpload(storages))
 	}
 
 	if config.Config().UploadStatusInterval != -1 {

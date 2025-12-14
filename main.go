@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/leijurv/gb/compression"
@@ -23,7 +22,6 @@ import (
 	"github.com/leijurv/gb/gbfs"
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
-	"github.com/leijurv/gb/relay"
 	"github.com/leijurv/gb/replicate"
 	"github.com/leijurv/gb/stats"
 	"github.com/leijurv/gb/storage"
@@ -76,12 +74,8 @@ func main() {
 				if len(storage.GetAll()) == 0 {
 					return errors.New("make a storage first")
 				}
-				ch, ok := relay.RemoteSplitter()
-				if !ok {
-					ch = backup.MakeDefaultServiceFactory()
-				}
 				paths := append([]string{c.Args().First()}, c.Args().Tail()...) // even if no argument (like: "gb backup"), backup current directory by passing one empty string arg
-				backup.Backup(paths, ch)
+				backup.Backup(paths)
 				if !c.Bool("no-backup-database") {
 					backup.BackupDB()
 				}
@@ -482,16 +476,6 @@ func main() {
 				return nil
 			},
 		},
-	}
-	// relay must bypass all of this, because it has no config file nor database, so we should not harass the user about setting up those things
-	if len(os.Args) == 3 && os.Args[1] == "relay" {
-		port, err := strconv.Atoi(os.Args[2])
-		if err != nil {
-			panic(err)
-		}
-		log.Println("Going to run a relay server listening on port", port)
-		relay.Listen(port)
-		return
 	}
 	err := app.Run(os.Args)
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/leijurv/gb/config"
-	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
@@ -52,16 +51,12 @@ type Stats struct {
 }
 
 // an abstraction over uploading to our storage destinations
-// can either be a direct upload, or go through a gb relay (see the relay package)
 // stateful, End must be called after Begin (so, obviously, cannot be used from multiple threads)
 // can be reused sequentially, though
 type UploadService interface {
 	Begin(blobID []byte) io.Writer
 	End(sha256 []byte, size int64) []storage_base.UploadedBlob
 }
-
-// since only one UploadService can be used per uploader thread, this provides however many are needed (aka: the number of configured uploader threads)
-type UploadServiceFactory chan UploadService
 
 // a map to manage gb's size optimization
 // (which is: if we see a file whose size is X, and we've never seen a file of that size before, we know it's going to be unique (and should be uploaded) without needing to calculate its hash)
@@ -187,17 +182,6 @@ func hashAFile(path string) ([]byte, int64, error) {
 	}
 	hash, size := hs.HashAndSize()
 	return hash, size, nil // go is a BIGOT for not letting me do return hs.HashAndSize(), nil
-}
-
-func MakeDefaultServiceFactory() UploadServiceFactory {
-	ch := make(UploadServiceFactory)
-	storage := storage.GetAll()
-	go func() {
-		for {
-			ch <- BeginDirectUpload(storage)
-		}
-	}()
-	return ch
 }
 
 func BeginDirectUpload(storages []storage_base.Storage) UploadService {

@@ -91,7 +91,17 @@ func main() {
 		{
 			Name:  "cat",
 			Usage: "dump a file to stdout by its sha256. always fetches from storage, never uses your filesystem",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
 			Action: func(c *cli.Context) error {
+				stor, ok := storage.StorageSelect(c.String("label"))
+				if !ok {
+					return nil
+				}
 				data, err := hex.DecodeString(c.Args().First())
 				if err != nil {
 					return err
@@ -99,7 +109,7 @@ func main() {
 				if len(data) != 32 {
 					return errors.New("wrong length")
 				}
-				utils.Copy(os.Stdout, download.CatEz(data))
+				utils.Copy(os.Stdout, download.CatEz(data, stor))
 				return nil
 			},
 		},
@@ -110,11 +120,17 @@ func main() {
 				{
 					Name:  "files",
 					Usage: "download files and calculate their hashes",
+					Flags: []cli.Flag{
+						cli.StringFlag{
+							Name:  "label",
+							Usage: "storage label",
+						},
+					},
 					Action: func(c *cli.Context) error {
 						if len(storage.GetAll()) == 0 {
 							return errors.New("make a storage first")
 						}
-						paranoia.TestAllFiles()
+						paranoia.TestAllFiles(c.String("label"))
 						return nil
 					},
 				},
@@ -297,14 +313,22 @@ func main() {
 					Name:  "at, to, timestamp",
 					Usage: "timestamp to which this should be restored",
 				},
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
 			},
 			Action: func(c *cli.Context) error {
+				stor, ok := storage.StorageSelect(c.String("label"))
+				if !ok {
+					return nil
+				}
 				timestamp, err := parseTimestamp(c.String("at"))
 				if err != nil {
 					return err
 				}
 				// restore prints out the timestamp for confirmation, no need to do it twice
-				download.Restore(c.Args().Get(0), c.Args().Get(1), timestamp)
+				download.Restore(c.Args().Get(0), c.Args().Get(1), timestamp, stor)
 				return nil
 			},
 		},
@@ -386,8 +410,16 @@ func main() {
 					Usage: "source path where files come from",
 					Value: "/",
 				},
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
 			},
 			Action: func(c *cli.Context) error {
+				stor, ok := storage.StorageSelect(c.String("label"))
+				if !ok {
+					return nil
+				}
 				timestamp, err := parseTimestamp(c.String("at"))
 				if err != nil {
 					return err
@@ -395,7 +427,7 @@ func main() {
 				if timestamp == 0 {
 					timestamp = time.Now().Unix()
 				}
-				gbfs.Mount(c.Args().First(), c.String("path"), timestamp)
+				gbfs.Mount(c.Args().First(), c.String("path"), timestamp, stor)
 				return nil
 			},
 		},

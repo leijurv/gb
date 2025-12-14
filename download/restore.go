@@ -16,6 +16,7 @@ import (
 
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
 
@@ -48,7 +49,7 @@ type Restoration struct {
 	sourcesOnDisk map[string]int64 // path to fsModified
 }
 
-func Restore(src string, dest string, timestamp int64) {
+func Restore(src string, dest string, timestamp int64, stor storage_base.Storage) {
 	// concept: restore a directory
 	// src is where the directory was (is, in the database)
 	// dest is where the directory should be
@@ -247,7 +248,7 @@ func Restore(src string, dest string, timestamp int64) {
 	log.Println("Confirm? (yes: enter, no: ctrl+c) >")
 	bufio.NewReader(os.Stdin).ReadString('\n')
 	for _, r := range plan {
-		execute(*r)
+		execute(*r, stor)
 	}
 }
 
@@ -258,7 +259,7 @@ func min(x, y int) int {
 	return y
 }
 
-func execute(rest Restoration) {
+func execute(rest Restoration, stor storage_base.Storage) {
 	paths := make([]string, 0)
 	for path, _ := range rest.destinations {
 		paths = append(paths, path)
@@ -302,7 +303,7 @@ func execute(rest Restoration) {
 		var src io.Reader
 		if diskSource == nil {
 			log.Println("Fetching from storage")
-			src = CatEz(rest.hash)
+			src = CatEz(rest.hash, stor)
 		} else {
 			log.Println("Reading locally, from", *diskSource)
 			f, err := os.Open(*diskSource)

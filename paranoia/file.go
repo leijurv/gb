@@ -228,7 +228,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 				}
 				if level > 3 {
 					log.Println("Actually doing that now (downloading that section of the blob and decrypting and decompressing)...")
-					reader := download.CatEz(hash)
+					reader := download.CatEz(hash, storageR)
 					if level == 5 {
 						// in level 5 we can't "toSkip" because remember we don't trust sha-256 :)
 						log.Println("Actually opening your file for this stupid byte by byte comparison now")

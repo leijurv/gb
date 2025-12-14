@@ -7,10 +7,15 @@ import (
 
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
+	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
 )
 
-func TestAllFiles() {
+func TestAllFiles(label string) {
+	stor, ok := storage.StorageSelect(label)
+	if !ok {
+		return
+	}
 	hashes := make(chan []byte, 100)
 	success := make(chan bool)
 	nWorkers := 16
@@ -29,7 +34,7 @@ func TestAllFiles() {
 			didISucceed := true
 			for hash := range hashes {
 				log.Println("Testing fetching hash", hex.EncodeToString(hash), "which is the contents of") //, path)
-				reader := download.Cat(hash, tx)
+				reader := download.Cat(hash, tx, stor)
 				h := utils.NewSHA256HasherSizer()
 				utils.Copy(&h, reader)
 				realHash, realSize := h.HashAndSize()
@@ -69,7 +74,7 @@ func TestAllFiles() {
 		close(hashes)
 	}()
 	for worker := 0; worker < nWorkers; worker++ {
-		if !<- success {
+		if !<-success {
 			panic("fail")
 		}
 	}

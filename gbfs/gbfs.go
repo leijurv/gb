@@ -23,7 +23,6 @@ import (
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
-	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
@@ -36,6 +35,7 @@ type File struct {
 	size         uint64
 	inode        uint64 // generated
 	compAlgo     string
+	storage      storage_base.Storage
 }
 
 func (f File) name() string {
@@ -47,11 +47,13 @@ type Dir struct {
 	path      string // full path including trailing slash
 	timestamp int64  // for querying historical data
 	inode     uint64 // generated
+	storage   storage_base.Storage
 }
 
 type GBFS struct {
 	root      Dir
 	timestamp int64
+	storage   storage_base.Storage
 }
 
 type FileHandle interface{}
@@ -146,53 +148,14 @@ func (d *Dir) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 var _ fuseFs.Node = (*File)(nil)
 var _ = fuseFs.NodeOpener(&File{})
 
-func newUncompressedHandle(hash []byte, tx *sql.Tx) UncompressedFileHandle {
-	// pasted from cat.go lol
-	var blobID []byte
-	var offset int64
-	var length int64
-	var key []byte
-	var path string
-	var storageID []byte
-	var kind string
-	var identifier string
-	var rootPath string
-	err := tx.QueryRow(`
-			SELECT
-				blob_entries.blob_id,
-				blob_entries.offset, 
-				blob_entries.final_size,
-				blob_entries.encryption_key,
-				blob_storage.path,
-				storage.storage_id,
-				storage.type,
-				storage.identifier,
-				storage.root_path
-			FROM blob_entries
-				INNER JOIN blobs ON blobs.blob_id = blob_entries.blob_id
-				INNER JOIN blob_storage ON blob_storage.blob_id = blobs.blob_id
-				INNER JOIN storage ON storage.storage_id = blob_storage.storage_id
-			WHERE blob_entries.hash = ?
-
-
-			ORDER BY storage.readable_label /* completely arbitrary. if there are many matching rows, just consistently pick it based on storage label. */
-		`, hash).Scan(&blobID, &offset, &length, &key, &path, &storageID, &kind, &identifier, &rootPath)
-	if err != nil {
-		panic(err)
-	}
-	storageR := storage.StorageDataToStorage(storage.StorageDescriptor{
-		StorageID:  utils.SliceToArr(storageID),
-		Kind:       kind,
-		Identifier: identifier,
-		RootPath:   rootPath,
-	})
-
+func newUncompressedHandle(hash []byte, tx *sql.Tx, stor storage_base.Storage) UncompressedFileHandle {
+	info := download.LookupBlobEntry(hash, tx, stor)
 	return UncompressedFileHandle{
-		storagePath: path,
-		blobOffset:  offset,
-		length:      length,
-		key:         &key,
-		storage:     storageR,
+		storagePath: info.StoragePath,
+		blobOffset:  info.Offset,
+		length:      info.Length,
+		key:         &info.Key,
+		storage:     stor,
 	}
 }
 
@@ -209,11 +172,11 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 	}()
 
 	if f.compAlgo != "" {
-		reader := download.CatReadCloser(*f.hash, tx)
+		reader := download.CatReadCloser(*f.hash, tx, f.storage)
 		resp.Flags |= fuse.OpenNonSeekable
 		return &CompressedFileHandle{reader, 0}, nil
 	} else {
-		handle := newUncompressedHandle(*f.hash, tx)
+		handle := newUncompressedHandle(*f.hash, tx, f.storage)
 		return &handle, nil
 	}
 }
@@ -267,19 +230,20 @@ func (d *Dir) Lookup(ctx context.Context, name string) (fuseFs.Node, error) {
 			path:      subdirPath,
 			timestamp: d.timestamp,
 			inode:     pathToInode(subdirPath),
+			storage:   d.storage,
 		}, nil
 	}
 
 	// Then check if it's a file
 	filePath := d.path + name
-	if file := lookupFile(filePath, d.timestamp); file != nil {
+	if file := lookupFile(filePath, d.timestamp, d.storage); file != nil {
 		return file, nil
 	}
 
 	return nil, syscall.ENOENT
 }
 
-func Mount(mountpoint string, path string, timestamp int64) {
+func Mount(mountpoint string, path string, timestamp int64, stor storage_base.Storage) {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
@@ -288,6 +252,7 @@ func Mount(mountpoint string, path string, timestamp int64) {
 		path:      path,
 		timestamp: timestamp,
 		inode:     pathToInode(path),
+		storage:   stor,
 	}
 
 	conn, err := fuse.Mount(mountpoint,
@@ -307,7 +272,7 @@ func Mount(mountpoint string, path string, timestamp int64) {
 	// Start serving in a goroutine
 	serveDone := make(chan error, 1)
 	go func() {
-		serveDone <- fuseFs.Serve(conn, GBFS{root, timestamp})
+		serveDone <- fuseFs.Serve(conn, GBFS{root, timestamp, stor})
 	}()
 
 	// Wait for either a signal or serve to complete
@@ -362,7 +327,7 @@ func directoryExists(path string, timestamp int64) bool {
 	return err == nil
 }
 
-func lookupFile(path string, timestamp int64) *File {
+func lookupFile(path string, timestamp int64, stor storage_base.Storage) *File {
 	row := db.DB.QueryRow(`SELECT files.path, files.hash, files.fs_modified, files.permissions, sizes.size, COALESCE(blob_entries.compression_alg, '')
 		FROM files
 		INNER JOIN sizes ON sizes.hash = files.hash
@@ -381,5 +346,6 @@ func lookupFile(path string, timestamp int64) *File {
 
 	file.hash = &hash
 	file.inode = pathToInode(file.path)
+	file.storage = stor
 	return &file
 }

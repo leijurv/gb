@@ -62,8 +62,6 @@ func BackupDB() {
 		upl := upload.End()
 		log.Println("DB uploaded to", upl.Path)
 	}
-	log.Println("Exiting process since database is closed and backed up")
-	os.Exit(0)
 }
 
 func DBKey() []byte {

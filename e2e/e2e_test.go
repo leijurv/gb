@@ -3,8 +3,10 @@ package e2e
 import (
 	"bytes"
 	"crypto/sha256"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/leijurv/gb/backup"
@@ -14,6 +16,7 @@ import (
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
+	bip39 "github.com/tyler-smith/go-bip39"
 )
 
 type testEnv struct {
@@ -266,5 +269,82 @@ func (e *testEnv) verifyRestored(relPath string, expectedHash [32]byte) {
 	actualHash := sha256.Sum256(content)
 	if actualHash != expectedHash {
 		e.t.Errorf("hash mismatch for %s: expected %x, got %x", relPath, expectedHash, actualHash)
+	}
+}
+
+func TestRestoreDB(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gb-e2e-restoredb-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	srcDir := filepath.Join(tmpDir, "source")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mockStor := setupDB(t, tmpDir)
+
+	// Create test files and run backup to populate the database
+	testFile := filepath.Join(srcDir, "testfile.txt")
+	if err := os.WriteFile(testFile, []byte("test content for db backup"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	backup.ResetForTesting()
+	backup.BackupNonInteractive([]string{srcDir})
+
+	// Get the db key and convert to mnemonic
+	dbKey := backup.DBKeyNonInteractive()
+	mnemonic, err := bip39.NewMnemonic(dbKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get the database file path before BackupDB closes it
+	dbPath := config.Config().DatabaseLocation
+
+	// Run BackupDB which will close the database and upload encrypted backup
+	backup.BackupDB()
+
+	// Read the original database file (now closed)
+	originalDB, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatalf("failed to read original db: %v", err)
+	}
+
+	// Get the encrypted backup from MockStorage
+	backupFilename := "db-v2backup-" + strconv.FormatInt(backup.GetTestingTimestamp(), 10)
+	_, size := mockStor.Metadata(backupFilename)
+	if size == 0 {
+		t.Fatal("backup not found in storage")
+	}
+	encryptedReader := mockStor.DownloadSection(backupFilename, 0, size)
+	encryptedData, err := io.ReadAll(encryptedReader)
+	encryptedReader.Close()
+	if err != nil {
+		t.Fatalf("failed to read encrypted backup: %v", err)
+	}
+
+	// Write encrypted backup to a file for RestoreDBNonInteractive
+	encryptedPath := filepath.Join(tmpDir, backupFilename)
+	if err := os.WriteFile(encryptedPath, encryptedData, 0644); err != nil {
+		t.Fatalf("failed to write encrypted backup: %v", err)
+	}
+
+	// Call RestoreDBNonInteractive
+	download.RestoreDBNonInteractive(encryptedPath, mnemonic)
+
+	// Read the decrypted output
+	decryptedPath := encryptedPath + ".decrypted"
+	decryptedDB, err := os.ReadFile(decryptedPath)
+	if err != nil {
+		t.Fatalf("failed to read decrypted db: %v", err)
+	}
+
+	// Compare original and decrypted
+	if !bytes.Equal(originalDB, decryptedDB) {
+		t.Errorf("database mismatch: original %d bytes, decrypted %d bytes", len(originalDB), len(decryptedDB))
 	}
 }

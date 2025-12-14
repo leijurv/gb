@@ -16,6 +16,12 @@ import (
 // just a simple utility to decrypt the database
 
 func RestoreDB(path string) {
+	log.Print("Enter database encryption mnemonic: ")
+	mnemonic, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	RestoreDBNonInteractive(path, mnemonic)
+}
+
+func RestoreDBNonInteractive(path string, mnemonic string) {
 	outPath := path + ".decrypted"
 	log.Println("Output will be written to", outPath)
 	var legacy bool
@@ -35,8 +41,6 @@ func RestoreDB(path string) {
 		panic(err)
 	}
 	log.Println("Read", len(encBytes), "bytes")
-	log.Print("Enter database encryption mnemonic: ")
-	mnemonic, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	database := decryptDatabase(encBytes, mnemonic, legacy)
 	err = ioutil.WriteFile(outPath, database, 0644)
 	if err != nil {

@@ -8,16 +8,21 @@ import (
 	"sync"
 )
 
+type mockBlobData struct {
+	data     []byte
+	checksum string
+}
+
 type MockStorage struct {
 	ID       []byte
-	blobs    map[string][]byte
+	blobs    map[string]mockBlobData
 	blobLock sync.RWMutex
 }
 
 func NewMockStorage(id []byte) *MockStorage {
 	return &MockStorage{
 		ID:    id,
-		blobs: make(map[string][]byte),
+		blobs: make(map[string]mockBlobData),
 	}
 }
 
@@ -43,25 +48,26 @@ func (m *MockStorage) BeginDatabaseUpload(filename string) StorageUpload {
 func (m *MockStorage) DownloadSection(path string, offset int64, length int64) io.ReadCloser {
 	m.blobLock.RLock()
 	defer m.blobLock.RUnlock()
-	data, ok := m.blobs[path]
+	blob, ok := m.blobs[path]
 	if !ok {
 		panic("blob not found: " + path)
 	}
-	if offset+length > int64(len(data)) {
+	if offset+length > int64(len(blob.data)) {
 		panic("out of range")
 	}
-	return io.NopCloser(bytes.NewReader(data[offset : offset+length]))
+	return io.NopCloser(bytes.NewReader(blob.data[offset : offset+length]))
 }
 
 func (m *MockStorage) ListBlobs() []UploadedBlob {
 	m.blobLock.RLock()
 	defer m.blobLock.RUnlock()
 	result := make([]UploadedBlob, 0, len(m.blobs))
-	for path, data := range m.blobs {
+	for path, blob := range m.blobs {
 		result = append(result, UploadedBlob{
 			StorageID: m.ID,
 			Path:      path,
-			Size:      int64(len(data)),
+			Checksum:  blob.checksum,
+			Size:      int64(len(blob.data)),
 		})
 	}
 	return result
@@ -70,11 +76,11 @@ func (m *MockStorage) ListBlobs() []UploadedBlob {
 func (m *MockStorage) Metadata(path string) (string, int64) {
 	m.blobLock.RLock()
 	defer m.blobLock.RUnlock()
-	data, ok := m.blobs[path]
+	blob, ok := m.blobs[path]
 	if !ok {
 		return "", 0
 	}
-	return "", int64(len(data))
+	return blob.checksum, int64(len(blob.data))
 }
 
 func (m *MockStorage) DeleteBlob(path string) {
@@ -91,10 +97,10 @@ func (m *MockStorage) String() string {
 	return "MockStorage"
 }
 
-func (m *MockStorage) storeBlob(path string, data []byte) {
+func (m *MockStorage) storeBlob(path string, data []byte, checksum string) {
 	m.blobLock.Lock()
 	defer m.blobLock.Unlock()
-	m.blobs[path] = data
+	m.blobs[path] = mockBlobData{data: data, checksum: checksum}
 }
 
 func blobIDToPath(blobID []byte) string {
@@ -117,13 +123,14 @@ func (u *mockUpload) End() UploadedBlob {
 	data := u.buf.Bytes()
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
-	u.storage.storeBlob(u.path, dataCopy)
 	hash := sha256.Sum256(data)
+	checksum := hex.EncodeToString(hash[:])
+	u.storage.storeBlob(u.path, dataCopy, checksum)
 	return UploadedBlob{
 		StorageID: u.storage.ID,
 		BlobID:    u.blobID,
 		Path:      u.path,
-		Checksum:  hex.EncodeToString(hash[:]),
+		Checksum:  checksum,
 		Size:      int64(len(data)),
 	}
 }

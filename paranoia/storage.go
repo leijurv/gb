@@ -20,6 +20,7 @@ func StorageParanoia(deleteUnknownFiles bool) {
 	expected := fetchAllExpected()
 	actual := fetchAllActual()
 	log.Println("Comparing expected against actual")
+	anyErrors := false
 	for k, v := range expected {
 		realBlob, ok := actual[k]
 		if !ok {
@@ -27,6 +28,7 @@ func StorageParanoia(deleteUnknownFiles bool) {
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Path:", k.path)
 			log.Println("Expected: ", v)
+			anyErrors = true
 			continue
 		}
 		if realBlob.Checksum != v.Checksum || realBlob.Size != v.Size || realBlob.Path != v.Path {
@@ -34,6 +36,7 @@ func StorageParanoia(deleteUnknownFiles bool) {
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Actual:", realBlob)
 			log.Println("Expected: ", v)
+			anyErrors = true
 		}
 	}
 
@@ -69,6 +72,9 @@ func StorageParanoia(deleteUnknownFiles bool) {
 		}
 
 		log.Printf("Deletion complete: %d files deleted", len(unknownFiles))
+	}
+	if anyErrors {
+		panic("err above")
 	}
 
 	log.Println("Done")

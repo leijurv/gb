@@ -14,6 +14,7 @@ import (
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
+	"github.com/leijurv/gb/paranoia"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	bip39 "github.com/tyler-smith/go-bip39"
@@ -111,22 +112,28 @@ func TestBackupDedupe(t *testing.T) {
 
 	env.backup()
 
+	for i := 4; i <= 10; i++ {
+		env.writeFile("dup"+string(rune('0'+i))+".bin", duplicateContent)
+	}
+
+	env.backup()
+
 	var blobCount int
-	err := db.DB.QueryRow("SELECT COUNT(*) FROM blobs").Scan(&blobCount)
+	err := db.DB.QueryRow("SELECT COUNT(*) FROM blob_entries").Scan(&blobCount)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if blobCount != 1 {
-		t.Errorf("expected 1 blob for deduplicated files, got %d", blobCount)
+		t.Errorf("expected 1 blob entry for deduplicated files, got %d", blobCount)
 	}
 
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 10; i++ {
 		env.removeFile("dup" + string(rune('0'+i)) + ".bin")
 	}
 
 	env.restore()
 
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 10; i++ {
 		env.verifyRestored("dup"+string(rune('0'+i))+".bin", expectedHash)
 	}
 }
@@ -164,18 +171,7 @@ func TestMultipleBackupsAndRestore(t *testing.T) {
 
 	env.restore()
 
-	restoredPath := filepath.Join(env.restoreDir, "changing.txt")
-	restoredContent, err := os.ReadFile(restoredPath)
-	if err != nil {
-		t.Fatalf("failed to read restored file: %v", err)
-	}
-	actualHash := sha256.Sum256(restoredContent)
-	if actualHash != expectedHash {
-		t.Errorf("hash mismatch: expected %x, got %x", expectedHash, actualHash)
-	}
-	if !bytes.Equal(restoredContent, content2) {
-		t.Errorf("expected latest content, got: %s", string(restoredContent))
-	}
+	env.verifyRestored("changing.txt", expectedHash)
 }
 
 func makeBinaryData(size int) []byte {
@@ -253,6 +249,9 @@ func (e *testEnv) removeFile(relPath string) {
 func (e *testEnv) backup() {
 	backup.ResetForTesting()
 	backup.BackupNonInteractive([]string{e.srcDir})
+
+	paranoia.DBParanoia()
+	paranoia.StorageParanoia(false)
 }
 
 func (e *testEnv) restore() {

@@ -64,14 +64,14 @@ func scannerThread(inputs []File) {
 		defer ticker.Stop()
 		for {
 			select {
+			case bucketerCh <- Planned{}: // unstick
+			case <-done: // but, bucketerCh has no buffer, so, we don't want to get stuck
+				return
+			}
+			select {
 			case <-done:
 				return
 			case <-ticker.C: // wait 1 second
-			}
-			select {
-			case bucketerCh <- Planned{}: // then unstick
-			case <-done: // but, bucketerCh has no buffer, so, we don't want to get stuck
-				return
 			}
 		}
 	}()

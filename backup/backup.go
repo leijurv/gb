@@ -74,20 +74,29 @@ func backupImpl(rawPaths []string) {
 		go uploaderThread(BeginDirectUpload(storages))
 	}
 
+	done := make(chan struct{}, 1)
 	if config.Config().UploadStatusInterval != -1 {
 		go func() {
+			ticker := time.NewTicker(time.Duration(config.Config().UploadStatusInterval) * time.Second)
+			defer ticker.Stop()
 			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+				}
 				uploading := stats.CurrentlyUploading()
 				if len(uploading) > 0 {
 					log.Println("Currently uploading:", strings.Join(uploading, ","))
 				}
 				log.Println("Bytes written:", utils.FormatCommas(stats.Total()))
-				time.Sleep(time.Duration(config.Config().UploadStatusInterval) * time.Second)
 			}
 		}()
 	}
+
 	scannerThread(inputs)
 	wg.Wait()
+	done <- struct{}{}
 	log.Println("Backup complete")
 }
 

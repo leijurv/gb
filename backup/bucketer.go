@@ -45,6 +45,6 @@ func bucketerThread() {
 		}
 	}
 	if len(tmp) > 0 {
-		uploaderCh <- tmp // leftovers, not necessarily of min size, but still need to be accounted for
+		panic("left some plans behind?")
 	}
 }

@@ -97,6 +97,7 @@ func backupImpl(rawPaths []string) {
 	scannerThread(inputs)
 	wg.Wait()
 	done <- struct{}{}
+	close(bucketerCh)
 	log.Println("Backup complete")
 }
 

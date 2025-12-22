@@ -1,7 +1,9 @@
 package download
 
 import (
+	"bytes"
 	"database/sql"
+	"fmt"
 	"io"
 
 	"github.com/leijurv/gb/compression"
@@ -18,6 +20,38 @@ type BlobEntryInfo struct {
 	CompressionAlg string
 	Key            []byte
 	StoragePath    string
+	ExpectedSize   int64 // decompressed size from sizes table
+}
+
+// hashVerifyingReader wraps a reader and verifies SHA256 hash when the
+// expected size is reached or EOF occurs.
+type hashVerifyingReader struct {
+	reader       io.ReadCloser
+	hasher       utils.HasherSizer
+	expectedHash []byte
+	expectedSize int64
+}
+
+func (r *hashVerifyingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.hasher.Write(p[:n])
+	}
+	// Verify when we've read the expected amount OR hit EOF
+	if r.hasher.Size() >= r.expectedSize || err == io.EOF {
+		actualHash, actualSize := r.hasher.HashAndSize()
+		if actualSize != r.expectedSize {
+			panic(fmt.Sprintf("hash verification failed: size mismatch (expected %d, got %d)", r.expectedSize, actualSize))
+		}
+		if !bytes.Equal(actualHash, r.expectedHash) {
+			panic("hash verification failed")
+		}
+	}
+	return n, err
+}
+
+func (r *hashVerifyingReader) Close() error {
+	return r.reader.Close()
 }
 
 func LookupBlobEntry(hash []byte, tx *sql.Tx, stor storage_base.Storage) BlobEntryInfo {
@@ -27,6 +61,7 @@ func LookupBlobEntry(hash []byte, tx *sql.Tx, stor storage_base.Storage) BlobEnt
 	var compressionAlg string
 	var key []byte
 	var path string
+	var expectedSize int64
 
 	err := tx.QueryRow(`
 		SELECT
@@ -35,12 +70,14 @@ func LookupBlobEntry(hash []byte, tx *sql.Tx, stor storage_base.Storage) BlobEnt
 			blob_entries.final_size,
 			blob_entries.compression_alg,
 			blob_entries.encryption_key,
-			blob_storage.path
+			blob_storage.path,
+			sizes.size
 		FROM blob_entries
 			INNER JOIN blobs ON blobs.blob_id = blob_entries.blob_id
 			INNER JOIN blob_storage ON blob_storage.blob_id = blobs.blob_id
+			INNER JOIN sizes ON sizes.hash = blob_entries.hash
 		WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?`,
-		hash, stor.GetID()).Scan(&blobID, &offset, &length, &compressionAlg, &key, &path)
+		hash, stor.GetID()).Scan(&blobID, &offset, &length, &compressionAlg, &key, &path, &expectedSize)
 	if err != nil {
 		panic(err)
 	}
@@ -52,6 +89,7 @@ func LookupBlobEntry(hash []byte, tx *sql.Tx, stor storage_base.Storage) BlobEnt
 		CompressionAlg: compressionAlg,
 		Key:            key,
 		StoragePath:    path,
+		ExpectedSize:   expectedSize,
 	}
 }
 
@@ -59,7 +97,13 @@ func CatReadCloser(hash []byte, tx *sql.Tx, stor storage_base.Storage) io.ReadCl
 	info := LookupBlobEntry(hash, tx, stor)
 	reader := utils.ReadCloserToReader(stor.DownloadSection(info.StoragePath, info.Offset, info.Length))
 	decrypted := crypto.DecryptBlobEntry(reader, info.Offset, info.Key)
-	return compression.ByAlgName(info.CompressionAlg).Decompress(decrypted)
+	decompressed := compression.ByAlgName(info.CompressionAlg).Decompress(decrypted)
+	return &hashVerifyingReader{
+		reader:       decompressed,
+		hasher:       utils.NewSHA256HasherSizer(),
+		expectedHash: hash,
+		expectedSize: info.ExpectedSize,
+	}
 }
 
 func Cat(hash []byte, tx *sql.Tx, stor storage_base.Storage) io.Reader {

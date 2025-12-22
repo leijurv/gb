@@ -184,7 +184,9 @@ func ReaderToReadCloser(in io.Reader) io.ReadCloser {
 	if ok && fr.pipeR == nil {
 		// this is really a ReadCloser in disguise, wrapped in a fakeReader
 		// AND, it hasn't been copied into a pipe yet
-		return fr.rc
+		ret := fr.rc
+		fr.rc = nil
+		return ret
 	}
 	rc, ok := in.(io.ReadCloser)
 	if ok {

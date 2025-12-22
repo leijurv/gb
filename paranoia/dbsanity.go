@@ -73,6 +73,39 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT hash FROM files WHERE path LIKE '%/'",
 	"SELECT hash FROM files WHERE path NOT LIKE '/%'",
 
+	// path sanity: double slashes
+	"SELECT hash FROM files WHERE path LIKE '%//%'",
+
+	// path sanity: . and .. components
+	"SELECT hash FROM files WHERE path LIKE '%/./%' OR path LIKE '%/.'",
+	"SELECT hash FROM files WHERE path LIKE '%/../%' OR path LIKE '%/..'",
+
+	// future timestamps
+	"SELECT hash FROM files WHERE start > strftime('%s', 'now')",
+	"SELECT hash FROM files WHERE end > strftime('%s', 'now')",
+	"SELECT blob_id FROM blob_storage WHERE timestamp > strftime('%s', 'now')",
+
+	// uncompressed entries should have final_size = sizes.size
+	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE blob_entries.compression_alg = '' AND blob_entries.final_size != sizes.size",
+
+	// zero-size files should have final_size = 0
+	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE sizes.size = 0 AND blob_entries.final_size != 0",
+
+	// encryption keys should not be reused across different blobs
+	"SELECT encryption_key FROM blob_entries GROUP BY encryption_key HAVING COUNT(DISTINCT blob_id) > 1",
+
+	// permissions should be 0-511 (9 bits)
+	"SELECT hash FROM files WHERE permissions < 0 OR permissions > 511",
+
+	// duplicate final_hash in blobs (should be astronomically unlikely)
+	"SELECT final_hash FROM blobs GROUP BY final_hash HAVING COUNT(*) > 1",
+
+	// same hash with same compression should produce same final_size (deterministic compression)
+	"SELECT hash FROM blob_entries GROUP BY hash, compression_alg HAVING COUNT(DISTINCT final_size) > 1",
+
+	// path length sanity (PATH_MAX is typically 4096)
+	"SELECT hash FROM files WHERE LENGTH(path) > 4096",
+
 	// everything has been backed up to every destination
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage) -- if this one fails it means that there is a blob that is in some storages but not all of them. `gb replicate` can help with this!",
 
@@ -201,7 +234,7 @@ func DBParanoia() {
 }
 
 func pathUtf8() {
-	log.Println("Running files path utf8 check")
+	log.Println("Running files path utf8 and control character check")
 	rows, err := db.DB.Query("SELECT path FROM files")
 	if err != nil {
 		panic(err)
@@ -217,13 +250,18 @@ func pathUtf8() {
 		if !utf8.ValidString(path) {
 			panic("invalid utf8 in the files database at path " + path)
 		}
+		for _, r := range path {
+			if r < 0x20 || r == 0x7F {
+				panic("control character in path " + path)
+			}
+		}
 		cnt++
 	}
 	err = rows.Err()
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Done running files path utf8 check on %d rows\n", cnt)
+	log.Printf("Done running files path utf8 and control character check on %d rows\n", cnt)
 }
 
 func sqliteVerifyPragmaCheck(pragma string) {

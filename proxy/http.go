@@ -13,10 +13,12 @@ import (
 	"github.com/leijurv/gb/compression"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/storage_base"
 )
 
 func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, storage storage_base.Storage) {
+	_, clientHasRange := req.Header["Range"]
 	var realContentLength int64
 	err := db.DB.QueryRow("SELECT size FROM sizes WHERE hash = ?", hash).Scan(&realContentLength)
 	if err != nil {
@@ -42,7 +44,7 @@ func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, st
 	seekStart := offsetIntoBlob
 	var requestedStart int64
 	respondWithRange := false
-	if _, ok := req.Header["Range"]; ok {
+	if clientHasRange {
 		if comp != "" {
 			http.Error(w, "this blob entry is compressed, random seeking is not currently supported for compression sorry", http.StatusServiceUnavailable)
 			return
@@ -76,6 +78,7 @@ func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, st
 			req.Header.Set("Range", "bytes="+strconv.FormatInt(seekStart, 10)+"-"+strconv.FormatInt(seekStart+claimedLength-1, 10))
 		}
 	}
+	fullRead := !clientHasRange || (requestedStart == 0 && claimedLength == realContentLength)
 
 	var data io.ReadCloser
 	if path[:3] == "gb/" && os.Getenv("GB_HTTP_PROXY_PATTERN") != "" {
@@ -105,6 +108,9 @@ func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, st
 
 	decrypted := crypto.DecryptBlobEntry(io.LimitReader(data, claimedLength), seekStart, key)
 	reader := compression.ByAlgName(comp).Decompress(decrypted)
+	if fullRead {
+		reader = download.WrapWithHashVerification(reader, hash, realContentLength)
+	}
 	writeHttpResponse(w, reader, requestedStart, claimedLength, realContentLength, req.URL.Path, respondWithRange)
 }
 

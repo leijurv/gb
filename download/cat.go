@@ -54,6 +54,15 @@ func (r *hashVerifyingReader) Close() error {
 	return r.reader.Close()
 }
 
+func WrapWithHashVerification(reader io.ReadCloser, expectedHash []byte, expectedSize int64) io.ReadCloser {
+	return &hashVerifyingReader{
+		reader:       reader,
+		hasher:       utils.NewSHA256HasherSizer(),
+		expectedHash: expectedHash,
+		expectedSize: expectedSize,
+	}
+}
+
 func LookupBlobEntry(hash []byte, tx *sql.Tx, stor storage_base.Storage) BlobEntryInfo {
 	var blobID []byte
 	var offset int64
@@ -98,12 +107,7 @@ func CatReadCloser(hash []byte, tx *sql.Tx, stor storage_base.Storage) io.ReadCl
 	reader := utils.ReadCloserToReader(stor.DownloadSection(info.StoragePath, info.Offset, info.Length))
 	decrypted := crypto.DecryptBlobEntry(reader, info.Offset, info.Key)
 	decompressed := compression.ByAlgName(info.CompressionAlg).Decompress(decrypted)
-	return &hashVerifyingReader{
-		reader:       decompressed,
-		hasher:       utils.NewSHA256HasherSizer(),
-		expectedHash: hash,
-		expectedSize: info.ExpectedSize,
-	}
+	return WrapWithHashVerification(decompressed, hash, info.ExpectedSize)
 }
 
 func Cat(hash []byte, tx *sql.Tx, stor storage_base.Storage) io.Reader {

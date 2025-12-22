@@ -12,7 +12,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.49
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.46
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.72.1
-	github.com/cespare/diff v0.1.0
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli v1.22.9
 	golang.org/x/net v0.0.0-20220531201128-c960675eff93

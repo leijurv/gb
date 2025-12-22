@@ -101,8 +101,6 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.33.4/go.mod h1:5Gn+d+VaaRgsjewpMvGaz
 github.com/aws/smithy-go v1.22.1 h1:/HPHZQ0g7f4eUeK6HKglFz8uwVfZKgoI25rb/J+dnro=
 github.com/aws/smithy-go v1.22.1/go.mod h1:irrKGvNn1InZwb2d7fkIRNucdfwR8R+Ts3wxYa/cJHg=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
-github.com/cespare/diff v0.1.0 h1:KxMLWd49YmHrRYhCAGmoQssK0VkZiiexj/D/cpdrt7Y=
-github.com/cespare/diff v0.1.0/go.mod h1:zsB9vY+7kn4Y/D7BqvEbhTbjL/PCkZUOqnlESQCYzf0=
 github.com/cespare/xxhash v1.1.0/go.mod h1:XrSqR1VqqWfGrhpAt58auRo0WTKS1nRRg3ghfAqPWnc=
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/chzyer/logex v1.1.10/go.mod h1:+Ywpsq7O8HXn0nuIou7OrIPyXbp3wmkHB+jjWRnGsAI=

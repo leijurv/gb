@@ -80,10 +80,10 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT hash FROM files WHERE path LIKE '%/./%' OR path LIKE '%/.'",
 	"SELECT hash FROM files WHERE path LIKE '%/../%' OR path LIKE '%/..'",
 
-	// future timestamps
-	"SELECT hash FROM files WHERE start > strftime('%s', 'now')",
-	"SELECT hash FROM files WHERE end > strftime('%s', 'now')",
-	"SELECT blob_id FROM blob_storage WHERE timestamp > strftime('%s', 'now')",
+	// future timestamps (60 second tolerance for clock skew between Go and SQLite)
+	"SELECT hash FROM files WHERE start > strftime('%s', 'now') + 60",
+	"SELECT hash FROM files WHERE end > strftime('%s', 'now') + 60",
+	"SELECT blob_id FROM blob_storage WHERE timestamp > strftime('%s', 'now') + 60",
 
 	// uncompressed entries should have final_size = sizes.size
 	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE blob_entries.compression_alg = '' AND blob_entries.final_size != sizes.size",

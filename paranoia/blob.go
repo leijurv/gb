@@ -83,7 +83,7 @@ func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_ba
 	hasherPostEnc := utils.NewSHA256HasherSizer()
 	encReader := io.TeeReader(outerReader, &hasherPostEnc)
 
-	rows, err := db.DB.Query(`SELECT hash, encryption_key, final_size, offset, compression_alg FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size`, blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
+	rows, err := db.DB.Query(`SELECT hash, encryption_key, final_size, offset, compression_alg, size FROM blob_entries INNER JOIN sizes USING (hash) WHERE blob_id = ? ORDER BY offset, final_size`, blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
 	if err != nil {
 		panic(err)
 	}
@@ -94,7 +94,8 @@ func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_ba
 		var entrySize int64
 		var offset int64
 		var compressionAlg string
-		err := rows.Scan(&hash, &key, &entrySize, &offset, &compressionAlg)
+		var expectedSize int64
+		err := rows.Scan(&hash, &key, &entrySize, &offset, &compressionAlg, &expectedSize)
 		if err != nil {
 			panic(err)
 		}
@@ -111,6 +112,9 @@ func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_ba
 		log.Println("Compressed size:", entrySize, "  Decompressed size:", realSize, "  Compression alg:", compressionAlg, "  Hash:", hex.EncodeToString(realHash))
 		if !bytes.Equal(hash, realHash) {
 			panic("decompressed to wrong data!")
+		}
+		if realSize != expectedSize {
+			panic("decompressed to wrong size!")
 		}
 		log.Println("Hash is equal!")
 	}

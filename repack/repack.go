@@ -211,13 +211,16 @@ func Repack(label string) {
 		var totalDownloaded int64
 		for i, blobID := range blobsToProcess {
 			log.Println("Downloading blob", i+1, "of", len(blobsToProcess), ":", hex.EncodeToString(blobID))
+			// Collect entries in a local slice to avoid blocking during download
+			// (blocking on channel send can cause Backblaze to close the connection)
+			var blobEntries []Entry
 			callback := func(hash []byte, data []byte) {
 				// Make copies since the data might be reused
 				hashCopy := make([]byte, len(hash))
 				copy(hashCopy, hash)
 				dataCopy := make([]byte, len(data))
 				copy(dataCopy, data)
-				entryCh <- Entry{Hash: hashCopy, Data: dataCopy}
+				blobEntries = append(blobEntries, Entry{Hash: hashCopy, Data: dataCopy})
 			}
 			totalDownloaded += paranoia.BlobReaderParanoiaWithCallback(
 				paranoia.DownloadEntireBlob(blobID, stor),
@@ -225,6 +228,10 @@ func Repack(label string) {
 				stor,
 				callback,
 			)
+			// Now that the blob is fully downloaded, send entries to channel (blocking is OK here)
+			for _, entry := range blobEntries {
+				entryCh <- entry
+			}
 			log.Println("Downloaded", i+1, "blobs out of", len(blobsToProcess), "-", utils.FormatCommas(totalDownloaded), "bytes total")
 		}
 	}()

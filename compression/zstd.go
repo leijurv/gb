@@ -11,9 +11,8 @@ type ZstdCompression struct{}
 
 func (n *ZstdCompression) Compress(out io.Writer, in io.Reader) error {
 	w := zstd.NewWriter(out)
-	defer w.Close()
 	utils.Copy(w, in)
-	return nil
+	return w.Close()
 }
 
 func (n *ZstdCompression) Decompress(in io.Reader) io.ReadCloser {

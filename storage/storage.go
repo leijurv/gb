@@ -153,9 +153,13 @@ func ClearCache() {
 
 func StorageSelect(label string) (storage_base.Storage, bool) {
 	if label == "" {
+		descs := GetAllDescriptors()
+		if len(descs) == 1 {
+			log.Println("Auto-selecting the only storage available")
+			return StorageDataToStorage(descs[0]), true
+		}
 		log.Println("First, we need to pick a storage to fetch em from")
 		log.Println("Options:")
-		descs := GetAllDescriptors()
 		for _, d := range descs {
 			var label string
 			err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)

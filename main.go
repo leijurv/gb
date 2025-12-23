@@ -7,12 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/leijurv/gb/compression"
-
-	"github.com/leijurv/gb/share"
-
-	"github.com/leijurv/gb/proxy"
-
 	"github.com/araddon/dateparse"
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/config"
@@ -22,8 +16,10 @@ import (
 	"github.com/leijurv/gb/gbfs"
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
+	"github.com/leijurv/gb/proxy"
 	"github.com/leijurv/gb/repack"
 	"github.com/leijurv/gb/replicate"
+	"github.com/leijurv/gb/share"
 	"github.com/leijurv/gb/stats"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/utils"
@@ -60,7 +56,6 @@ func main() {
 
 		// we don't know where the database should be read from until after the "config-file" flag is parsed
 		db.SetupDatabase()
-		compression.CheckCompression()
 		return nil
 	}
 	app.Commands = []cli.Command{

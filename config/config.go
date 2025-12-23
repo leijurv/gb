@@ -32,7 +32,7 @@ type ConfigData struct {
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
 	ShareBaseURL           string   `json:"share_base_url"`
-	DisableLepton          bool     `json:"disable_lepton"`
+	DisableLeptonGo        bool     `json:"disable_lepton_go"`
 	SkipHashFailures       bool     `json:"skip_hash_failures"`
 }
 
@@ -116,7 +116,7 @@ var config = ConfigData{
 	},
 	IgnorePermissionErrors: false,
 	ShareBaseURL:           "",
-	DisableLepton:          false,
+	DisableLeptonGo:        false,
 	SkipHashFailures:       false,
 }
 
@@ -278,5 +278,4 @@ func SetTestConfig(databaseLocation string) {
 	config.NumUploaderThreads = 1
 	config.UploadStatusInterval = -1
 	config.MinBlobSize = 1000
-	config.DisableLepton = true
 }

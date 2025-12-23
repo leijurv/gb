@@ -1,6 +1,6 @@
 module github.com/leijurv/gb
 
-go 1.21
+go 1.22.2
 
 require (
 	github.com/mattn/go-sqlite3 v1.11.0 // database locking was changed in newer versions. gb will randomly panic with "database is locked" in multithreaded situations if this dependency is updated further, apparently in disregard of the option "_busy_timeout=20000" that is set in the db connection. sorry.
@@ -12,6 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.49
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.46
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.72.1
+	github.com/leijurv/lepton_jpeg_go v0.0.0-20251223225320-f763c909328c
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli v1.22.9
 	golang.org/x/net v0.0.0-20220531201128-c960675eff93

@@ -259,11 +259,11 @@ type multithreadedMultiWriter struct {
 	writers []io.Writer
 }
 
-func (t *multithreadedMultiWriter) Write(p []byte) (n int, err error) {
+func (t *multithreadedMultiWriter) Write(p []byte) (int, error) {
 	if len(t.writers) == 1 {
 		// fast case for gb users with only one storage
-		n, err = t.writers[0].Write(p)
-		return
+		n, err := t.writers[0].Write(p)
+		return n, err
 	}
 	errs := make([]error, len(t.writers))
 	ns := make([]int, len(t.writers))
@@ -272,7 +272,7 @@ func (t *multithreadedMultiWriter) Write(p []byte) (n int, err error) {
 		i := i
 		wg.Add(1)
 		go func() {
-			n, err = t.writers[i].Write(p)
+			n, err := t.writers[i].Write(p)
 			if err == nil && n != len(p) { // a short write is still an error
 				err = io.ErrShortWrite
 			}

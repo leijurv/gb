@@ -100,7 +100,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	}
 	paddingOffset := postEncInfo.Size()
 	paddingOut, paddingKey := crypto.EncryptBlob(postEncOut, paddingOffset)
-	_, err := paddingOut.Write(make([]byte, samplePaddingLength(paddingOffset))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
+	_, err := paddingOut.Write(make([]byte, SamplePaddingLength(paddingOffset))) // padding with zeros is fine, it'll be indistinguishable from real data after AES
 	if err != nil {
 		panic(err)
 	}

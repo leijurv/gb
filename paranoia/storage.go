@@ -16,7 +16,7 @@ type storageAndPath struct { // can be used as a map key
 	path      string
 }
 
-func StorageParanoia(deleteUnknownFiles bool) {
+func StorageParanoia(deleteUnknownFiles bool) bool {
 	expected := fetchAllExpected()
 	actual := fetchAllActual()
 	log.Println("Comparing expected against actual")
@@ -61,7 +61,7 @@ func StorageParanoia(deleteUnknownFiles bool) {
 		_, err := fmt.Scanln(&response)
 		if err != nil || response != "yes" {
 			log.Println("Deletion cancelled")
-			return
+			return false
 		}
 
 		log.Println("Deleting", len(unknownFiles), "unknown files...")
@@ -74,10 +74,15 @@ func StorageParanoia(deleteUnknownFiles bool) {
 		log.Printf("Deletion complete: %d files deleted", len(unknownFiles))
 	}
 	if anyErrors {
-		panic("err above")
+		panic("Storage paranoia found errors (see above)")
+	}
+	if len(unknownFiles) > 0 {
+		log.Println("Storage paranoia found unknown files (see above)")
+		return false
 	}
 
 	log.Println("Done")
+	return true
 }
 
 func fetchAllActual() map[storageAndPath]storage_base.UploadedBlob {

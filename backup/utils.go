@@ -181,7 +181,7 @@ func fetchContentionMutex(size int64) (*sync.Mutex, bool) {
 	return lock, ok
 }
 
-func samplePaddingLength(size int64) int64 {
+func SamplePaddingLength(size int64) int64 {
 	rand.Seed(time.Now().UnixNano())
 	conf := config.Config()
 

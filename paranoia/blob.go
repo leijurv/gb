@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/leijurv/gb/compression"
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
@@ -68,6 +69,10 @@ func DownloadEntireBlob(blobID []byte, storage storage_base.Storage) io.Reader {
 }
 
 func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_base.Storage) int64 {
+	return BlobReaderParanoiaWithCallback(outerReader, blobID, storage, nil)
+}
+
+func BlobReaderParanoiaWithCallback(outerReader io.Reader, blobID []byte, storage storage_base.Storage, callback func(hash []byte, data []byte)) int64 {
 	log.Println("Running paranoia on", hex.EncodeToString(blobID), "in storage", storage)
 	if len(blobID) != 32 {
 		panic("sanity check")
@@ -104,7 +109,18 @@ func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_ba
 		}
 		log.Println("Expected hash for this entry is " + hex.EncodeToString(hash) + ", decompressing...")
 		verify := utils.NewSHA256HasherSizer()
-		utils.Copy(&verify, utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(io.LimitReader(crypto.DecryptBlobEntry(encReader, offset, key), entrySize))))
+		decompressedReader := utils.ReadCloserToReader(compression.ByAlgName(compressionAlg).Decompress(io.LimitReader(crypto.DecryptBlobEntry(encReader, offset, key), entrySize)))
+		var data []byte
+		if callback != nil {
+			// Buffer the decompressed data so we can pass it to the callback
+			data, err = ioutil.ReadAll(decompressedReader)
+			if err != nil {
+				panic(err)
+			}
+			(&verify).Write(data)
+		} else {
+			utils.Copy(&verify, decompressedReader)
+		}
 		if hasherPostEnc.Size() != offset+entrySize {
 			panic("entry was wrong size")
 		}
@@ -117,6 +133,12 @@ func BlobReaderParanoia(outerReader io.Reader, blobID []byte, storage storage_ba
 			panic("decompressed to wrong size!")
 		}
 		log.Println("Hash is equal!")
+		if callback != nil {
+			if realSize >= config.Config().MinBlobSize {
+				panic("entry size is >= MinBlobSize, this should not be repacked")
+			}
+			callback(realHash, data)
+		}
 	}
 	err = rows.Err()
 	if err != nil {

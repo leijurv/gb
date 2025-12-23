@@ -22,6 +22,7 @@ import (
 	"github.com/leijurv/gb/gbfs"
 	"github.com/leijurv/gb/history"
 	"github.com/leijurv/gb/paranoia"
+	"github.com/leijurv/gb/repack"
 	"github.com/leijurv/gb/replicate"
 	"github.com/leijurv/gb/stats"
 	"github.com/leijurv/gb/storage"
@@ -388,6 +389,20 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				replicate.ReplicateBlobs(c.String("label"))
+				return nil
+			},
+		},
+		{
+			Name:  "repack",
+			Usage: "repack blobs (read blob IDs from stdin)",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				repack.Repack(c.String("label"))
 				return nil
 			},
 		},

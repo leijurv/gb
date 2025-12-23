@@ -1,6 +1,7 @@
 package paranoia
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"log"
 	"unicode/utf8"
@@ -8,6 +9,12 @@ import (
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 )
+
+// Querier is an interface that both *sql.DB and *sql.Tx implement
+type Querier interface {
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+}
 
 var queriesThatShouldHaveNoRows = []string{
 	// god i wish these could be database constraints :(
@@ -215,27 +222,35 @@ var queriesThatShouldHaveNoRows = []string{
 }
 
 func DBParanoia() {
-	sqliteVerifyPragmaCheck("quick_check")
-	sqliteVerifyForeignKeys()
-	for _, q := range queriesThatShouldHaveNoRows {
-		log.Println("Running paranoia query:", q)
+	DBParanoiaOn(db.DB)
+}
+
+func DBParanoiaTx(tx *sql.Tx) {
+	DBParanoiaOn(tx)
+}
+
+func DBParanoiaOn(q Querier) {
+	sqliteVerifyPragmaCheckOn(q, "quick_check")
+	sqliteVerifyForeignKeysOn(q)
+	for _, query := range queriesThatShouldHaveNoRows {
+		log.Println("Running paranoia query:", query)
 		var result []byte
-		err := db.DB.QueryRow(q).Scan(&result)
+		err := q.QueryRow(query).Scan(&result)
 		if err != db.ErrNoRows {
 			log.Println(err)
 			log.Println("Result is", hex.EncodeToString(result))
 			panic("sanity query should have no rows")
 		}
 	}
-	pathUtf8()
-	sqliteVerifyPragmaCheck("integrity_check")
-	blobsCoherence()
+	pathUtf8On(q)
+	sqliteVerifyPragmaCheckOn(q, "integrity_check")
+	blobsCoherenceOn(q)
 	log.Println("Done running database paranoia")
 }
 
-func pathUtf8() {
+func pathUtf8On(q Querier) {
 	log.Println("Running files path utf8 and control character check")
-	rows, err := db.DB.Query("SELECT path FROM files")
+	rows, err := q.Query("SELECT path FROM files")
 	if err != nil {
 		panic(err)
 	}
@@ -264,9 +279,9 @@ func pathUtf8() {
 	log.Printf("Done running files path utf8 and control character check on %d rows\n", cnt)
 }
 
-func sqliteVerifyPragmaCheck(pragma string) {
+func sqliteVerifyPragmaCheckOn(q Querier, pragma string) {
 	log.Println("Running sqlite `PRAGMA " + pragma + ";`")
-	rows, err := db.DB.Query("PRAGMA " + pragma)
+	rows, err := q.Query("PRAGMA " + pragma)
 	if err != nil {
 		panic(err)
 	}
@@ -293,9 +308,9 @@ func sqliteVerifyPragmaCheck(pragma string) {
 	log.Println("Done running sqlite `PRAGMA " + pragma + ";`")
 }
 
-func sqliteVerifyForeignKeys() {
+func sqliteVerifyForeignKeysOn(q Querier) {
 	log.Println("Running sqlite `PRAGMA foreign_key_check;`")
-	rows, err := db.DB.Query("PRAGMA foreign_key_check")
+	rows, err := q.Query("PRAGMA foreign_key_check")
 	if err != nil {
 		panic(err)
 	}
@@ -323,9 +338,9 @@ func sqliteVerifyForeignKeys() {
 	log.Println("Done running sqlite `PRAGMA foreign_key_check;`")
 }
 
-func blobsCoherence() {
+func blobsCoherenceOn(q Querier) {
 	log.Println("Running blob entry coherence")
-	rows, err := db.DB.Query("SELECT blob_id, size FROM blobs")
+	rows, err := q.Query("SELECT blob_id, size FROM blobs")
 	if err != nil {
 		panic(err)
 	}
@@ -339,7 +354,7 @@ func blobsCoherence() {
 		if err != nil {
 			panic(err)
 		}
-		entriesCnt += blobCoherence(blobID, size)
+		entriesCnt += blobCoherenceOn(q, blobID, size)
 		cnt++
 	}
 	err = rows.Err()
@@ -349,8 +364,8 @@ func blobsCoherence() {
 	log.Println("Verified entry coherence on", cnt, "blobs and", entriesCnt, "entries")
 }
 
-func blobCoherence(blobID []byte, size int64) int {
-	rows, err := db.DB.Query("SELECT final_size, offset FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size", blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
+func blobCoherenceOn(q Querier, blobID []byte, size int64) int {
+	rows, err := q.Query("SELECT final_size, offset FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size", blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
 	if err != nil {
 		panic(err)
 	}

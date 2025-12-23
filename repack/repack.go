@@ -399,7 +399,14 @@ func uploadEntries(entries []Entry, uploadService backup.UploadService) newBlobD
 
 		// Look up a file path to determine compression
 		var path string
-		err := db.DB.QueryRow("SELECT path FROM files WHERE hash = ? LIMIT 1", entry.Hash).Scan(&path)
+		err := db.DB.QueryRow(`
+			SELECT path FROM files WHERE hash = ?
+			ORDER BY (
+				path LIKE "%.jpg" COLLATE NOCASE OR
+				path LIKE "%.jpeg" COLLATE NOCASE -- A given hash can appear in multiple places. I want lepton to compress all jpgs, even if they appeared as something else at some point. Therefore, yes this is weird, but it's just an "order by" to reduce arbitrariness and put JPGs first
+			) DESC
+			LIMIT 1
+		`, entry.Hash).Scan(&path)
 		if err != nil {
 			panic(err)
 		}

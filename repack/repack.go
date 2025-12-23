@@ -415,7 +415,7 @@ func uploadEntries(entries []Entry, uploadService backup.UploadService) newBlobD
 		}
 
 		length := postEncInfo.Size() - startOffset
-		log.Println("Entry", hex.EncodeToString(entry.Hash[:8]), "size", utils.FormatCommas(realSize), "->", utils.FormatCommas(length), "compression:", compAlg)
+		log.Println("Entry", hex.EncodeToString(entry.Hash[:8]), "size", utils.FormatCommas(realSize), "->", utils.FormatCommas(length), "compression:", compAlg, "from:", path)
 
 		blobEntries = append(blobEntries, blobEntry{
 			hash:                entry.Hash,

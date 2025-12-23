@@ -36,7 +36,7 @@ func SetupDatabase() {
 	} else {
 		db = config.Config().DatabaseLocation
 	}
-	setupDatabase("file:"+db+"?_foreign_keys=1&_journal_mode=wal&_sync=1&_locking_mode=exclusive&_busy_timeout=20000", true)
+	setupDatabase("file:"+db+"?_foreign_keys=1&_journal_mode=wal&_sync=1&_busy_timeout=20000", true)
 }
 
 func SetupDatabaseTestMode(setupSchema bool) {

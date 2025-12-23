@@ -10,10 +10,19 @@ import (
 	"github.com/leijurv/gb/db"
 )
 
-func Search(path string) {
-	query := "%" + path + "%"
-	log.Println("Query is:", query)
-	rows, err := db.DB.Query(`SELECT files.path, files.start, files.end, files.permissions, files.fs_modified, sizes.size, files.hash FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE files.path LIKE ?`, query)
+func Search(input string) {
+	query := `SELECT files.path, files.start, files.end, files.permissions, files.fs_modified, sizes.size, files.hash FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE `
+	var arg any
+	if hash, err := hex.DecodeString(input); err == nil && len(hash) == 32 {
+		query += "files.hash = ?"
+		arg = hash
+		log.Println("Query by hash:", input)
+	} else {
+		query += "files.path LIKE ?"
+		arg = "%" + input + "%"
+		log.Println("Query is:", arg)
+	}
+	rows, err := db.DB.Query(query, arg)
 	if err != nil {
 		panic(err)
 	}

@@ -283,9 +283,11 @@ func execute(rest Restoration, stor storage_base.Storage) {
 		chunk := paths[i:min(len(rest.destinations), i+500)]
 		handles := make([]*os.File, 0)
 		writers := make([]io.Writer, 0)
+		chunkDest := make([]Item, 0, len(chunk))
 		for _, path := range chunk {
 			dir := filepath.Dir(path)
-			mode := rest.destinations[path].permissions
+			item := rest.destinations[path]
+			mode := item.permissions
 
 			// https://stackoverflow.com/a/31151508/2277831
 			dirMode := mode               // start with perms of the file
@@ -305,6 +307,7 @@ func execute(rest Restoration, stor storage_base.Storage) {
 			}
 			handles = append(handles, f)
 			writers = append(writers, f)
+			chunkDest = append(chunkDest, item)
 		}
 
 		out := io.MultiWriter(writers...)
@@ -330,13 +333,29 @@ func execute(rest Restoration, stor storage_base.Storage) {
 		hash, size := hs.HashAndSize()
 		log.Println("Got size and hash:", size, hex.EncodeToString(hash))
 		if size != rest.size || !bytes.Equal(hash, rest.hash) {
-			panic("wrong")
+			for _, f := range handles {
+				f.Close()
+			}
+			for _, item := range chunkDest {
+				err := os.Remove(item.destPath)
+				if err != nil && !os.IsNotExist(err) {
+					log.Println("Failed to delete corrupted file:", item.destPath, err)
+				}
+			}
+			panic("hash verification failed, deleted corrupted outputs")
 		}
 		log.Println("Success")
 		diskSource = &chunk[0]
 
 		for _, f := range handles {
 			f.Close()
+		}
+		for _, item := range chunkDest {
+			modTime := time.Unix(item.fsModified, 0)
+			err := os.Chtimes(item.destPath, modTime, modTime)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 }

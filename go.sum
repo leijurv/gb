@@ -78,6 +78,8 @@ github.com/leijurv/lepton_jpeg_go v0.0.0-20251223225320-f763c909328c/go.mod h1:u
 github.com/mattn/go-runewidth v0.0.10/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRCM46jaSJTDAk=
 github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
 github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+github.com/muja/goconfig v0.0.0-20180417074348-0a635507dddc h1:feiXqI2b2JPrHpN/079PWov2fV8jFAi08egwqgYmBgE=
+github.com/muja/goconfig v0.0.0-20180417074348-0a635507dddc/go.mod h1:7kv47IZ5wy874g/w56YmuACXL+QvX3nM9THSAkaArx0=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rivo/uniseg v0.1.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=

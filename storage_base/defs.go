@@ -2,6 +2,7 @@ package storage_base
 
 import (
 	"io"
+	"time"
 )
 
 // a place where blobs can be stored
@@ -17,6 +18,10 @@ type Storage interface {
 
 	// delete a blob by its path
 	DeleteBlob(path string)
+
+	// generate a presigned URL for downloading a blob (use Range header with curl for sections)
+	// returns empty string and error if not supported (e.g., Google Drive)
+	PresignedURL(path string, expiry time.Duration) (string, error)
 
 	GetID() []byte
 

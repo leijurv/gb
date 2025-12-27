@@ -274,6 +274,19 @@ func (remote *S3) DeleteBlob(path string) {
 	log.Println("Successfully deleted S3 object:", path)
 }
 
+func (remote *S3) PresignedURL(path string, expiry time.Duration) (string, error) {
+	presignClient := s3.NewPresignClient(remote.client)
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(remote.Data.Bucket),
+		Key:    aws.String(path),
+	}
+	result, err := presignClient.PresignGetObject(context.Background(), input, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", err
+	}
+	return result.URL, nil
+}
+
 func (remote *S3) String() string {
 	return "S3 bucket " + remote.Data.Bucket + " at path " + remote.RootPath + " at endpoint " + remote.Data.Endpoint + " StorageID " + hex.EncodeToString(remote.StorageID[:])
 }

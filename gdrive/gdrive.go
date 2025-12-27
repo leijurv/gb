@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
@@ -149,6 +151,10 @@ func (gds *gDriveStorage) DeleteBlob(path string) {
 		panic("Error deleting Google Drive file: " + err.Error())
 	}
 	log.Println("Successfully deleted Google Drive file:", path)
+}
+
+func (gds *gDriveStorage) PresignedURL(path string, expiry time.Duration) (string, error) {
+	return "", errors.New("presigned URLs are not supported for Google Drive")
 }
 
 func (gds *gDriveStorage) String() string {

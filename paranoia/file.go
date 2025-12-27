@@ -112,7 +112,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 			SELECT
 				files.hash,
 				blob_entries.blob_id,
-				blob_entries.offset, 
+				blob_entries.offset,
 				blob_entries.final_size,
 				blob_entries.compression_alg,
 				blob_entries.encryption_key,
@@ -122,7 +122,8 @@ func paranoia(path string, info os.FileInfo, level int) {
 				storage.storage_id,
 				storage.type,
 				storage.identifier,
-				storage.root_path
+				storage.root_path,
+				(SELECT COUNT(*) FROM blob_entries sibling WHERE sibling.blob_id = blob_entries.blob_id AND sibling.encryption_key = blob_entries.encryption_key) AS shared_key_count
 			FROM files
 				INNER JOIN blob_entries ON blob_entries.hash = files.hash
 				INNER JOIN blobs ON blobs.blob_id = blob_entries.blob_id
@@ -149,31 +150,52 @@ func paranoia(path string, info os.FileInfo, level int) {
 		var kind string
 		var identifier string
 		var rootPath string
+		var sharedKeyCount int
 
-		err := rows.Scan(&hash, &blobID, &offset, &length, &compressionAlg, &key, &finalSize, &pathInStorage, &checksum, &storageID, &kind, &identifier, &rootPath)
+		err := rows.Scan(&hash, &blobID, &offset, &length, &compressionAlg, &key, &finalSize, &pathInStorage, &checksum, &storageID, &kind, &identifier, &rootPath, &sharedKeyCount)
 		if err != nil {
 			panic(err)
 		}
 		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", pathInStorage, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decompressing using", compressionAlg)
-		log.Println("For example, to verify this, download the file into", hex.EncodeToString(blobID), "and run")
+
+		// Create the storage object to try generating a presigned URL
+		storageR := storage.StorageDataToStorage(storage.StorageDescriptor{
+			StorageID:  utils.SliceToArr(storageID),
+			Kind:       kind,
+			Identifier: identifier,
+			RootPath:   rootPath,
+		})
+
 		cmd := ""
-
-		// the idea behind all this trickery to follow is that:
-		// 1. we should efficiently actually seek into the correct offset into the blob. we shouldn't cat the entire thing and discard bytes until we get to where we want (that's slow)
-		// 2. it should work on both bash and zsh
-		// 3. it should work on both mac and linux
-		// with these three put together, we end up with the sillyness below :)
-
-		// note that in most cases, for large files that get a blob all to themselves, this is exceedingly simple (just a `cat | openssl | head`)
-		// the weird seeking is just for when the file is not located at the start of the blob (aka when offset != 0)
-
-		if offset == 0 {
-			cmd += "cat " + hex.EncodeToString(blobID) + " | "
-		} else {
-			// would look better if the blob was at the beginning, but, `<file { cmd }` doesn't work in bash on mac (it works in zsh on mac, bash on linux, and zsh on linux though)
-			cmd += "{ dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 status=none; cat; } <" + hex.EncodeToString(blobID) + " | "
-		}
 		iv, remainingSeek := crypto.CalcIVAndSeek(offset)
+
+		// Try to get a presigned URL for curl-based retrieval
+		presignedURL, presignErr := storageR.PresignedURL(pathInStorage, 7*24*time.Hour)
+		if presignErr == nil {
+			log.Println("To verify this, run the following command (presigned URL valid for 1 week):")
+			// Calculate the byte range we need: from aligned offset to offset+length
+			// We need (length + remainingSeek) bytes starting at (offset - remainingSeek) = offset/16*16
+			alignedOffset := offset / 16 * 16
+			cmd += "curl -s -H 'Range: " + utils.FormatHTTPRange(alignedOffset, length+remainingSeek) + "' '" + presignedURL + "' | "
+		} else {
+			log.Println("For example, to verify this, download the file into", hex.EncodeToString(blobID), "and run")
+			// the idea behind all this trickery to follow is that:
+			// 1. we should efficiently actually seek into the correct offset into the blob. we shouldn't cat the entire thing and discard bytes until we get to where we want (that's slow)
+			// 2. it should work on both bash and zsh
+			// 3. it should work on both mac and linux
+			// with these three put together, we end up with the sillyness below :)
+
+			// note that in most cases, for large files that get a blob all to themselves, this is exceedingly simple (just a `cat | openssl | head`)
+			// the weird seeking is just for when the file is not located at the start of the blob (aka when offset != 0)
+
+			if offset == 0 {
+				cmd += "cat " + hex.EncodeToString(blobID) + " | "
+			} else {
+				// would look better if the blob was at the beginning, but, `<file { cmd }` doesn't work in bash on mac (it works in zsh on mac, bash on linux, and zsh on linux though)
+				cmd += "{ dd bs=" + strconv.FormatInt(offset/16*16, 10) + " skip=1 count=0 status=none; cat; } <" + hex.EncodeToString(blobID) + " | "
+			}
+		}
+
 		cmd += "openssl enc -aes-128-ctr -d -K " + hex.EncodeToString(key) + " -iv " + hex.EncodeToString(iv) + " 2>/dev/null | "
 		if remainingSeek != 0 {
 			cmd += "{ dd bs=" + strconv.FormatInt(remainingSeek, 10) + " skip=1 count=0 status=none; cat; } | "
@@ -181,15 +203,14 @@ func paranoia(path string, info os.FileInfo, level int) {
 		cmd += "head -c " + strconv.FormatInt(length, 10) + compression.ByAlgName(compressionAlg).DecompressionTrollBashCommandIncludingThePipe() + " | shasum -a 256"
 		log.Println(cmd)
 		log.Println("And ensure it outputs the hash of the file, which is", hex.EncodeToString(hash))
+
+		if sharedKeyCount > 1 {
+			log.Printf("WARNING: If you share this bash command, you will inadvertently reveal the contents of %d other file(s), since this was backed up with an older version of gb that shared encryption keys across distinct files in a single blob. To fix this, you can `gb repack` this blob to have distinct encryption keys per entry.", sharedKeyCount-1)
+		}
+
 		count++
 		if level > 1 {
 			log.Println("Fetching the metadata of the blob containing this file to verify that it's what we expect...")
-			storageR := storage.StorageDataToStorage(storage.StorageDescriptor{
-				StorageID:  utils.SliceToArr(storageID),
-				Kind:       kind,
-				Identifier: identifier,
-				RootPath:   rootPath,
-			})
 			fetchedChecksum, fetchedSize := storageR.Metadata(pathInStorage)
 			log.Println("Checksum in fetched metadata:", fetchedChecksum)
 			log.Println("Size in fetched metadata:", fetchedSize)

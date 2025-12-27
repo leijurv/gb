@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"sync"
+	"time"
 )
 
 type mockBlobData struct {
@@ -95,6 +97,10 @@ func (m *MockStorage) GetID() []byte {
 
 func (m *MockStorage) String() string {
 	return "MockStorage"
+}
+
+func (m *MockStorage) PresignedURL(path string, expiry time.Duration) (string, error) {
+	return "", errors.New("presigned URLs are not supported for MockStorage")
 }
 
 func (m *MockStorage) storeBlob(path string, data []byte, checksum string) {

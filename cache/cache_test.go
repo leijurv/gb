@@ -333,6 +333,10 @@ func (fs *fakeStorage) String() string {
 	return "fake storage"
 }
 
+func (fs *fakeStorage) PresignedURL(path string, expiry time.Duration) (string, error) {
+	return "", errors.New("presigned URLs are not supported for fakeStorage")
+}
+
 // withErrorInjection returns a wrapper that injects errors into all DownloadSection calls
 func (fs *fakeStorage) withErrorInjection(errorConfig *readerErrorConfig) storage_base.Storage {
 	return &errorInjectingStorage{
@@ -380,6 +384,10 @@ func (eis *errorInjectingStorage) GetID() []byte {
 
 func (eis *errorInjectingStorage) String() string {
 	return "error-injecting " + eis.baseStorage.String()
+}
+
+func (eis *errorInjectingStorage) PresignedURL(path string, expiry time.Duration) (string, error) {
+	return eis.baseStorage.PresignedURL(path, expiry)
 }
 
 func TestFakeReader(t *testing.T) {

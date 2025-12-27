@@ -101,26 +101,27 @@ func Repack(label string) {
 	log.Println("Processing", len(blobIDs), "blobs")
 
 	// Step 4: Verify Uniqueness - check that all hashes in these blobs are globally unique
+	// Find all blob_ids that contain any duplicate hash (one query instead of N)
 	log.Println("Verifying hash uniqueness...")
-	for _, blobID := range blobIDs {
-		rows, err := db.DB.Query(`
-			SELECT hash FROM blob_entries WHERE blob_id = ?
-			AND hash IN (SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1)
-		`, blobID)
+	rows, err := db.DB.Query(`
+		SELECT DISTINCT blob_id FROM blob_entries
+		WHERE hash IN (SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1)
+	`)
+	if err != nil {
+		panic(err)
+	}
+	for rows.Next() {
+		var blobID []byte
+		err := rows.Scan(&blobID)
 		if err != nil {
 			panic(err)
 		}
-		for rows.Next() {
-			var hash []byte
-			err := rows.Scan(&hash)
-			if err != nil {
-				panic(err)
-			}
+		if seenBlobIDs[utils.SliceToArr(blobID)] {
 			rows.Close()
-			panic("Hash " + hex.EncodeToString(hash) + " in blob " + hex.EncodeToString(blobID) + " appears in multiple blob_entries - cannot repack")
+			panic("Blob " + hex.EncodeToString(blobID) + " contains a hash that appears in multiple blob_entries - cannot repack")
 		}
-		rows.Close()
 	}
+	rows.Close()
 	log.Println("All hashes are unique")
 
 	// Step 5: Verify Size Consistency - within each blob, either all entries >= MinBlobSize (skip) or all < MinBlobSize (use)

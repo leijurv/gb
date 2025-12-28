@@ -95,6 +95,9 @@ var queriesThatShouldHaveNoRows = []string{
 	// uncompressed entries should have final_size = sizes.size
 	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE blob_entries.compression_alg = '' AND blob_entries.final_size != sizes.size",
 
+	// lepton should never make a file larger
+	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE blob_entries.compression_alg = 'lepton' AND blob_entries.final_size > sizes.size",
+
 	// zero-size files should have final_size = 0
 	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE sizes.size = 0 AND blob_entries.final_size != 0",
 

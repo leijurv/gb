@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/leijurv/gb/backup"
@@ -435,9 +436,23 @@ func Repack(label string, mode RepackMode) {
 	log.Println("Repack complete!")
 	log.Println("Old blob files remain in storage - run `gb paranoia storage --delete-unknown-files` to clean them up.")
 
-	for _, blob := range newBlobs {
-		paranoia.BlobReaderParanoia(paranoia.DownloadEntireBlob(blob.blobID, stor), blob.blobID, stor)
+	blobCh := make(chan newBlobData, len(newBlobs))
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			for blob := range blobCh {
+				paranoia.BlobReaderParanoia(paranoia.DownloadEntireBlob(blob.blobID, stor), blob.blobID, stor)
+			}
+			wg.Done()
+		}()
 	}
+
+	for _, blob := range newBlobs {
+		blobCh <- blob
+	}
+	close(blobCh)
+	wg.Wait()
 
 	// Backup the database itself
 	backup.BackupDB()

@@ -53,7 +53,6 @@ func ReplicateBlobs(label string) {
 			j := i
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
 				for blob := range todo {
 					log.Println("Copy", blob, "from", storage, "to", dst)
 					log.Println("Done", utils.FormatCommas(atomic.LoadInt64(sz)), "bytes, thread", j)
@@ -68,6 +67,7 @@ func ReplicateBlobs(label string) {
 						panic(err)
 					}
 				}
+				wg.Done()
 			}()
 		}
 		for _, blob := range toReplicate {

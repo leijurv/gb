@@ -154,36 +154,23 @@ func Repack(label string, mode RepackMode) {
 	}
 	log.Println("Processing", len(blobIDs), "blobs")
 
-	// Step 5: Verify Size Consistency and Global Uniqueness
-	// Within each blob, either all entries >= MinBlobSize (skip) or all < MinBlobSize (use)
-	// Also verify that any duplicate hashes are all within seenBlobIDs
-	log.Println("Verifying size consistency and filtering blobs...")
-	minBlobSize := config.Config().MinBlobSize
+	log.Println("Filtering blobs...")
 	blobsToProcess := make([][]byte, 0)
 	hashDedupe := make(map[[32]byte]struct{}) // tracks hashes we've "claimed" (either large skipped or will process)
 	blobsToDelete := make([][]byte, 0)        // large blobs that are duplicates and should just be deleted
 	for _, blobID := range blobIDs {
-		rows, err := db.DB.Query(`
-			SELECT blob_entries.hash, sizes.size FROM blob_entries
-			INNER JOIN sizes ON blob_entries.hash = sizes.hash
-			WHERE blob_id = ?
-		`, blobID)
+		rows, err := db.DB.Query(`SELECT hash FROM blob_entries WHERE blob_id = ?`, blobID)
 		if err != nil {
 			panic(err)
 		}
 		var hashes [][]byte
-		var hasLarge bool
 		for rows.Next() {
 			var hash []byte
-			var size int64
-			err := rows.Scan(&hash, &size)
+			err := rows.Scan(&hash)
 			if err != nil {
 				panic(err)
 			}
 			hashes = append(hashes, hash)
-			if size >= minBlobSize {
-				hasLarge = true
-			}
 		}
 		if err := rows.Err(); err != nil {
 			panic(err)
@@ -214,11 +201,7 @@ func Repack(label string, mode RepackMode) {
 			rows.Close()
 		}
 
-		if hasLarge {
-			// Skipping this blob because all entries are large
-			if len(hashes) != 1 {
-				panic("Blob " + hex.EncodeToString(blobID) + " has multiple large entries - not supported. repack will respect your MinBlobSize config; increase it accordingly?")
-			}
+		if len(hashes) == 1 { // optimization: if the blob only has one entry, which likely indicates it's a large file, we'd like to skip downloading it entirely if possible
 			hashArr := utils.SliceToArr(hashes[0])
 			if _, exists := hashDedupe[hashArr]; exists {
 				// This hash was already claimed by another blob, so this blob is a duplicate
@@ -227,7 +210,7 @@ func Repack(label string, mode RepackMode) {
 			} else {
 				// Claim this hash
 				hashDedupe[hashArr] = struct{}{}
-				log.Println("Skipping blob", hex.EncodeToString(blobID), "- all entries are >= MinBlobSize")
+				log.Println("Skipping blob", hex.EncodeToString(blobID), "- only one entry")
 			}
 			continue
 		}
@@ -319,6 +302,7 @@ func Repack(label string, mode RepackMode) {
 	// Accumulate entries and upload as new blobs
 	storages := storage.GetAll()
 	uploadService := backup.BeginDirectUpload(storages)
+	minBlobSize := config.Config().MinBlobSize
 
 	var accumulated []Entry
 	var accumulatedSize int64
@@ -332,6 +316,11 @@ func Repack(label string, mode RepackMode) {
 			continue
 		}
 		hashDedupe[hashArr] = struct{}{}
+
+		if int64(len(entry.Data)) >= minBlobSize {
+			newBlobs = append(newBlobs, uploadEntries([]Entry{entry}, uploadService))
+			continue
+		}
 
 		accumulated = append(accumulated, entry)
 		accumulatedSize += int64(len(entry.Data))

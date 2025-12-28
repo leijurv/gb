@@ -172,7 +172,7 @@ func Repack(label string, mode RepackMode) {
 			panic(err)
 		}
 		var hashes [][]byte
-		var hasSmall, hasLarge bool
+		var hasLarge bool
 		for rows.Next() {
 			var hash []byte
 			var size int64
@@ -183,8 +183,6 @@ func Repack(label string, mode RepackMode) {
 			hashes = append(hashes, hash)
 			if size >= minBlobSize {
 				hasLarge = true
-			} else {
-				hasSmall = true
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -216,13 +214,10 @@ func Repack(label string, mode RepackMode) {
 			rows.Close()
 		}
 
-		if hasSmall && hasLarge {
-			panic("Blob " + hex.EncodeToString(blobID) + " has mixed sizes (some >= MinBlobSize, some <) - cannot repack")
-		}
-		if hasLarge && !hasSmall {
+		if hasLarge {
 			// Skipping this blob because all entries are large
 			if len(hashes) != 1 {
-				panic("Blob " + hex.EncodeToString(blobID) + " has multiple large entries - not supported")
+				panic("Blob " + hex.EncodeToString(blobID) + " has multiple large entries - not supported. repack will respect your MinBlobSize config; increase it accordingly?")
 			}
 			hashArr := utils.SliceToArr(hashes[0])
 			if _, exists := hashDedupe[hashArr]; exists {

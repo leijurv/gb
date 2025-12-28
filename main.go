@@ -397,7 +397,35 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				repack.Repack(c.String("label"))
+				repack.Repack(c.String("label"), repack.BlobIDsFromStdin)
+				return nil
+			},
+		},
+		{
+			Name:  "deduplicate",
+			Usage: "detect blobs that have duplicated entries and repack them so that all your blob entries have unique contents",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				repack.Repack(c.String("label"), repack.Deduplicate)
+				return nil
+			},
+		},
+		{
+			Name:  "upgrade-encryption",
+			Usage: "find blobs that contain multiple files and use old style encryption, and repack them with unique encryption keys for each entry",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				repack.Repack(c.String("label"), repack.UpgradeEncryption)
 				return nil
 			},
 		},

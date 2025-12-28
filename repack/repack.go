@@ -47,34 +47,21 @@ type newBlobData struct {
 	entries     []blobEntry
 }
 
-func Repack(label string) {
-	log.Println("Repack: repacking blobs from stdin")
-	log.Println("This reads blobIDs (in hex) from stdin, downloads them, verifies contents, and repacks into new properly-sized blobs")
-	log.Println()
+type RepackMode int
 
-	// Step 1: Storage Selection
-	stor, ok := storage.StorageSelect(label)
-	if !ok {
-		return
-	}
+const (
+	BlobIDsFromStdin RepackMode = iota
+	Deduplicate
+	UpgradeEncryption
+)
 
-	// Step 2: Run Paranoia Checks
-	//log.Println("Running paranoia storage check...")
-	//if !paranoia.StorageParanoia(false) {
-	//	panic("Storage paranoia failed - cannot proceed with repack")
-	//}
-	log.Println("Running paranoia db check...")
-	paranoia.DBParanoia()
-	log.Println("Paranoia checks passed")
-
-	// Step 3: Read Blob IDs from Stdin
+func blobIDsFromStdin() [][]byte {
 	stdin, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
 		panic(err)
 	}
 	lines := strings.Split(string(stdin), "\n")
 	blobIDs := make([][]byte, 0)
-	seenBlobIDs := make(map[[32]byte]bool)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -87,63 +74,106 @@ func Repack(label string) {
 		if err != nil {
 			panic(err)
 		}
+		blobIDs = append(blobIDs, blobID)
+	}
+	return blobIDs
+}
+
+func Repack(label string, mode RepackMode) {
+	// Step 1: Storage Selection
+	stor, ok := storage.StorageSelect(label)
+	if !ok {
+		return
+	}
+
+	if mode == Deduplicate {
+		log.Println("Skipping paranoia db check because you presumably have duplicated blob_entries that I'm here to fix")
+	} else {
+		log.Println("Running paranoia db check...")
+		paranoia.DBParanoia()
+		log.Println("Paranoia checks passed")
+	}
+
+	var blobIDs [][]byte
+	switch mode {
+	case BlobIDsFromStdin:
+		blobIDs = blobIDsFromStdin()
+	case Deduplicate:
+		rows, err := db.DB.Query(`
+			SELECT DISTINCT blob_id FROM blob_entries
+			WHERE hash IN (SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1)
+		`)
+		if err != nil {
+			panic(err)
+		}
+		for rows.Next() {
+			var blobID []byte
+			err := rows.Scan(&blobID)
+			if err != nil {
+				panic(err)
+			}
+			blobIDs = append(blobIDs, blobID)
+		}
+		rows.Close()
+	case UpgradeEncryption:
+		rows, err := db.DB.Query(`
+			SELECT blob_id FROM blob_entries GROUP BY blob_id HAVING COUNT(DISTINCT encryption_key) = 1 AND COUNT(*) > 1
+		`)
+		if err != nil {
+			panic(err)
+		}
+		for rows.Next() {
+			var blobID []byte
+			err := rows.Scan(&blobID)
+			if err != nil {
+				panic(err)
+			}
+			blobIDs = append(blobIDs, blobID)
+		}
+		rows.Close()
+	}
+
+	if len(blobIDs) == 0 {
+		log.Println("No blob IDs provided")
+		return
+	}
+	seenBlobIDs := make(map[[32]byte]bool)
+	for _, blobID := range blobIDs {
 		blobIDArr := utils.SliceToArr(blobID)
 		if seenBlobIDs[blobIDArr] {
 			panic("Duplicate blob ID in stdin: " + hex.EncodeToString(blobID))
 		}
 		seenBlobIDs[blobIDArr] = true
-		blobIDs = append(blobIDs, blobID)
-	}
-	if len(blobIDs) == 0 {
-		log.Println("No blob IDs provided")
-		return
 	}
 	log.Println("Processing", len(blobIDs), "blobs")
 
-	// Step 4: Verify Uniqueness - check that all hashes in these blobs are globally unique
-	// Find all blob_ids that contain any duplicate hash (one query instead of N)
-	log.Println("Verifying hash uniqueness...")
-	rows, err := db.DB.Query(`
-		SELECT DISTINCT blob_id FROM blob_entries
-		WHERE hash IN (SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1)
-	`)
-	if err != nil {
-		panic(err)
-	}
-	for rows.Next() {
-		var blobID []byte
-		err := rows.Scan(&blobID)
-		if err != nil {
-			panic(err)
-		}
-		if seenBlobIDs[utils.SliceToArr(blobID)] {
-			rows.Close()
-			panic("Blob " + hex.EncodeToString(blobID) + " contains a hash that appears in multiple blob_entries - cannot repack")
-		}
-	}
-	rows.Close()
-	log.Println("All hashes are unique")
-
-	// Step 5: Verify Size Consistency - within each blob, either all entries >= MinBlobSize (skip) or all < MinBlobSize (use)
+	// Step 5: Verify Size Consistency and Global Uniqueness
+	// Within each blob, either all entries >= MinBlobSize (skip) or all < MinBlobSize (use)
+	// Also verify that any duplicate hashes are all within seenBlobIDs
 	log.Println("Verifying size consistency and filtering blobs...")
 	minBlobSize := config.Config().MinBlobSize
 	blobsToProcess := make([][]byte, 0)
+	hashDedupe := make(map[[32]byte]struct{}) // tracks hashes we've "claimed" (either large skipped or will process)
+	blobsToDelete := make([][]byte, 0)        // large blobs that are duplicates and should just be deleted
 	for _, blobID := range blobIDs {
 		rows, err := db.DB.Query(`
-			SELECT sizes.size FROM blob_entries
+			SELECT blob_entries.hash, sizes.size FROM blob_entries
 			INNER JOIN sizes ON blob_entries.hash = sizes.hash
 			WHERE blob_id = ?
 		`, blobID)
 		if err != nil {
 			panic(err)
 		}
+		var hashes [][]byte
 		var hasSmall, hasLarge bool
 		for rows.Next() {
+			var hash []byte
 			var size int64
-			err := rows.Scan(&size)
+			err := rows.Scan(&hash, &size)
 			if err != nil {
 				panic(err)
 			}
+			hashes = append(hashes, hash)
 			if size >= minBlobSize {
 				hasLarge = true
 			} else {
@@ -152,28 +182,65 @@ func Repack(label string) {
 		}
 		rows.Close()
 
+		// Check global uniqueness: for each hash, all blobs containing it must be in seenBlobIDs
+		for _, hash := range hashes {
+			rows, err := db.DB.Query(`SELECT blob_id FROM blob_entries WHERE hash = ?`, hash)
+			if err != nil {
+				panic(err)
+			}
+			for rows.Next() {
+				var otherBlobID []byte
+				err := rows.Scan(&otherBlobID)
+				if err != nil {
+					panic(err)
+				}
+				if !seenBlobIDs[utils.SliceToArr(otherBlobID)] {
+					rows.Close()
+					panic("Hash " + hex.EncodeToString(hash) + " in blob " + hex.EncodeToString(blobID) +
+						" also appears in blob " + hex.EncodeToString(otherBlobID) + " which is not being repacked")
+				}
+			}
+			rows.Close()
+		}
+
 		if hasSmall && hasLarge {
 			panic("Blob " + hex.EncodeToString(blobID) + " has mixed sizes (some >= MinBlobSize, some <) - cannot repack")
 		}
 		if hasLarge && !hasSmall {
-			log.Println("Skipping blob", hex.EncodeToString(blobID), "- all entries are >= MinBlobSize")
+			// Skipping this blob because all entries are large
+			if len(hashes) != 1 {
+				panic("Blob " + hex.EncodeToString(blobID) + " has multiple large entries - not supported")
+			}
+			hashArr := utils.SliceToArr(hashes[0])
+			if _, exists := hashDedupe[hashArr]; exists {
+				// This hash was already claimed by another blob, so this blob is a duplicate
+				log.Println("Blob", hex.EncodeToString(blobID), "is a duplicate large blob - will be deleted")
+				blobsToDelete = append(blobsToDelete, blobID)
+			} else {
+				// Claim this hash
+				hashDedupe[hashArr] = struct{}{}
+				log.Println("Skipping blob", hex.EncodeToString(blobID), "- all entries are >= MinBlobSize")
+			}
 			continue
 		}
 		blobsToProcess = append(blobsToProcess, blobID)
 	}
 
-	if len(blobsToProcess) == 0 {
-		log.Println("No blobs need repacking")
+	if len(blobsToProcess) == 0 && len(blobsToDelete) == 0 {
+		log.Println("No blobs need repacking or deleting")
 		return
 	}
 	log.Println("Will repack", len(blobsToProcess), "blobs")
+	if len(blobsToDelete) > 0 {
+		log.Println("Will delete", len(blobsToDelete), "duplicate large blobs")
+	}
 
 	// Collect "before" statistics
 	var beforeEntries int64
 	var beforeUncompressed int64
 	var beforeCompressed int64
 	var beforeFinalSize int64
-	for _, blobID := range blobsToProcess {
+	for _, blobID := range append(blobsToProcess, blobsToDelete...) {
 		var blobSize int64
 		err := db.DB.QueryRow("SELECT size FROM blobs WHERE blob_id = ?", blobID).Scan(&blobSize)
 		if err != nil {
@@ -247,6 +314,14 @@ func Repack(label string) {
 	var newBlobs []newBlobData
 
 	for entry := range entryCh {
+		// Dedupe: skip entries whose hash we've already seen (from large blobs or earlier in this loop)
+		hashArr := utils.SliceToArr(entry.Hash)
+		if _, exists := hashDedupe[hashArr]; exists {
+			log.Println("Skipping duplicate hash", hex.EncodeToString(entry.Hash[:8]))
+			continue
+		}
+		hashDedupe[hashArr] = struct{}{}
+
 		accumulated = append(accumulated, entry)
 		accumulatedSize += int64(len(entry.Data))
 
@@ -310,8 +385,10 @@ func Repack(label string) {
 	}
 
 	// Delete old blob data (must delete in correct order due to foreign keys)
-	log.Println("Deleting old blob records...")
-	for _, blobID := range blobsToProcess {
+	// This includes both repacked blobs and duplicate large blobs
+	allBlobsToDelete := append(blobsToProcess, blobsToDelete...)
+	log.Println("Deleting", len(allBlobsToDelete), "old blob records (", len(blobsToProcess), "repacked +", len(blobsToDelete), "duplicate large)...")
+	for _, blobID := range allBlobsToDelete {
 		// Delete blob_entries first (foreign key to blobs)
 		_, err = tx.Exec("DELETE FROM blob_entries WHERE blob_id = ?", blobID)
 		if err != nil {
@@ -328,7 +405,7 @@ func Repack(label string) {
 			panic(err)
 		}
 	}
-	log.Println("Deleted", len(blobsToProcess), "old blob records")
+	log.Println("Deleted", len(allBlobsToDelete), "old blob records")
 
 	// Run DB paranoia on the transaction before committing
 	log.Println("Running DB paranoia on transaction...")

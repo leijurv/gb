@@ -120,9 +120,7 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id, storage_id HAVING COUNT(*) > 1",
 
 	// nothing was ever backed up twice
-	// "SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1",
-	// NEVER MIND this has happened a few times when another program was modifying files at the same time, such as creating two empty files that get backed up
-	// it also happens if you run `gb backup` on the same folder in two different windows at the same time
+	"SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1 -- if this one fails it means that you may have run two `gb backup` processes at once, and the same file got duplicated. you can fix this with `gb deduplicate`!",
 
 	// if the same blob has been uploaded to two storages of the same type (such as S3), make sure that the path and checksum matches
 	// this is a good sanity check after doing a `gb replicate`!

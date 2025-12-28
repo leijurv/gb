@@ -114,6 +114,9 @@ func Repack(label string, mode RepackMode) {
 			}
 			blobIDs = append(blobIDs, blobID)
 		}
+		if err := rows.Err(); err != nil {
+			panic(err)
+		}
 		rows.Close()
 	case UpgradeEncryption:
 		rows, err := db.DB.Query(`
@@ -129,6 +132,9 @@ func Repack(label string, mode RepackMode) {
 				panic(err)
 			}
 			blobIDs = append(blobIDs, blobID)
+		}
+		if err := rows.Err(); err != nil {
+			panic(err)
 		}
 		rows.Close()
 	}
@@ -180,6 +186,9 @@ func Repack(label string, mode RepackMode) {
 				hasSmall = true
 			}
 		}
+		if err := rows.Err(); err != nil {
+			panic(err)
+		}
 		rows.Close()
 
 		// Check global uniqueness: for each hash, all blobs containing it must be in seenBlobIDs
@@ -199,6 +208,9 @@ func Repack(label string, mode RepackMode) {
 					panic("Hash " + hex.EncodeToString(hash) + " in blob " + hex.EncodeToString(blobID) +
 						" also appears in blob " + hex.EncodeToString(otherBlobID) + " which is not being repacked")
 				}
+			}
+			if err := rows.Err(); err != nil {
+				panic(err)
 			}
 			rows.Close()
 		}
@@ -266,6 +278,9 @@ func Repack(label string, mode RepackMode) {
 			beforeEntries++
 			beforeUncompressed += uncompSize
 			beforeCompressed += compSize
+		}
+		if err := rows.Err(); err != nil {
+			panic(err)
 		}
 		rows.Close()
 	}

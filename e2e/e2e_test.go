@@ -104,18 +104,19 @@ func TestBackupDedupe(t *testing.T) {
 	defer env.cleanup()
 
 	duplicateContent := makeBinaryData(5000)
-	expectedHash := sha256.Sum256(duplicateContent)
+	duplicateContent2 := makeBinaryData(5000)
+	duplicateContent2[0] += 1
+	if sha256.Sum256(duplicateContent) == sha256.Sum256(duplicateContent2) {
+		t.Fatal()
+	}
 
 	for i := 1; i <= 3; i++ {
 		env.writeFile("dup"+string(rune('0'+i))+".bin", duplicateContent)
 	}
-
 	env.backup()
-
-	for i := 4; i <= 10; i++ {
+	for i := 4; i <= 5; i++ {
 		env.writeFile("dup"+string(rune('0'+i))+".bin", duplicateContent)
 	}
-
 	env.backup()
 
 	var blobCount int
@@ -127,14 +128,31 @@ func TestBackupDedupe(t *testing.T) {
 		t.Errorf("expected 1 blob entry for deduplicated files, got %d", blobCount)
 	}
 
+	for i := 6; i <= 7; i++ {
+		env.writeFile("dup"+string(rune('0'+i))+".bin", duplicateContent)
+	}
+	for i := 8; i <= 10; i++ {
+		env.writeFile("dup"+string(rune('0'+i))+".bin", duplicateContent2)
+	}
+	env.backup()
+
+	err = db.DB.QueryRow("SELECT COUNT(*) FROM blob_entries").Scan(&blobCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blobCount != 2 {
+		t.Errorf("expected 2 blob entries for deduplicated files, got %d", blobCount)
+	}
+
 	for i := 1; i <= 10; i++ {
 		env.removeFile("dup" + string(rune('0'+i)) + ".bin")
 	}
-
 	env.restore()
-
-	for i := 1; i <= 10; i++ {
-		env.verifyRestored("dup"+string(rune('0'+i))+".bin", expectedHash)
+	for i := 1; i <= 7; i++ {
+		env.verifyRestored("dup"+string(rune('0'+i))+".bin", sha256.Sum256(duplicateContent))
+	}
+	for i := 8; i <= 10; i++ {
+		env.verifyRestored("dup"+string(rune('0'+i))+".bin", sha256.Sum256(duplicateContent2))
 	}
 }
 
@@ -251,7 +269,9 @@ func (e *testEnv) backup() {
 	backup.BackupNonInteractive([]string{e.srcDir})
 
 	paranoia.DBParanoia()
-	paranoia.StorageParanoia(false)
+	if !paranoia.StorageParanoia(false) {
+		panic("shouldn't be any unknown files")
+	}
 }
 
 func (e *testEnv) restore() {

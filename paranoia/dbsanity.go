@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"log"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/leijurv/gb/config"
@@ -24,9 +26,6 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN blob_entries ON blobs.blob_id = blob_entries.blob_id WHERE blob_entries.blob_id IS NULL",                                                        // know of a blob with no entries
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN blob_storage ON blobs.blob_id = blob_storage.blob_id WHERE blob_storage.blob_id IS NULL",                                                        // know of a blob that isn't stored anywhere
 	"SELECT blobs.blob_id FROM blobs LEFT OUTER JOIN (SELECT * FROM blob_entries WHERE offset = 0) initial_entries ON blobs.blob_id = initial_entries.blob_id WHERE initial_entries.blob_id IS NULL", // know of a blob with no entry at offset 0
-
-	// no longer possible with database layer 2 (the column is now NOT NULL)
-	//"SELECT blob_id FROM blob_entries WHERE compression_alg IS NULL",
 
 	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND compression_alg != ''",
 
@@ -77,26 +76,73 @@ var queriesThatShouldHaveNoRows = []string{
 			) = 0
 	`,
 
-	"SELECT hash FROM files WHERE path LIKE '%/'",
-	"SELECT hash FROM files WHERE path NOT LIKE '/%'",
+	// path sanity relating to slashes, ., .., etc
+	`
+	SELECT hash FROM files WHERE
+		(path LIKE '%/') OR
+		(path NOT LIKE '/%') OR
+		(path LIKE '%//%') OR
+		(path LIKE '%/./%') OR
+		(path LIKE '%/.') OR
+		(path LIKE '%/../%') OR
+		(path LIKE '%/..') OR
+		LENGTH(path) > 4096
+	`,
 
-	// path sanity: double slashes
-	"SELECT hash FROM files WHERE path LIKE '%//%'",
-
-	// path sanity: . and .. components
-	"SELECT hash FROM files WHERE path LIKE '%/./%' OR path LIKE '%/.'",
-	"SELECT hash FROM files WHERE path LIKE '%/../%' OR path LIKE '%/..'",
-
-	// future timestamps (60 second tolerance for clock skew between Go and SQLite)
+	// future timestamps (60 second tolerance for clock skew between Go and SQLite, also helps with unit tests)
 	"SELECT hash FROM files WHERE start > strftime('%s', 'now') + 60",
 	"SELECT hash FROM files WHERE end > strftime('%s', 'now') + 60",
 	"SELECT blob_id FROM blob_storage WHERE timestamp > strftime('%s', 'now') + 60",
+
+	// prior to the gb epoch (first commit)
+	"SELECT hash FROM files WHERE start < 1572924988",
 
 	// uncompressed entries should have final_size = sizes.size
 	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE blob_entries.compression_alg = '' AND blob_entries.final_size != sizes.size",
 
 	// lepton should never make a file larger
 	"SELECT blob_entries.hash FROM blob_entries INNER JOIN sizes ON blob_entries.hash = sizes.hash WHERE blob_entries.compression_alg = 'lepton' AND blob_entries.final_size > sizes.size",
+
+	// currently understood storages
+	`
+	SELECT storage_id FROM storage WHERE type NOT IN (
+		'S3',
+		'GDrive',
+		'Mock'
+	)
+	`,
+
+	// currently understood compressions
+	`
+	SELECT blob_id FROM blob_entries WHERE compression_alg NOT IN (
+		'',
+		'zstd',
+		'lepton'
+	)
+	`,
+
+	// lepton is only used on jpgs
+	`
+	SELECT
+		hash
+	FROM
+		blob_entries
+	WHERE
+		compression_alg = 'lepton'
+		AND NOT EXISTS
+			(
+				SELECT
+					1
+				FROM
+					files
+				WHERE
+					files.hash = blob_entries.hash
+				AND (
+					path LIKE '%.jpg' COLLATE NOCASE OR
+					path LIKE '%.jpeg' COLLATE NOCASE
+				)
+			)
+	`,
 
 	// encryption keys should not be reused across different blobs
 	"SELECT encryption_key FROM blob_entries GROUP BY encryption_key HAVING COUNT(DISTINCT blob_id) > 1",
@@ -107,12 +153,6 @@ var queriesThatShouldHaveNoRows = []string{
 	// duplicate final_hash in blobs (should be astronomically unlikely)
 	"SELECT final_hash FROM blobs GROUP BY final_hash HAVING COUNT(*) > 1",
 
-	// same hash with same compression should produce same final_size (deterministic compression)
-	"SELECT hash FROM blob_entries GROUP BY hash, compression_alg HAVING COUNT(DISTINCT final_size) > 1",
-
-	// path length sanity (PATH_MAX is typically 4096)
-	"SELECT hash FROM files WHERE LENGTH(path) > 4096",
-
 	// everything has been backed up to every destination
 	"SELECT blob_id FROM blob_storage GROUP BY blob_id HAVING COUNT(*) != (SELECT COUNT(*) FROM storage) -- if this one fails it means that there is a blob that is in some storages but not all of them. `gb replicate` can help with this!",
 
@@ -121,6 +161,9 @@ var queriesThatShouldHaveNoRows = []string{
 
 	// nothing was ever backed up twice
 	"SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1 -- if this one fails it means that you may have run two `gb backup` processes at once, and the same file got duplicated. you can fix this with `gb deduplicate`!",
+
+	// checksum is de facto required
+	"SELECT blob_id FROM blob_storage WHERE checksum IS NULL",
 
 	// if the same blob has been uploaded to two storages of the same type (such as S3), make sure that the path and checksum matches
 	// this is a good sanity check after doing a `gb replicate`!
@@ -206,17 +249,6 @@ var queriesThatShouldHaveNoRows = []string{
 		AND files2.end IS NOT NULL /* this is an optimization that sqlite can't figure out. the unique partial index on path where end is null implies that if row1.end is null then row2.end can't also be null since they're the same path. but sqlite can't figure this out sadly */
 		AND files2.start > files1.start /* given the UNIQUE(path, start) this is how to dedupe rows (it's not >=) */
 	`,
-
-	// these are already foreign key constraints, but some enterprising user who manually touches the database might screw em up
-	"SELECT files.hash FROM files LEFT OUTER JOIN sizes ON files.hash = sizes.hash WHERE sizes.hash IS NULL",
-	"SELECT blob_entries.hash FROM blob_entries LEFT OUTER JOIN sizes ON blob_entries.hash = sizes.hash WHERE sizes.hash IS NULL",
-	"SELECT blob_entries.blob_id FROM blob_entries LEFT OUTER JOIN blobs ON blob_entries.blob_id = blobs.blob_id WHERE blobs.blob_id IS NULL",
-	"SELECT blob_storage.blob_id FROM blob_storage LEFT OUTER JOIN blobs ON blob_storage.blob_id = blobs.blob_id WHERE blobs.blob_id IS NULL",
-	"SELECT blob_storage.storage_id FROM blob_storage LEFT OUTER JOIN storage ON blob_storage.storage_id = storage.storage_id WHERE storage.storage_id IS NULL",
-	// don't verify check constraints or unique constraints.
-	// reason: foreign keys are pragma disabled by default, so it's possible to unknowingly violate them
-	// not the case for check constraints / uniques. you can't accidentally violate those, you have to explicitly disable or remove them
-	// if you do that, then your funeral
 }
 
 func DBParanoia() {
@@ -229,17 +261,17 @@ func DBParanoiaTx(tx *sql.Tx) {
 
 func DBParanoiaOn(q Querier) {
 	sqliteVerifyPragmaCheckOn(q, "quick_check")
-	sqliteVerifyForeignKeysOn(q)
 	for _, query := range queriesThatShouldHaveNoRows {
-		log.Println("Running paranoia query:", query)
+		prettyQuery := strings.ReplaceAll(strings.ReplaceAll(query, "\n", ""), "\t", " ")
+		start := time.Now()
 		var result []byte
 		err := q.QueryRow(query).Scan(&result)
 		if err != db.ErrNoRows {
-			log.Println(err)
-			log.Println("Result is", hex.EncodeToString(result))
-			panic("sanity query should have no rows")
+			panic("Failed database sanity on query `"+prettyQuery+"` " +  hex.EncodeToString(result))
 		}
+		log.Println(prettyQuery, "took", time.Since(start))
 	}
+	sqliteVerifyForeignKeysOn(q)
 	pathUtf8On(q)
 	sqliteVerifyPragmaCheckOn(q, "integrity_check")
 	blobsCoherenceOn(q)

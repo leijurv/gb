@@ -268,7 +268,6 @@ func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 		if err != nil {
 			panic(err)
 		}
-		defer rows.Close()
 		any := false
 		for rows.Next() {
 			var path string

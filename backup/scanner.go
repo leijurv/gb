@@ -107,7 +107,7 @@ func scanFile(file File, tx *sql.Tx) {
 	// no bypass :(
 	// we know of a file with the exact same size (either in db, or currently being uploaded)
 	// so we do actually need to check the hash of this file to determine if it's unique or not
-	hasherCh <- HashPlan{file, nil}
+	hasherCh <- HashPlan{file, status.Hash}
 }
 
 // find files in the database for this path, that no longer exist on disk (i.e. they're DELETED LOL)

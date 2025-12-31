@@ -30,6 +30,7 @@ func hashOneFile(plan HashPlan) {
 	if err != nil {
 		if config.Config().SkipHashFailures {
 			log.Println("Skipping", path, "due to", err, "(maybe it was deleted?) because skip_hash_failures is true")
+			return
 		} else {
 			log.Println(path, "couldn't be backed up due to", err, "and skip_hash_failures is false, so, panicking now")
 			panic(err)

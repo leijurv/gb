@@ -186,6 +186,8 @@ func (up *gDriveUpload) End() storage_base.UploadedBlob {
 		panic("gdrive broke the etag lmao")
 	}
 
+	up.completed = true
+	up.completedID = file.Id
 	return storage_base.UploadedBlob{
 		StorageID: up.gds.storageID,
 		Path:      file.Id,
@@ -195,17 +197,30 @@ func (up *gDriveUpload) End() storage_base.UploadedBlob {
 	}
 }
 
+func (up *gDriveUpload) Cancel() {
+	if up.completed {
+		log.Println("Google Drive upload already completed, deleting file ID:", up.completedID)
+		up.gds.DeleteBlob(up.completedID)
+		return
+	}
+	log.Println("Cancelling Google Drive upload")
+	up.writer.CloseWithError(errors.New("upload cancelled"))
+	<-up.result // wait for the upload goroutine to finish (it will error out)
+}
+
 type gDriveResult struct {
 	file *drive.File
 	err  error
 }
 
 type gDriveUpload struct {
-	writer *io.PipeWriter
-	result chan gDriveResult
-	hasher *utils.HasherSizer
-	gds    *gDriveStorage
-	blobID []byte
+	writer      *io.PipeWriter
+	result      chan gDriveResult
+	hasher      *utils.HasherSizer
+	gds         *gDriveStorage
+	blobID      []byte
+	completed   bool
+	completedID string // Google Drive file ID after upload completes
 }
 
 type identifierInDB struct {

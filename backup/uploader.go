@@ -36,6 +36,16 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 
 	blobID := crypto.RandBytes(32)
 	rawServOut := serv.Begin(blobID)
+	txCommitted := false
+	defer func() {
+		if r := recover(); r != nil {
+			if !txCommitted {
+				log.Println("Upload aborted, cleaning up blobs...")
+				serv.Cancel()
+			}
+			panic(r)
+		}
+	}()
 
 	postEncInfo := utils.NewSHA256HasherSizer()
 	postEncOut := io.MultiWriter(rawServOut, &postEncInfo)
@@ -95,7 +105,8 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		})
 	}
 	if len(entries) == 0 {
-		log.Println("Exiting because nothing wrote")
+		log.Println("Exiting because nothing wrote; cancelling upload")
+		serv.Cancel()
 		return
 	}
 	paddingOffset := postEncInfo.Size()
@@ -170,6 +181,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	}
 	log.Println("Uploader done with blob", plan)
 	log.Println("Uploader committing to database")
+	txCommitted = true // err on the side of caution - if tx.Commit returns an err, very likely it did not actually commit, but, it's possible! so don't delete the blob if there's ANY chance that the db is expecting this blob to exist.
 	err = tx.Commit()
 	if err != nil {
 		panic(err)

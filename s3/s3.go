@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"strings"
@@ -39,12 +40,13 @@ type s3Result struct {
 }
 
 type s3Upload struct {
-	calc   *ETagCalculator
-	writer *io.PipeWriter
-	result chan s3Result
-	path   string
-	blobID []byte
-	s3     *S3
+	calc      *ETagCalculator
+	writer    *io.PipeWriter
+	result    chan s3Result
+	path      string
+	blobID    []byte
+	s3        *S3
+	completed bool
 }
 
 type S3DatabaseIdentifier struct {
@@ -164,6 +166,7 @@ func (remote *S3) beginUpload(blobIDOptional []byte, path string) *s3Upload {
 		}
 		result, err := manager.NewUploader(remote.client, func(u *manager.Uploader) {
 			u.PartSize = s3PartSize
+			u.LeavePartsOnError = false // explicitly abort incomplete multipart uploads on error
 		}).Upload(context.Background(), &s3.PutObjectInput{
 			Bucket:            aws.String(remote.Data.Bucket),
 			Key:               aws.String(path),
@@ -310,6 +313,7 @@ func (up *s3Upload) End() storage_base.UploadedBlob {
 	if etag.ETag != realEtag || etag.Size != realSize {
 		panic("aws broke the etag or size lmao")
 	}
+	up.completed = true
 	return storage_base.UploadedBlob{
 		StorageID: up.s3.StorageID,
 		BlobID:    up.blobID,
@@ -317,6 +321,18 @@ func (up *s3Upload) End() storage_base.UploadedBlob {
 		Checksum:  etag.ETag,
 		Size:      realSize,
 	}
+}
+
+func (up *s3Upload) Cancel() {
+	if up.completed {
+		log.Println("S3 upload already completed, deleting blob at path:", up.path)
+		up.s3.DeleteBlob(up.path)
+		return
+	}
+	log.Println("Cancelling S3 upload for path:", up.path)
+	up.writer.CloseWithError(errors.New("upload cancelled"))
+	up.calc.Writer.Close()
+	<-up.result // wait for the upload goroutine to finish (it will error out)
 }
 
 func fetchETagAndSize(remote *S3, path string) (string, int64) {

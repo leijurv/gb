@@ -149,6 +149,7 @@ func DryBackup(rawPaths []string) {
 	if err != nil {
 		panic(err)
 	}
+	defer tx.Rollback()
 	statuses := make([]FileStatus, 0)
 	for _, input := range inputs {
 		if input.info.IsDir() {

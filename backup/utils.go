@@ -56,6 +56,7 @@ type Stats struct {
 type UploadService interface {
 	Begin(blobID []byte) io.Writer
 	End(sha256 []byte, size int64) []storage_base.UploadedBlob
+	Cancel()
 }
 
 // a map to manage gb's size optimization
@@ -235,24 +236,22 @@ func (du *directUpload) Begin(blobID []byte) io.Writer {
 }
 
 func (du *directUpload) End(sha256 []byte, size int64) []storage_base.UploadedBlob {
-	completeds := make([]storage_base.UploadedBlob, len(du.uploads))
-	var wg sync.WaitGroup
-	for i := range completeds {
-		i := i
-		wg.Add(1)
-		go func() {
-			completeds[i] = du.uploads[i].End()
-			wg.Done() // don't use defer because we only want to call wg.Done if .End didn't panic
-		}()
-	}
-	wg.Wait()
-	for _, c := range completeds {
+	completeds := make([]storage_base.UploadedBlob, 0)
+	for _, upload := range du.uploads {
+		c := upload.End()
 		if c.Size != size {
 			log.Println(c.Size, size)
 			panic("sanity check")
 		}
+		completeds = append(completeds, c)
 	}
 	return completeds
+}
+
+func (du *directUpload) Cancel() {
+	for i := range du.uploads {
+		du.uploads[i].Cancel()
+	}
 }
 
 type multithreadedMultiWriter struct {

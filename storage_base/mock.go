@@ -136,10 +136,11 @@ func (m *MockStorage) CorruptByte(blobID []byte, offset int) {
 }
 
 type mockUpload struct {
-	storage *MockStorage
-	blobID  []byte
-	path    string
-	buf     *bytes.Buffer
+	storage   *MockStorage
+	blobID    []byte
+	path      string
+	buf       *bytes.Buffer
+	completed bool
 }
 
 func (u *mockUpload) Writer() io.Writer {
@@ -153,11 +154,18 @@ func (u *mockUpload) End() UploadedBlob {
 	hash := sha256.Sum256(data)
 	checksum := hex.EncodeToString(hash[:])
 	u.storage.storeBlob(u.path, dataCopy, checksum)
+	u.completed = true
 	return UploadedBlob{
 		StorageID: u.storage.ID,
 		BlobID:    u.blobID,
 		Path:      u.path,
 		Checksum:  checksum,
 		Size:      int64(len(data)),
+	}
+}
+
+func (u *mockUpload) Cancel() {
+	if u.completed {
+		u.storage.DeleteBlob(u.path)
 	}
 }

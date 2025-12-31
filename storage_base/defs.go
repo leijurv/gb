@@ -46,4 +46,7 @@ type StorageUpload interface {
 
 	// flush and close the upload, **verify integrity by comparing the checksum**, then return the data
 	End() UploadedBlob
+
+	// abort the upload without completing it (e.g., for incomplete multipart uploads)
+	Cancel()
 }

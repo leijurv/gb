@@ -44,7 +44,7 @@ func (r *hashVerifyingReader) Read(p []byte) (int, error) {
 			panic(fmt.Sprintf("hash verification failed: size mismatch (expected %d, got %d)", r.expectedSize, actualSize))
 		}
 		if !bytes.Equal(actualHash, r.expectedHash) {
-			panic("hash verification failed")
+			panic("hash verification failed in download/cat")
 		}
 	}
 	return n, err

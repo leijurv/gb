@@ -281,83 +281,91 @@ func execute(rest Restoration, stor storage_base.Storage) {
 	diskSource := rest.nominatedSource
 	for i := 0; i < len(paths); i += 500 {
 		chunk := paths[i:min(len(rest.destinations), i+500)]
-		handles := make([]*os.File, 0)
-		writers := make([]io.Writer, 0)
-		chunkDest := make([]Item, 0, len(chunk))
-		for _, path := range chunk {
-			dir := filepath.Dir(path)
-			item := rest.destinations[path]
-			mode := item.permissions
+		diskSource = executeChunk(chunk, rest, diskSource, stor)
+	}
+}
 
-			// https://stackoverflow.com/a/31151508/2277831
-			dirMode := mode               // start with perms of the file
-			dirMode |= (mode >> 2) & 0111 // for group and other, allow execute (dir read) if they can read
-			dirMode |= 0700               // we must have full access no matter what, otherwise this recursive mkdir won't work in the first place
-
-			log.Println("mkdir", dir, "with original", mode, "overridden to", dirMode)
-			err := os.MkdirAll(dir, dirMode)
-			if err != nil {
-				panic(err)
-			}
-
-			log.Println("open", path, "for write")
-			f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-			if err != nil {
-				panic(err)
-			}
-			handles = append(handles, f)
-			writers = append(writers, f)
-			chunkDest = append(chunkDest, item)
-		}
-
-		out := io.MultiWriter(writers...)
-
-		hs := utils.NewSHA256HasherSizer()
-		out = io.MultiWriter(out, &hs)
-
-		var src io.Reader
-		if diskSource == nil {
-			log.Println("Fetching from storage")
-			src = CatEz(rest.hash, stor)
-		} else {
-			log.Println("Reading locally, from", *diskSource)
-			f, err := os.Open(*diskSource)
-			if err != nil {
-				panic(err)
-			}
-			defer f.Close()
-			src = f
-		}
-		utils.Copy(out, src)
-		log.Println("Expecting size and hash:", rest.size, hex.EncodeToString(rest.hash))
-		hash, size := hs.HashAndSize()
-		log.Println("Got size and hash:", size, hex.EncodeToString(hash))
-		if size != rest.size || !bytes.Equal(hash, rest.hash) {
-			for _, f := range handles {
-				f.Close()
-			}
-			for _, item := range chunkDest {
-				err := os.Remove(item.destPath)
-				if err != nil && !os.IsNotExist(err) {
-					log.Println("Failed to delete corrupted file:", item.destPath, err)
-				}
-			}
-			panic("hash verification failed, deleted corrupted outputs")
-		}
-		log.Println("Success")
-		diskSource = &chunk[0]
-
+func executeChunk(chunk []string, rest Restoration, diskSource *string, stor storage_base.Storage) *string {
+	handles := make([]*os.File, 0)
+	chunkDest := make([]Item, 0, len(chunk))
+	success := false
+	defer func() {
 		for _, f := range handles {
 			f.Close()
 		}
-		for _, item := range chunkDest {
-			modTime := time.Unix(item.fsModified, 0)
-			err := os.Chtimes(item.destPath, modTime, modTime)
-			if err != nil {
-				panic(err)
+		if !success {
+			for _, item := range chunkDest {
+				err := os.Remove(item.destPath)
+				if err != nil && !os.IsNotExist(err) {
+					log.Println("Failed to delete file after error:", item.destPath, err)
+				}
 			}
 		}
+	}()
+
+	writers := make([]io.Writer, 0)
+	for _, path := range chunk {
+		dir := filepath.Dir(path)
+		item := rest.destinations[path]
+		mode := item.permissions
+
+		// https://stackoverflow.com/a/31151508/2277831
+		dirMode := mode               // start with perms of the file
+		dirMode |= (mode >> 2) & 0111 // for group and other, allow execute (dir read) if they can read
+		dirMode |= 0700               // we must have full access no matter what, otherwise this recursive mkdir won't work in the first place
+
+		log.Println("mkdir", dir, "with original", mode, "overridden to", dirMode)
+		err := os.MkdirAll(dir, dirMode)
+		if err != nil {
+			panic(err)
+		}
+
+		log.Println("open", path, "for write")
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		if err != nil {
+			panic(err)
+		}
+		handles = append(handles, f)
+		writers = append(writers, f)
+		chunkDest = append(chunkDest, item)
 	}
+
+	out := io.MultiWriter(writers...)
+
+	hs := utils.NewSHA256HasherSizer()
+	out = io.MultiWriter(out, &hs)
+
+	var src io.Reader
+	if diskSource == nil {
+		log.Println("Fetching from storage")
+		src = CatEz(rest.hash, stor)
+	} else {
+		log.Println("Reading locally, from", *diskSource)
+		f, err := os.Open(*diskSource)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close()
+		src = f
+	}
+	utils.Copy(out, src)
+	log.Println("Expecting size and hash:", rest.size, hex.EncodeToString(rest.hash))
+	hash, size := hs.HashAndSize()
+	log.Println("Got size and hash:", size, hex.EncodeToString(hash))
+	if size != rest.size || !bytes.Equal(hash, rest.hash) {
+		panic("hash verification failed in restore")
+	}
+	log.Println("Success")
+	success = true
+
+	for _, item := range chunkDest {
+		modTime := time.Unix(item.fsModified, 0)
+		err := os.Chtimes(item.destPath, modTime, modTime)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return &chunk[0]
 }
 
 func statSources(plan map[[32]byte]*Restoration) {

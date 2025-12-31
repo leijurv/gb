@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"io"
 	"os"
 	"path/filepath"
@@ -161,13 +162,12 @@ func TestRestoreUsesLocalSource(t *testing.T) {
 	defer env.cleanup()
 
 	content := makeBinaryData(2000)
-	expectedHash := sha256.Sum256(content)
 	env.writeFile("testfile.bin", content)
 
 	env.backup()
 	env.restore()
 
-	env.verifyRestored("testfile.bin", expectedHash)
+	env.verifyRestored("testfile.bin", sha256.Sum256(content))
 }
 
 func TestMultipleBackupsAndRestore(t *testing.T) {
@@ -180,7 +180,6 @@ func TestMultipleBackupsAndRestore(t *testing.T) {
 	env.backup()
 
 	content2 := []byte("modified content that is different")
-	expectedHash := sha256.Sum256(content2)
 	env.writeFile("changing.txt", content2)
 
 	env.backup()
@@ -189,7 +188,7 @@ func TestMultipleBackupsAndRestore(t *testing.T) {
 
 	env.restore()
 
-	env.verifyRestored("changing.txt", expectedHash)
+	env.verifyRestored("changing.txt", sha256.Sum256(content2))
 }
 
 func makeBinaryData(size int) []byte {
@@ -264,6 +263,13 @@ func (e *testEnv) removeFile(relPath string) {
 	}
 }
 
+func (e *testEnv) removeRestored(relPath string) {
+	path := filepath.Join(e.restoreDir, relPath)
+	if err := os.Remove(path); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func (e *testEnv) backup() {
 	backup.ResetForTesting()
 	backup.BackupNonInteractive([]string{e.srcDir})
@@ -289,6 +295,101 @@ func (e *testEnv) verifyRestored(relPath string, expectedHash [32]byte) {
 	if actualHash != expectedHash {
 		e.t.Errorf("hash mismatch for %s: expected %x, got %x", relPath, expectedHash, actualHash)
 	}
+}
+
+func TestBackupIntegrity(t *testing.T) {
+	env := setupTestEnv(t, "integrity")
+	defer env.cleanup()
+
+	// Create a file and back it up
+	content := makeBinaryData(2000)
+	hash := sha256.Sum256(content)
+	env.writeFile("testfile.zip", content)
+	env.backup()
+
+	// If you corrupt a byte of zstd compressed data, obviously zstd will notice
+	// So we need this to be uncompressed, to ensure that we are actually testing OUR integrity checks
+	var compression string
+	err := db.DB.QueryRow("SELECT compression_alg FROM blob_entries WHERE compression_alg != ''").Scan(&compression)
+	if err != sql.ErrNoRows {
+		t.Fatal(compression)
+	}
+
+	// Query the database to find the blob ID
+	var blobID []byte
+	err = db.DB.QueryRow("SELECT blob_id FROM blob_entries LIMIT 1").Scan(&blobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Corrupt a byte at offset 0 in the blob
+	env.mockStor.CorruptByte(blobID, 0)
+
+	// Remove the original file so restore must fetch from storage
+	env.removeFile("testfile.zip")
+
+	// Attempt restore - should panic due to integrity failure
+	panicked := false
+	var panicMsg any
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+				panicMsg = r
+			}
+		}()
+		env.restore()
+	}()
+
+	if !panicked {
+		t.Error("expected restore to panic due to corrupted blob")
+	}
+	if panicMsg != "hash verification failed in download/cat" {
+		t.Error("the failed hash should have been caught by cat, rather than in restore", panicMsg)
+	}
+
+	if entries, err := os.ReadDir(env.restoreDir); err != nil || len(entries) != 0 {
+		t.Errorf("expected empty restore directory, got %d entries", len(entries))
+	}
+
+	env.writeFile("testfile.zip", content)
+
+	// this restore will be successful because it will use the local source
+	env.restore() // flaky warning: this only passes because the mtime of testfile.zip in units of seconds is unchanged, but that's only true because the above code takes way less than 1 second to run... :(
+	env.verifyRestored("testfile.zip", hash)
+
+	env.removeRestored("testfile.zip")
+	content[0] ^= 0xff
+	env.writeFile("testfile.zip", content)
+	// now the restore will ATTEMPT to use the testfile.zip from the src dir, but the hash will not match
+	panicked = false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicked = true
+				panicMsg = r
+			}
+		}()
+		env.restore()
+	}()
+
+	if !panicked {
+		t.Error("expected restore to panic due to corrupted local source (size and mtime matches, but hash is unexpected)")
+	}
+	if panicMsg != "hash verification failed in restore" {
+		t.Error("unexpected:", panicMsg)
+	}
+
+	if entries, err := os.ReadDir(env.restoreDir); err != nil || len(entries) != 0 {
+		t.Errorf("expected empty restore directory, got %d entries", len(entries))
+	}
+
+	env.removeFile("testfile.zip")
+
+	// un-corrupt (re-invert the byte back to how it originally was)
+	env.mockStor.CorruptByte(blobID, 0)
+	env.restore() // back to working properly
+	env.verifyRestored("testfile.zip", hash)
 }
 
 func TestRestoreDB(t *testing.T) {

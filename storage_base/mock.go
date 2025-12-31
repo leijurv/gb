@@ -114,6 +114,27 @@ func blobIDToPath(blobID []byte) string {
 	return h[:2] + "/" + h[2:4] + "/" + h
 }
 
+// CorruptByte flips all bits at the given offset in the specified blob. Used for testing integrity verification.
+func (m *MockStorage) CorruptByte(blobID []byte, offset int) {
+	m.blobLock.Lock()
+	defer m.blobLock.Unlock()
+
+	path := blobIDToPath(blobID)
+	blob, ok := m.blobs[path]
+	if !ok {
+		panic("blob not found: " + path)
+	}
+	if offset < 0 || offset >= len(blob.data) {
+		panic("offset out of range")
+	}
+
+	corrupted := make([]byte, len(blob.data))
+	copy(corrupted, blob.data)
+	corrupted[offset] ^= 0xFF
+
+	m.blobs[path] = mockBlobData{data: corrupted, checksum: blob.checksum}
+}
+
 type mockUpload struct {
 	storage *MockStorage
 	blobID  []byte

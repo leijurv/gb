@@ -162,6 +162,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 			for _, file := range files {
 				fileHasKnownData(tx, file.path, file.info, entry.hash)
 			}
+			delete(hashLateMap, utils.SliceToArr(entry.hash))
 		} else {
 			// a dummy stupid file changed from underneath us, now we need to clean up that mess :(
 			// it is possible that other files were relying on this thread to complete the upload for this hash

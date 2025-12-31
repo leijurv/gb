@@ -455,12 +455,7 @@ func locateSourcesOnDisk(plan map[[32]byte]*Restoration) {
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		err = tx.Commit() // this is ok since read-only
-		if err != nil {
-			panic(err)
-		}
-	}()
+	defer tx.Rollback()
 	// use a prepared statement since we're going to do it MANY MANY MANY times in a row
 	stmt, err := tx.Prepare("SELECT path, fs_modified FROM files WHERE end IS NULL AND hash = ?")
 	if err != nil {

@@ -119,12 +119,7 @@ func CatEz(hash []byte, stor storage_base.Storage) io.Reader {
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		err = tx.Commit() // this is ok since read-only
-		if err != nil {
-			panic(err)
-		}
-	}()
+	defer tx.Rollback()
 
 	return Cat(hash, tx, stor)
 }

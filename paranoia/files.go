@@ -25,12 +25,7 @@ func TestAllFiles(label string) {
 			if err != nil {
 				panic(err)
 			}
-			defer func() {
-				err = tx.Commit() // this is ok since read-only
-				if err != nil {
-					panic(err)
-				}
-			}()
+			defer tx.Rollback()
 			didISucceed := true
 			for hash := range hashes {
 				log.Println("Testing fetching hash", hex.EncodeToString(hash), "which is the contents of") //, path)

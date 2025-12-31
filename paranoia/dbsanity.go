@@ -267,7 +267,7 @@ func DBParanoiaOn(q Querier) {
 		var result []byte
 		err := q.QueryRow(query).Scan(&result)
 		if err != db.ErrNoRows {
-			panic("Failed database sanity on query `"+prettyQuery+"` " +  hex.EncodeToString(result))
+			panic("Failed database sanity on query `" + prettyQuery + "` " + hex.EncodeToString(result))
 		}
 		log.Println(prettyQuery, "took", time.Since(start))
 	}

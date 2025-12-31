@@ -60,23 +60,21 @@ func hashOneFile(plan HashPlan) {
 	}
 
 	bucketWithKnownHash := func() *Planned {
-		hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
+		hashLateMapLock.Lock() // this lock ensures atomicity between the hashLateMap, and the database (blob_entries and files)
 		defer hashLateMapLock.Unlock()
 		tx, err := db.DB.Begin()
 		if err != nil {
 			panic(err)
 		}
-		defer func() {
-			err = tx.Commit() // this is ok since shouldn't ever panic
-			if err != nil {
-				panic(err)
-			}
-		}()
+		defer tx.Rollback() // fileHasKnownData can panic
 		var dbHash []byte
 		err = tx.QueryRow("SELECT hash FROM blob_entries WHERE hash = ?", hash).Scan(&dbHash)
 		if err == nil {
 			// yeah so we already have this hash backed up, so the train stops here. we just need to add this to files table, and we're done!
 			fileHasKnownData(tx, path, info, hash)
+			if err := tx.Commit(); err != nil {
+				panic(err)
+			}
 			return nil // done, no need to upload
 		}
 		if err != db.ErrNoRows {

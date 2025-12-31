@@ -164,12 +164,7 @@ func (f *File) Open(ctx context.Context, req *fuse.OpenRequest, resp *fuse.OpenR
 	if err != nil {
 		panic(err)
 	}
-	defer func() {
-		err := tx.Commit()
-		if err != nil {
-			panic(err)
-		}
-	}()
+	defer tx.Rollback()
 
 	if f.compAlgo != "" {
 		reader := download.CatReadCloser(*f.hash, tx, f.storage)

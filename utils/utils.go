@@ -94,22 +94,12 @@ func walkFiles0(startPath string, filesCh chan pathAndInfo, gitIgnored map[strin
 		if config.Config().UseGitignore && info.IsDir() && (path != startPath || gitIgnored == nil) {
 			_, err = os.Stat(filepath.Join(path, ".git"))
 			if err == nil {
-				ignoredPaths, err := gitIgnoredFiles(path)
-				if err != nil {
-					if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
-						log.Println("Found a directory with .git but git status returned 128 (fatal error):", path)
-						// continue normal execution, this probably just isn't a real git repo somehow
-					} else {
-						// abnormal error
-						panic(err)
-					}
-				} else {
-					// start a new walk with a list of ignored paths
-					if err := walkFiles0(path, filesCh, ignoredPaths); err != nil {
-						return err
-					}
-					return filepath.SkipDir
+				ignoredPaths := gitIgnoredFiles(path)
+				// start a new walk with a list of ignored paths
+				if err := walkFiles0(path, filesCh, ignoredPaths); err != nil {
+					return err
 				}
+				return filepath.SkipDir
 			}
 		}
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
@@ -350,12 +340,19 @@ func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 	return ret
 }
 
-func gitIgnoredFiles(dir string) (map[string]struct{}, error) {
+func gitIgnoredFiles(dir string) map[string]struct{} {
 	cmd := exec.Command("git", "status", "--ignored", "--porcelain")
 	cmd.Dir = dir
 	bytes, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+			log.Println("Found a directory with .git but git status returned 128 (fatal error):", dir)
+			// continue normal execution, this probably just isn't a real git repo somehow
+			return make(map[string]struct{}) // can't return nil or we will cause an infinite loop
+		} else {
+			// abnormal error
+			panic(err)
+		}
 	}
 	output := string(bytes)
 	split := strings.Split(output, "\n")
@@ -368,5 +365,5 @@ func gitIgnoredFiles(dir string) (map[string]struct{}, error) {
 			ret[path] = struct{}{}
 		}
 	}
-	return ret, nil
+	return ret
 }

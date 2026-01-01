@@ -42,13 +42,23 @@ func HaveReadPermission(path string) bool {
 	return err != syscall.EACCES
 }
 
-type pathAndInfo struct {
-	path string
-	info os.FileInfo
-}
-
-func walkFiles0(startPath string, filesCh chan pathAndInfo, gitIgnored map[string]struct{}) error {
-	callback := func(path string, info os.FileInfo, err error) error {
+// walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
+func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
+	type PathAndInfo struct {
+		path string
+		info os.FileInfo
+	}
+	filesCh := make(chan PathAndInfo, 32)
+	done := make(chan struct{})
+	go func() {
+		for file := range filesCh {
+			fn(file.path, file.info)
+		}
+		log.Println("Scan processor signaling done")
+		done <- struct{}{}
+	}()
+	gitIgnored := make(map[string]struct{})
+	err := filepath.Walk(startPath, func(path string, info os.FileInfo, err error) error {
 		if !utf8.ValidString(path) {
 			panic("invalid utf8 on your filesystem at " + path)
 		}
@@ -83,23 +93,16 @@ func walkFiles0(startPath string, filesCh chan pathAndInfo, gitIgnored map[strin
 			log.Println(path)
 			return err
 		}
-		if _, ok := gitIgnored[path]; ok {
-			log.Println("EXCLUDING this path because it is ignored by git:", path)
+		if config.Config().UseGitignore {
 			if info.IsDir() {
-				return filepath.SkipDir
+				findGitIgnoredFiles(path, gitIgnored)
 			}
-			return nil
-		}
-		// path != startPath to prevent infinite recursion, gitignore == nil to allow starting from a git repo
-		if config.Config().UseGitignore && info.IsDir() && (path != startPath || gitIgnored == nil) {
-			_, err = os.Stat(filepath.Join(path, ".git"))
-			if err == nil {
-				ignoredPaths := gitIgnoredFiles(path)
-				// start a new walk with a list of ignored paths
-				if err := walkFiles0(path, filesCh, ignoredPaths); err != nil {
-					return err
+			if _, ok := gitIgnored[path]; ok {
+				log.Println("EXCLUDING this path because it is ignored by git:", path)
+				if info.IsDir() {
+					return filepath.SkipDir
 				}
-				return filepath.SkipDir
+				return nil
 			}
 		}
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
@@ -108,25 +111,9 @@ func walkFiles0(startPath string, filesCh chan pathAndInfo, gitIgnored map[strin
 		if ignoreErrors && !HaveReadPermission(path) {
 			return nil // skip this file
 		}
-		filesCh <- pathAndInfo{path, info}
+		filesCh <- PathAndInfo{path, info}
 		return nil
-	}
-	return filepath.Walk(startPath, callback)
-}
-
-// walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
-func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
-	filesCh := make(chan pathAndInfo, 32)
-	done := make(chan struct{})
-	go func() {
-		for file := range filesCh {
-			fn(file.path, file.info)
-		}
-		log.Println("Scan processor signaling done")
-		done <- struct{}{}
-	}()
-
-	err := walkFiles0(startPath, filesCh, nil)
+	})
 	if err != nil {
 		// permission error while traversing
 		// we should *not* continue, because that would mark all further files as "deleted"
@@ -340,7 +327,10 @@ func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 	return ret
 }
 
-func gitIgnoredFiles(dir string) map[string]struct{} {
+func findGitIgnoredFiles(dir string, gitIgnored map[string]struct{}) {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return // not a git repo at all
+	}
 	cmd := exec.Command("git", "status", "--ignored", "--porcelain")
 	cmd.Dir = dir
 	cmd.Stderr = os.Stderr
@@ -349,22 +339,18 @@ func gitIgnoredFiles(dir string) map[string]struct{} {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
 			log.Println("Found a directory with .git but git status returned 128 (fatal error):", dir)
 			// continue normal execution, this probably just isn't a real git repo somehow
-			return make(map[string]struct{}) // can't return nil or we will cause an infinite loop
+			return
 		} else {
-			// abnormal error
 			panic(err)
 		}
 	}
-	output := string(bytes)
-	split := strings.Split(output, "\n")
-	ret := make(map[string]struct{})
+	split := strings.Split(string(bytes), "\n")
 	for _, line := range split {
 		path, isIgnored := strings.CutPrefix(line, "!! ")
 		if isIgnored {
 			path, _ = strings.CutSuffix(path, "/")
 			path = filepath.Join(dir, path)
-			ret[path] = struct{}{}
+			gitIgnored[path] = struct{}{}
 		}
 	}
-	return ret
 }

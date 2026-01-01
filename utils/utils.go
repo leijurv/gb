@@ -343,6 +343,7 @@ func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 func gitIgnoredFiles(dir string) map[string]struct{} {
 	cmd := exec.Command("git", "status", "--ignored", "--porcelain")
 	cmd.Dir = dir
+	cmd.Stderr = os.Stderr
 	bytes, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {

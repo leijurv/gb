@@ -91,7 +91,7 @@ func walkFiles0(startPath string, filesCh chan pathAndInfo, gitIgnored map[strin
 			return nil
 		}
 		// path != startPath to prevent infinite recursion, gitignore == nil to allow starting from a git repo
-		if info.IsDir() && (path != startPath || gitIgnored == nil) {
+		if config.Config().UseGitignore && info.IsDir() && (path != startPath || gitIgnored == nil) {
 			_, err = os.Stat(filepath.Join(path, ".git"))
 			if err == nil {
 				ignoredPaths, err := gitIgnoredFiles(path)

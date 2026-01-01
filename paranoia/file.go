@@ -176,7 +176,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 			// Calculate the byte range we need: from aligned offset to offset+length
 			// We need (length + remainingSeek) bytes starting at (offset - remainingSeek) = offset/16*16
 			alignedOffset := offset / 16 * 16
-			cmd += "curl -s -H 'Range: " + utils.FormatHTTPRange(alignedOffset, length+remainingSeek) + "' '" + presignedURL + "' | "
+			cmd += "curl -H 'Range: " + utils.FormatHTTPRange(alignedOffset, length+remainingSeek) + "' '" + presignedURL + "' | "
 		} else {
 			log.Println("For example, to verify this, download the file into", hex.EncodeToString(blobID), "and run")
 			// the idea behind all this trickery to follow is that:

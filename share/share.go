@@ -14,9 +14,12 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func CreateShareURL(pathOrHash string, overrideName string) {
-	var sharedName string
-	hash, err := hex.DecodeString(pathOrHash)
+// ResolvePathOrHash takes a path or hex hash string and returns the hash and a name for sharing.
+// If pathOrHash is a valid file path, it verifies the file is backed up and uses the filename.
+// If pathOrHash is a hex hash, overrideName must be provided.
+func ResolvePathOrHash(pathOrHash string, overrideName string) (hash []byte, sharedName string) {
+	var err error
+	hash, err = hex.DecodeString(pathOrHash)
 	if err != nil || len(hash) != 32 {
 		log.Println("Interpreting `" + pathOrHash + "` as a path on your filesystem since it doesn't appear to be a hex SHA-256 hash")
 		path, err := filepath.Abs(pathOrHash)
@@ -58,6 +61,11 @@ func CreateShareURL(pathOrHash string, overrideName string) {
 		}
 		sharedName = overrideName
 	}
+	return hash, sharedName
+}
+
+func CreateShareURL(pathOrHash string, overrideName string) {
+	hash, sharedName := ResolvePathOrHash(pathOrHash, overrideName)
 	shareBase := config.Config().ShareBaseURL
 	if shareBase == "" {
 		log.Println("You don't appear to have `share_base_url` set in your .gb.conf")

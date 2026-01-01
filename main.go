@@ -492,8 +492,8 @@ func main() {
 			},
 		},
 		{
-			Name:  "share",
-			Usage: "create a shareable url for a file or hash",
+			Name:  "share-url",
+			Usage: "create a shareable url for a file or hash, assuming you are running the `gb shared` server somewhere publicly accessible on the internet",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "name",
@@ -503,6 +503,31 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				share.CreateShareURL(c.Args().First(), c.String("name"))
+				return nil
+			},
+		},
+		{
+			Name:  "share",
+			Usage: "create a self-contained shareable URL that works without needing to run a server",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "name",
+					Usage: "override the filename",
+					Value: "",
+				},
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label to use",
+					Value: "",
+				},
+				cli.DurationFlag{
+					Name:  "expiry",
+					Usage: "how long the presigned URL should be valid",
+					Value: 7 * 24 * time.Hour,
+				},
+			},
+			Action: func(c *cli.Context) error {
+				share.WebShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				return nil
 			},
 		},

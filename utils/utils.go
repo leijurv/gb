@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -56,6 +57,7 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 		log.Println("Scan processor signaling done")
 		done <- struct{}{}
 	}()
+	gitIgnored := make(map[string]struct{})
 	err := filepath.Walk(startPath, func(path string, info os.FileInfo, err error) error {
 		if !utf8.ValidString(path) {
 			panic("invalid utf8 on your filesystem at " + path)
@@ -90,6 +92,18 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 			log.Println("while looking at this path:")
 			log.Println(path)
 			return err
+		}
+		if config.Config().UseGitignore {
+			if info.IsDir() {
+				findGitIgnoredFiles(path, gitIgnored)
+			}
+			if _, ok := gitIgnored[path]; ok {
+				log.Println("EXCLUDING this path because it is ignored by git:", path)
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
 		}
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
 			return nil
@@ -310,4 +324,32 @@ func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 		}
 	}
 	return ret
+}
+
+func findGitIgnoredFiles(dir string, gitIgnored map[string]struct{}) {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return // not a git repo at all
+	}
+	cmd := exec.Command("git", "status", "--ignored", "--porcelain")
+	cmd.Dir = dir
+	cmd.Stderr = os.Stderr
+	bytes, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+			log.Println("Found a directory with .git but git status returned 128 (fatal error):", dir)
+			// continue normal execution, this probably just isn't a real git repo somehow
+			return
+		} else {
+			panic(err)
+		}
+	}
+	split := strings.Split(string(bytes), "\n")
+	for _, line := range split {
+		path, isIgnored := strings.CutPrefix(line, "!! ")
+		if isIgnored {
+			path, _ = strings.CutSuffix(path, "/")
+			path = filepath.Join(dir, path)
+			gitIgnored[path] = struct{}{}
+		}
+	}
 }

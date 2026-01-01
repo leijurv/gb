@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -41,22 +42,13 @@ func HaveReadPermission(path string) bool {
 	return err != syscall.EACCES
 }
 
-// walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
-func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
-	type PathAndInfo struct {
-		path string
-		info os.FileInfo
-	}
-	filesCh := make(chan PathAndInfo, 32)
-	done := make(chan struct{})
-	go func() {
-		for file := range filesCh {
-			fn(file.path, file.info)
-		}
-		log.Println("Scan processor signaling done")
-		done <- struct{}{}
-	}()
-	err := filepath.Walk(startPath, func(path string, info os.FileInfo, err error) error {
+type pathAndInfo struct {
+	path string
+	info os.FileInfo
+}
+
+func walkFiles0(startPath string, filesCh chan pathAndInfo, gitIgnored map[string]struct{}) error {
+	callback := func(path string, info os.FileInfo, err error) error {
 		if !utf8.ValidString(path) {
 			panic("invalid utf8 on your filesystem at " + path)
 		}
@@ -91,15 +83,60 @@ func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
 			log.Println(path)
 			return err
 		}
+		if _, ok := gitIgnored[path]; ok {
+			log.Println("EXCLUDING this path because it is ignored by git:", path)
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// path != startPath to prevent infinite recursion, gitignore == nil to allow starting from a git repo
+		if info.IsDir() && (path != startPath || gitIgnored == nil) {
+			_, err = os.Stat(filepath.Join(path, ".git"))
+			if err == nil {
+				ignoredPaths, err := gitIgnoredFiles(path)
+				if err != nil {
+					if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 128 {
+						log.Println("Found a directory with .git but git status returned 128 (fatal error):", path)
+						// continue normal execution, this probably just isn't a real git repo somehow
+					} else {
+						// abnormal error
+						panic(err)
+					}
+				} else {
+					// start a new walk with a list of ignored paths
+					if err := walkFiles0(path, filesCh, ignoredPaths); err != nil {
+						return err
+					}
+					return filepath.SkipDir
+				}
+			}
+		}
 		if !NormalFile(info) { // **THIS IS WHAT SKIPS DIRECTORIES**
 			return nil
 		}
 		if ignoreErrors && !HaveReadPermission(path) {
 			return nil // skip this file
 		}
-		filesCh <- PathAndInfo{path, info}
+		filesCh <- pathAndInfo{path, info}
 		return nil
-	})
+	}
+	return filepath.Walk(startPath, callback)
+}
+
+// walk a directory recursively, but only call the provided function for normal files that don't error on os.Stat
+func WalkFiles(startPath string, fn func(path string, info os.FileInfo)) {
+	filesCh := make(chan pathAndInfo, 32)
+	done := make(chan struct{})
+	go func() {
+		for file := range filesCh {
+			fn(file.path, file.info)
+		}
+		log.Println("Scan processor signaling done")
+		done <- struct{}{}
+	}()
+
+	err := walkFiles0(startPath, filesCh, nil)
 	if err != nil {
 		// permission error while traversing
 		// we should *not* continue, because that would mark all further files as "deleted"
@@ -311,4 +348,25 @@ func ListDirectoryAtTime(dir string, timestamp int64) []GBdirent {
 		}
 	}
 	return ret
+}
+
+func gitIgnoredFiles(dir string) (map[string]struct{}, error) {
+	cmd := exec.Command("git", "status", "--ignored", "--porcelain")
+	cmd.Dir = dir
+	bytes, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	output := string(bytes)
+	split := strings.Split(output, "\n")
+	ret := make(map[string]struct{})
+	for _, line := range split {
+		path, isIgnored := strings.CutPrefix(line, "!! ")
+		if isIgnored {
+			path, _ = strings.CutSuffix(path, "/")
+			path = filepath.Join(dir, path)
+			ret[path] = struct{}{}
+		}
+	}
+	return ret, nil
 }

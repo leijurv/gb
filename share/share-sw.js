@@ -7,6 +7,9 @@ self.addEventListener('message', (event) => {
     if (event.data.type === 'download') {
         const params = event.data.params;
         downloadParamsMap.set(params.sha256, params);
+    } else if (event.data.type === 'ping') {
+        // Respond to ping to confirm service worker is fully loaded
+        event.source.postMessage({ type: 'pong' });
     }
 });
 

@@ -173,28 +173,21 @@
             </details>
         </div>
         <button id="download">Download</button>
-        <div id="media-container"></div>
         <div id="status"></div>
         <div class="progress-container" id="progress-container">
             <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
             <div class="progress-text" id="progress-text">0%</div>
         </div>
+        <div id="media-container"></div>
     </div>
 
     <script>
     const $ = id => document.getElementById(id);
 
     function parseHash() {
-        const hash = window.location.hash.slice(1);
-        const params = {};
-        for (const part of hash.split('&')) {
-            const [key, ...rest] = part.split('=');
-            if (key) {
-                // Replace + with space before decoding (form encoding quirk)
-                params[key] = decodeURIComponent(rest.join('=').replace(/\+/g, ' '));
-            }
-        }
-        return params;
+        // Go's url.Values.Encode() converts spaces to "+", and URLSearchParams
+        // handles this correctly (application/x-www-form-urlencoded decoding)
+        return Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
     }
 
     const params = parseHash();
@@ -244,6 +237,7 @@
         return null;
     }
     const expiresAt = parseS3Expiry(s3Url);
+    const isExpired = expiresAt && expiresAt < Date.now();
 
     $('filename').textContent = filename;
     $('meta').textContent = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression === 'zstd' ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
@@ -331,6 +325,8 @@
             $('expiry-countdown').textContent = formatCountdown(remaining);
             if (remaining <= 0) {
                 $('expiry-countdown').style.fontWeight = 'bold';
+                $('download').disabled = true;
+                showStatus('This share link has expired. Ask the sender for a new link.', 'error');
             }
         }, 1000);
     }
@@ -367,8 +363,10 @@
     }
 
     const ext = filename.split('.').pop().toLowerCase();
-    const isVideo = (ext === 'mp4' || ext === 'webm' || ext === 'mov' || ext === 'mkv' || ext === 'avi');
-    const isAudio = (ext === 'mp3' || ext === 'wav' || ext === 'flac' || ext === 'ogg' || ext === 'm4a' || ext === 'aac');
+    const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
+    const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
+    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+    const isPdf = ext === 'pdf';
 
     const mediaUrl = downloadUrl + '&media=true';
 
@@ -386,6 +384,24 @@
             audio.preload = 'metadata';
             audio.src = mediaUrl;
             $('media-container').appendChild(audio);
+            $('media-container').style.display = 'block';
+        } else if (isImage) {
+            const img = document.createElement('img');
+            img.src = mediaUrl;
+            img.alt = filename;
+            img.style.maxWidth = '80vw';
+            img.style.maxHeight = 'calc(100vh - 300px)';
+            img.style.borderRadius = '6px';
+            $('media-container').appendChild(img);
+            $('media-container').style.display = 'block';
+        } else if (isPdf) {
+            const iframe = document.createElement('iframe');
+            iframe.src = mediaUrl;
+            iframe.style.width = '80vw';
+            iframe.style.height = 'calc(100vh - 300px)';
+            iframe.style.border = 'none';
+            iframe.style.borderRadius = '6px';
+            $('media-container').appendChild(iframe);
             $('media-container').style.display = 'block';
         }
     }
@@ -501,19 +517,24 @@
     if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
         showStatus('Error: HTTPS required for Service Workers', 'error');
         $('download').disabled = true;
+    } else if (isExpired) {
+        showStatus('This share link has expired. Ask the sender for a new link.', 'error');
+        $('download').disabled = true;
     }
 
     // Initialize service worker on page load so media can stream immediately
-    (async () => {
-        try {
-            await registerServiceWorker();
-            await waitForServiceWorkerReady();
-            sendParamsToServiceWorker();
-            showMediaPlayer();
-        } catch (e) {
-            console.error('Failed to initialize service worker:', e);
-        }
-    })();
+    if (!isExpired) {
+        (async () => {
+            try {
+                await registerServiceWorker();
+                await waitForServiceWorkerReady();
+                sendParamsToServiceWorker();
+                showMediaPlayer();
+            } catch (e) {
+                console.error('Failed to initialize service worker:', e);
+            }
+        })();
+    }
     </script>
 </body>
 </html>

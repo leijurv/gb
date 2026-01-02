@@ -1,14 +1,37 @@
-importScripts('https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.min.js');
-importScripts('https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js');
+// Load dependencies with SRI verification
+// (importScripts doesn't support integrity, so we fetch + verify + eval via blob URL)
+const dependencies = [
+    {
+        url: 'https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.min.js',
+        integrity: 'sha384-MhnRpMMxECUIiwGKUUKgm602Ohalv+N2TWG/AYjw9V90GIGHkeXCu/hLzLqBEkb4'
+    },
+    {
+        url: 'https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js',
+        integrity: 'sha384-QjbMdgv/hWELlDRbhj6tXsKlzXhrlrSIGNqgdQVvxYQpo+vA+4jOWramMq56bPSg'
+    }
+];
+
+async function loadDependencies() {
+    for (const dep of dependencies) {
+        const response = await fetch(dep.url, { integrity: dep.integrity });
+        if (!response.ok) throw new Error(`Failed to fetch ${dep.url}: ${response.status}`);
+        const code = await response.text();
+        // Safe to eval since integrity was verified by fetch
+        eval(code);
+    }
+}
+
+const depsLoaded = loadDependencies();
 
 const downloadParamsMap = new Map();
 
-self.addEventListener('message', (event) => {
+self.addEventListener('message', async (event) => {
     if (event.data.type === 'download') {
         const params = event.data.params;
         downloadParamsMap.set(params.sha256, params);
     } else if (event.data.type === 'ping') {
-        // Respond to ping to confirm service worker is fully loaded
+        // Wait for dependencies before confirming ready
+        await depsLoaded;
         event.source.postMessage({ type: 'pong' });
     }
 });
@@ -96,6 +119,8 @@ function createDecryptTransform(keyBytes, startOffset) {
 
             if (toProcess > 0) {
                 const toDecrypt = combined.slice(0, toProcess);
+                // CTR mode is symmetric: encrypt(ciphertext) = decrypt(ciphertext)
+                // Web Crypto only exposes encrypt() for AES-CTR, which works for decryption too
                 const decrypted = await crypto.subtle.encrypt(
                     { name: 'AES-CTR', counter: counter, length: 64 },
                     cryptoKey,
@@ -122,6 +147,7 @@ function createDecryptTransform(keyBytes, startOffset) {
             if (pendingBytes.length > 0) {
                 const padded = new Uint8Array(16);
                 padded.set(pendingBytes, 0);
+                // CTR mode is symmetric (see comment above)
                 const decrypted = await crypto.subtle.encrypt(
                     { name: 'AES-CTR', counter: counter, length: 64 },
                     cryptoKey,
@@ -254,6 +280,7 @@ self.addEventListener('fetch', (event) => {
         const range = parseRangeHeader(rangeHeader, p.size);
         if (range) {
             event.respondWith((async () => {
+                await depsLoaded;
                 const keyBytes = hexToBytes(p.key);
 
                 // Calculate the byte range in the encrypted blob
@@ -294,6 +321,7 @@ self.addEventListener('fetch', (event) => {
 
     // Full file request (or compressed file)
     event.respondWith((async () => {
+        await depsLoaded;
         const keyBytes = hexToBytes(p.key);
         const offset = p.offset;
         const length = p.length;
@@ -330,7 +358,9 @@ self.addEventListener('fetch', (event) => {
 
         // Only set Content-Disposition for downloads, not media playback
         if (!isMediaPlayback) {
-            headers.set('Content-Disposition', 'attachment; filename="' + p.filename.replace(/"/g, '\\"') + '"');
+            // RFC 5987 encoding for non-ASCII filenames
+            const encodedFilename = encodeURIComponent(p.filename).replace(/'/g, '%27');
+            headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
         }
 
         if (canSeek) {

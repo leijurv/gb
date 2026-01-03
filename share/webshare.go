@@ -1,25 +1,70 @@
 package share
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
+	"strings"
 	"time"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage"
+	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
 )
 
 const DefaultWebShareBaseURL = "https://leijurv.github.io/gb/share/share.html"
 
+// CFShareMetadata is the JSON structure uploaded to storage for CF Worker shares
+type CFShareMetadata struct {
+	Name   string `json:"name"`
+	Key    string `json:"key"`
+	Offset int64  `json:"offset"`
+	Length int64  `json:"length"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+	Cmp    string `json:"cmp"`
+	Path   string `json:"path"`
+}
+
+// generatePassword creates a random alphanumeric password of the given length
+func generatePassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]uint8, length)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
+}
+
 func WebShare(pathOrHash string, overrideName string, label string, expiry time.Duration) {
+	webShareInternal(pathOrHash, overrideName, label, expiry, false)
+}
+
+func CFWorkerShare(pathOrHash string, overrideName string, label string) {
+	webShareInternal(pathOrHash, overrideName, label, 0, true)
+}
+
+func webShareInternal(pathOrHash string, overrideName string, label string, expiry time.Duration, cfShare bool) {
 	hash, sharedName := ResolvePathOrHash(pathOrHash, overrideName)
 
 	stor, ok := storage.StorageSelect(label)
 	if !ok {
+		return
+	}
+
+	cfg := config.Config()
+	if cfShare && cfg.CFShareBaseURL == "" {
+		log.Println("You need to set `cf_share_base_url` in your .gb.conf to use --cf-worker mode")
+		log.Println("This should be the base URL of your Cloudflare Worker, e.g. https://share.example.com")
 		return
 	}
 
@@ -58,6 +103,25 @@ func WebShare(pathOrHash string, overrideName string, label string, expiry time.
 		return
 	}
 
+	var shareURL string
+	if cfShare {
+		shareURL = generateCFWorkerURL(stor, cfg, hash, sharedName, key, offset, length, originalSize, compressionAlg, pathInStorage)
+	} else {
+		shareURL = generatePresignedURL(stor, hash, sharedName, key, offset, length, originalSize, compressionAlg, pathInStorage, expiry)
+	}
+
+	log.Println()
+	log.Printf("File: %s", sharedName)
+	log.Printf("Size: %s uncompressed, %s compressed", utils.FormatCommas(originalSize), utils.FormatCommas(length))
+	log.Printf("Compression: %s", compressionAlg)
+	if !cfShare {
+		log.Printf("URL expires: %s", time.Now().Add(expiry).Format(time.RFC3339))
+	}
+	log.Println()
+	fmt.Println(shareURL)
+}
+
+func generatePresignedURL(stor storage_base.Storage, hash []byte, sharedName string, key []byte, offset, length, originalSize int64, compressionAlg, pathInStorage string, expiry time.Duration) string {
 	presignedURL, err := stor.PresignedURL(pathInStorage, expiry)
 	if err != nil {
 		panic(fmt.Sprintf("Cannot generate presigned URL for this storage: %v", err))
@@ -73,13 +137,42 @@ func WebShare(pathOrHash string, overrideName string, label string, expiry time.
 	params.Set("sha256", base64.RawURLEncoding.EncodeToString(hash))
 	params.Set("cmp", compressionAlg)
 
-	shareURL := DefaultWebShareBaseURL + "#" + params.Encode()
+	return DefaultWebShareBaseURL + "#" + params.Encode()
+}
 
-	log.Println()
-	log.Printf("File: %s", sharedName)
-	log.Printf("Size: %s uncompressed, %s compressed", utils.FormatCommas(originalSize), utils.FormatCommas(length))
-	log.Printf("Compression: %s", compressionAlg)
-	log.Printf("URL expires: %s", time.Now().Add(expiry).Format(time.RFC3339))
-	log.Println()
-	fmt.Println(shareURL)
+func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, hash []byte, sharedName string, key []byte, offset, length, originalSize int64, compressionAlg, pathInStorage string) string {
+	metadata := CFShareMetadata{
+		Name:   sharedName,
+		Key:    hex.EncodeToString(key),
+		Offset: offset,
+		Length: length,
+		Size:   originalSize,
+		SHA256: base64.RawURLEncoding.EncodeToString(hash),
+		Cmp:    compressionAlg,
+		Path:   pathInStorage,
+	}
+
+	jsonData, err := json.Marshal(metadata)
+	if err != nil {
+		panic(err)
+	}
+
+	password := generatePassword(cfg.CFSharePasswordLength)
+
+	uploadPath := "share/" + password + ".json"
+	log.Printf("Uploading share metadata to %s", uploadPath)
+
+	upload := stor.BeginDatabaseUpload(uploadPath)
+	_, err = upload.Writer().Write(jsonData)
+	if err != nil {
+		panic(err)
+	}
+	result := upload.End()
+	log.Printf("Uploaded %d bytes to %s", result.Size, result.Path)
+
+	baseURL := cfg.CFShareBaseURL
+	for strings.HasSuffix(baseURL, "/") {
+		baseURL = baseURL[:len(baseURL)-1]
+	}
+	return fmt.Sprintf("%s/%s/%s", baseURL, password, sharedName)
 }

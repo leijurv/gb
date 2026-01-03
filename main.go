@@ -525,9 +525,17 @@ func main() {
 					Usage: "how long the presigned URL should be valid",
 					Value: 7 * 24 * time.Hour,
 				},
+				cli.BoolFlag{
+					Name:  "cf-worker",
+					Usage: "use Cloudflare Worker mode: upload share metadata to storage and generate a CF Worker URL",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				share.WebShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
+				if c.Bool("cf-worker") {
+					share.CFWorkerShare(c.Args().First(), c.String("name"), c.String("label"))
+				} else {
+					share.WebShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
+				}
 				return nil
 			},
 		},

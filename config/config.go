@@ -32,6 +32,8 @@ type ConfigData struct {
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
 	ShareBaseURL           string   `json:"share_base_url"`
+	CFShareBaseURL         string   `json:"cf_share_base_url"`
+	CFSharePasswordLength  int      `json:"cf_share_password_length"`
 	DisableLeptonGo        bool     `json:"disable_lepton_go"`
 	SkipHashFailures       bool     `json:"skip_hash_failures"`
 	UseGitignore           bool     `json:"use_gitignore"`
@@ -117,6 +119,8 @@ var config = ConfigData{
 	},
 	IgnorePermissionErrors: false,
 	ShareBaseURL:           "",
+	CFShareBaseURL:         "",
+	CFSharePasswordLength:  8,
 	DisableLeptonGo:        false,
 	SkipHashFailures:       false,
 	UseGitignore:           false,
@@ -213,6 +217,9 @@ func sanity() {
 	}
 	if config.DatabaseLocation != dbAbs {
 		panic("DatabaseLocation must be absolute path")
+	}
+	if config.CFSharePasswordLength < 8 {
+		panic("CF share password length must be at least 8")
 	}
 }
 

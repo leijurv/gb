@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -307,13 +308,12 @@ func (up *s3Upload) End() storage_base.UploadedBlob {
 	}
 	log.Println("Upload output:", result.result.Location)
 	etag := <-up.calc.Result
-	log.Println("Expecting etag", etag.ETag)
 	realEtag, realSize := fetchETagAndSize(up.s3, up.path)
-	log.Println("Real etag was", realEtag)
 	if etag.ETag != realEtag || etag.Size != realSize {
 		panic("aws broke the etag or size lmao")
 	}
 	up.completed = true
+	up.assertNotPubliclyAccessible(result.result.Location)
 	return storage_base.UploadedBlob{
 		StorageID: up.s3.StorageID,
 		BlobID:    up.blobID,
@@ -333,6 +333,20 @@ func (up *s3Upload) Cancel() {
 	up.writer.CloseWithError(errors.New("upload cancelled"))
 	up.calc.Writer.Close()
 	<-up.result // wait for the upload goroutine to finish (it will error out)
+}
+
+func (up *s3Upload) assertNotPubliclyAccessible(url string) {
+	resp, err := http.Get(url)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 { // hilarious: backblaze gives 401, oracle cloud gives 404, AWS S3 gives 403
+		log.Println("Good: bucket is not publicly accessible (got", resp.StatusCode, ")")
+		return
+	}
+	up.s3.DeleteBlob(up.path)
+	panic("Your bucket is publicly accessible, probably not a good idea! (Use `gb share` to share files). Got status " + resp.Status + " when fetching " + url)
 }
 
 func fetchETagAndSize(remote *S3, path string) (string, int64) {

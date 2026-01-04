@@ -181,8 +181,7 @@
         <div id="media-container"></div>
     </div>
 
-    <script>
-    async function meow() {
+    <script type="module">
     const $ = id => document.getElementById(id);
 
     function parseHash() {
@@ -195,23 +194,24 @@
         // Split the pathname by "/" and filter out empty strings
         const pathSegments = url.pathname.split('/').filter(segment => segment.length > 0);
         if (pathSegments.length !== 2) {
-            $('content').innerHTML = `<div class="error-box">Missing path or parameters</div>`;
-            throw new Error('Expected 2 url path elements');
+            return; // this is probably github pages
         }
         return pathSegments
     }
 
-    let params;
+    var params = {};
     if (window.location.hash) {
         params = parseHash();
     } else {
-        const shortParams = parseShortUrl()
-        const response = await fetch(`/share-data/${shortParams[0]}.json`)
-        if (!response.ok) {
-            $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
-            throw new Error(`Request failed with status ${response.status}`);
+        const shortParams = parseShortUrl();
+        if (shortParams) {
+            const response = await fetch(`/share-data/${shortParams[0]}.json`)
+            if (!response.ok) {
+                $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
+                throw new Error(`Request failed with status ${response.status}`);
+            }
+            params = await response.json()
         }
-        params = await response.json()
     }
     console.log('params:', params)
 
@@ -356,7 +356,7 @@
         }, 1000);
     }
 
-    const downloadUrl = '/gb-download?id=' + encodeURIComponent(expectedSha256);
+    const downloadUrl = './gb-download?id=' + encodeURIComponent(expectedSha256);
 
     function sendParamsToServiceWorker() {
         navigator.serviceWorker.controller?.postMessage({
@@ -443,7 +443,7 @@
             throw new Error('Service Workers not supported');
         }
 
-        const registration = await navigator.serviceWorker.register('/share-sw.js');
+        const registration = await navigator.serviceWorker.register('share-sw.js');
 
         if (registration.installing) {
             await new Promise(resolve => {
@@ -560,8 +560,6 @@
             }
         })();
     }
-    }
-    meow();
     </script>
 </body>
 </html>

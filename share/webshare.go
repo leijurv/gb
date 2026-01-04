@@ -158,5 +158,5 @@ func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, param
 	for strings.HasSuffix(baseURL, "/") {
 		baseURL = baseURL[:len(baseURL)-1]
 	}
-	return fmt.Sprintf("%s/%s/%s", baseURL, password, params["name"])
+	return fmt.Sprintf("%s/%s/%s", baseURL, password, url.PathEscape(params["name"]))
 }

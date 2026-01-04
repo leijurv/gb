@@ -20,17 +20,6 @@ import (
 
 const DefaultWebShareBaseURL = "https://leijurv.github.io/gb/share/share.html"
 
-type ShareMetadata struct {
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Offset int64  `json:"offset"`
-	Length int64  `json:"length"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-	Cmp    string `json:"cmp"`
-	Path   string `json:"path"`
-}
-
 // generatePassword creates a random alphanumeric password of the given length
 func generatePassword(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

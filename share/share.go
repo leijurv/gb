@@ -21,7 +21,6 @@ func ResolvePathOrHash(pathOrHash string, overrideName string) (hash []byte, sha
 	var err error
 	hash, err = hex.DecodeString(pathOrHash)
 	if err != nil || len(hash) != 32 {
-		log.Println("Interpreting `" + pathOrHash + "` as a path on your filesystem since it doesn't appear to be a hex SHA-256 hash")
 		path, err := filepath.Abs(pathOrHash)
 		if err != nil {
 			panic(err)
@@ -41,12 +40,10 @@ func ResolvePathOrHash(pathOrHash string, overrideName string) (hash []byte, sha
 			panic(err)
 		}
 		defer tx.Rollback()
-		log.Println("Making sure this file is backed up")
-		status := backup.CompareFileToDb(path, stat, tx, true)
+		status := backup.CompareFileToDb(path, stat, tx, false)
 		if status.New || status.Modified {
 			panic("backup the file before sharing it")
 		}
-		log.Println("Ok, it is backed up")
 		hash = status.Hash
 		if overrideName == "" {
 			sharedName = filepath.Base(path)

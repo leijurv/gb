@@ -113,10 +113,11 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	log.Printf("Size: %s uncompressed, %s compressed", utils.FormatCommas(originalSize), utils.FormatCommas(length))
 	log.Printf("Compression: %s", compressionAlg)
 	if !cfShare {
-		log.Printf("URL expires: %s", time.Now().Add(expiry).Format(time.RFC3339))
+		log.Printf("URL EXPIRES: %s", time.Now().Add(expiry).Format(time.RFC3339))
 	}
-	log.Println()
+	fmt.Println()
 	fmt.Println(shareURL)
+	fmt.Println()
 }
 
 func generatePresignedURL(stor storage_base.Storage, params map[string]string, expiry time.Duration, pathInStorage string) string {
@@ -144,15 +145,13 @@ func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, param
 	password := generatePassword(cfg.CFSharePasswordLength)
 
 	uploadPath := "share/" + password + ".json"
-	log.Printf("Uploading share metadata to %s", uploadPath)
 
 	upload := stor.BeginDatabaseUpload(uploadPath)
 	_, err = upload.Writer().Write(jsonData)
 	if err != nil {
 		panic(err)
 	}
-	result := upload.End()
-	log.Printf("Uploaded %d bytes to %s", result.Size, result.Path)
+	upload.End()
 
 	baseURL := cfg.CFShareBaseURL
 	for strings.HasSuffix(baseURL, "/") {

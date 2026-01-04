@@ -155,7 +155,6 @@ func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
 }
 
 func (remote *S3) beginUpload(blobIDOptional []byte, path string) *s3Upload {
-	log.Println("Path is", path)
 	pipeR, pipeW := io.Pipe()
 	resultCh := make(chan s3Result)
 	go func() {
@@ -342,7 +341,7 @@ func (up *s3Upload) assertNotPubliclyAccessible(url string) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 { // hilarious: backblaze gives 401, oracle cloud gives 404, AWS S3 gives 403
-		log.Println("Good: bucket is not publicly accessible (got", resp.StatusCode, ")")
+		// good, bucket is not publicly accessible
 		return
 	}
 	up.s3.DeleteBlob(up.path)

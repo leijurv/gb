@@ -2,23 +2,57 @@
 // (importScripts doesn't support integrity, so we fetch + verify + eval via blob URL)
 const dependencies = [
     {
-        url: 'https://cdn.jsdelivr.net/npm/fzstd@0.1.1/umd/index.min.js',
-        integrity: 'sha384-MhnRpMMxECUIiwGKUUKgm602Ohalv+N2TWG/AYjw9V90GIGHkeXCu/hLzLqBEkb4'
-    },
-    {
         url: 'https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js',
         integrity: 'sha384-QjbMdgv/hWELlDRbhj6tXsKlzXhrlrSIGNqgdQVvxYQpo+vA+4jOWramMq56bPSg'
     }
 ];
 
+// zstd-emscripten WASM library for streaming decompression (from kig/zstd-emscripten)
+// Uses official libzstd compiled to WASM - no window size limitations
+// Zstd frame format is stable: old decoders can decompress new encoder output
+let ZStd = null;
+
+const zstdJs = {
+    url: 'zstd/zstd.js',  // relative to service worker
+    integrity: 'sha384-78z6VYTAbieb/uF4afnBJAjPzgKIxv0MgekAbfoEKEDZIVwGWxfKPToG5VKCU3TR'
+};
+const zstdWasm = {
+    url: 'zstd/zstd.wasm',
+    integrity: 'sha384-Wu2F+8X9C4paG5l9Zp/TMb/hJhIX0rB9bIsxZmdqixBwdIymHYS3RQognZWsAk0I'
+};
+
+async function loadZstdWasm() {
+    // Fetch both files in parallel with integrity verification
+    const [jsResponse, wasmResponse] = await Promise.all([
+        fetch(zstdJs.url, { integrity: zstdJs.integrity }),
+        fetch(zstdWasm.url, { integrity: zstdWasm.integrity })
+    ]);
+    if (!jsResponse.ok) throw new Error(`Failed to fetch ${zstdJs.url}: ${jsResponse.status}`);
+    if (!wasmResponse.ok) throw new Error(`Failed to fetch ${zstdWasm.url}: ${wasmResponse.status}`);
+
+    const [code, wasmBinary] = await Promise.all([
+        jsResponse.text(),
+        wasmResponse.arrayBuffer()
+    ]);
+
+    eval(code);
+    // Pass wasmBinary to the factory so emscripten doesn't fetch it
+    ZStd = await ZSTD({ wasmBinary: wasmBinary });
+}
+
 async function loadDependencies() {
+    const tasks = [];
     for (const dep of dependencies) {
-        const response = await fetch(dep.url, { integrity: dep.integrity });
-        if (!response.ok) throw new Error(`Failed to fetch ${dep.url}: ${response.status}`);
-        const code = await response.text();
-        // Safe to eval since integrity was verified by fetch
-        eval(code);
+        tasks.push((async () => {
+            const response = await fetch(dep.url, { integrity: dep.integrity });
+            if (!response.ok) throw new Error(`Failed to fetch ${dep.url}: ${response.status}`);
+            const code = await response.text();
+            // Safe to eval since integrity was verified by fetch
+            eval(code);
+        })());
     }
+    tasks.push(loadZstdWasm());
+    await Promise.all(tasks);
 }
 
 const depsLoaded = loadDependencies();
@@ -185,27 +219,75 @@ function createLengthLimitTransform(maxLength) {
 }
 
 function createZstdDecompressTransform() {
-    let decompressor;
-    let outputChunks = [];
+    // WASM streaming decompression using zstd-emscripten
+    // Buffer size for input/output chunks (128KB each)
+    const BUFFER_SIZE = 131072;
+
+    let dctx = null;
+    let buffersPtr = null;
+    let buffIn, buffInPos, buffOut, buffOutPos;
 
     return new TransformStream({
         start() {
-            decompressor = new fzstd.Decompress((chunk) => {
-                outputChunks.push(chunk);
-            });
+            // Allocate WASM memory for buffers
+            // Layout: [inPos(4)] [input(BUFFER_SIZE-4)] [outPos(4)] [output(BUFFER_SIZE-4)]
+            buffersPtr = ZStd._malloc(BUFFER_SIZE * 2);
+            buffIn = new Uint8Array(ZStd.HEAPU8.buffer, buffersPtr + 4, BUFFER_SIZE - 4);
+            buffInPos = new Int32Array(ZStd.HEAPU8.buffer, buffersPtr, 1);
+            buffOut = new Uint8Array(ZStd.HEAPU8.buffer, buffersPtr + BUFFER_SIZE + 4, BUFFER_SIZE - 4);
+            buffOutPos = new Int32Array(ZStd.HEAPU8.buffer, buffersPtr + BUFFER_SIZE, 1);
+
+            // Create decompression stream context
+            dctx = ZStd._ZSTD_createDStream();
         },
         transform(chunk, controller) {
-            outputChunks = [];
-            decompressor.push(chunk);
-            for (const out of outputChunks) {
-                controller.enqueue(out);
+            // Process input in BUFFER_SIZE chunks
+            for (let i = 0; i < chunk.byteLength; i += buffIn.byteLength) {
+                const block = chunk.slice(i, i + buffIn.byteLength);
+                buffIn.set(block);
+                buffInPos[0] = 0;
+
+                // Decompress until all input consumed
+                while (buffInPos[0] < block.byteLength) {
+                    buffOutPos[0] = 0;
+                    const ret = ZStd._ZSTD_decompressStream_simpleArgs(
+                        dctx,
+                        buffOut.byteOffset, buffOut.byteLength, buffOutPos.byteOffset,
+                        buffIn.byteOffset, block.byteLength, buffInPos.byteOffset
+                    );
+                    if (ZStd._ZSTD_isError(ret)) {
+                        const errPtr = ZStd._ZSTD_getErrorName(ret);
+                        const errMsg = ZStd.UTF8ToString(errPtr);
+                        throw new Error('ZSTD decompression error: ' + errMsg);
+                    }
+                    if (buffOutPos[0] > 0) {
+                        // Copy output and enqueue (must copy since buffer will be reused)
+                        controller.enqueue(new Uint8Array(buffOut.slice(0, buffOutPos[0])));
+                    }
+                }
             }
         },
         flush(controller) {
-            outputChunks = [];
-            decompressor.push(new Uint8Array(0), true);
-            for (const out of outputChunks) {
-                controller.enqueue(out);
+            // Flush any remaining data (should be none for complete streams)
+            buffInPos[0] = 0;
+            buffOutPos[0] = 0;
+            const ret = ZStd._ZSTD_decompressStream_simpleArgs(
+                dctx,
+                buffOut.byteOffset, buffOut.byteLength, buffOutPos.byteOffset,
+                buffIn.byteOffset, 0, buffInPos.byteOffset
+            );
+            if (!ZStd._ZSTD_isError(ret) && buffOutPos[0] > 0) {
+                controller.enqueue(new Uint8Array(buffOut.slice(0, buffOutPos[0])));
+            }
+
+            // Cleanup WASM resources
+            if (dctx) {
+                ZStd._ZSTD_freeDStream(dctx);
+                dctx = null;
+            }
+            if (buffersPtr) {
+                ZStd._free(buffersPtr);
+                buffersPtr = null;
             }
         }
     });

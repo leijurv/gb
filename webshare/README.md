@@ -38,3 +38,16 @@ S3 presigned urls can only be revoked by revoking the key that was used to make 
 Your domain needs to be proxied by cloudflare and your domain needs to be configured to use your worker.
 You can do this by creating a workers route. My configuration looks like this
 ![img.png](img.png)
+
+### 5. Configure gb to create short URLs by default
+Open .gb.conf in your editor, set `share_use_cf` to `true`, and `cf_share_base_url` to the url of your worker
+
+When running `gb share` gb will now by default generate short links to your worker
+
+gb also allows you to configure `cf_share_password_length` to generate shorter random strings in the url. 
+The default is 8.
+
+## Self Hosting
+The worker script is relatively simple and does not depend on any cloudflare features.
+It is not currently supported, but it should easily be possible to write a simple script that is compatible with other server side 
+js runtimes and just calls the `fetch` function in the worker script.

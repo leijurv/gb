@@ -22,7 +22,7 @@ export default defineConfig({
     viteStaticCopy({
       targets: [
         {
-            src: 'share.html',
+            src: 'index.html',
             dest: '.'
         },
       ],
@@ -43,7 +43,7 @@ export default defineConfig({
         entryFileNames: '[name].js',  // Outputs as worker.js and share-sw.js
         chunkFileNames: '[name].js',
       },
-      external: ['./share.html', './share-sw.js.txt', './zstd.js.txt', './zstd.wasm.bin']
+      external: ['./index.html', './share-sw.js.txt', './zstd.js.txt', './zstd.wasm.bin']
     },
     outDir: 'dist',
     emptyOutDir: true

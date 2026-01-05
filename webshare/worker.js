@@ -43,7 +43,7 @@ async function readFromS3(env, filePath) {
   return response;
 }
 
-import share from "./share.html"
+import share from "./index.html"
 import service from "./share-sw.js.txt"
 
 export default {

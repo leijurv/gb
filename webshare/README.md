@@ -28,7 +28,7 @@ wrangler will open a browser window to log into cloudflare
 ```
 npm install
 wrangler deploy
-gb wrangler-secrets | wrangler secret bulk
+wrangler secret bulk <<< "$(gb wrangler-secrets)"
 ```
 `gb wrangler-secrets` automatically generates all the secrets needed to run the worker. 
 You will be prompted to provide a new S3 key just for the worker but this is optional.

@@ -197,7 +197,7 @@
             $('content').innerHTML = `<div class="error-box">Missing path or parameters</div>`;
             throw new Error('Missing path or parameters');
         }
-        const hashIndex = key.indexOf('#');
+        const hashIndex = key.indexOf('/');
         if (hashIndex !== -1) key = key.slice(0, hashIndex);
         return key
     }
@@ -366,7 +366,7 @@
         }, 1000);
     }
 
-    const downloadUrl = './gb-download?id=' + encodeURIComponent(expectedSha256);
+    const downloadUrl = '/gb/webshare/gb-download?id=' + encodeURIComponent(expectedSha256);
 
     function sendParamsToServiceWorker() {
         navigator.serviceWorker.controller?.postMessage({
@@ -454,7 +454,7 @@
             throw new Error('Service Workers not supported');
         }
 
-        const registration = await navigator.serviceWorker.register('share-sw.js');
+        const registration = await navigator.serviceWorker.register('/gb/webshare/share-sw.js');
 
         if (registration.installing) {
             await new Promise(resolve => {

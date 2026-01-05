@@ -76,7 +76,7 @@ export default {
           }
 
           const path = url.pathname.slice(1); // remove leading "/"
-          if (path === "share-sw.js") {
+          if (path === "gb/webshare/share-sw.js") {
             return new Response(service,  { headers: {
               'Content-Type': "application/javascript; charset=utf-8",
               'Content-Length': String(share.length),

@@ -454,7 +454,7 @@
             throw new Error('Service Workers not supported');
         }
 
-        const registration = await navigator.serviceWorker.register('/gb/webshare/share-sw.js');
+        const registration = await navigator.serviceWorker.register('/gb/webshare/share-sw.js', { scope: '/' });
 
         if (registration.installing) {
             await new Promise(resolve => {

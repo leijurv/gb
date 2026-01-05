@@ -41,8 +41,10 @@ func WranglerSecrets() {
 			secrets["S3_SECRET_KEY"] = input
 		}
 		jsonData, err := json.Marshal(secrets)
-		jsonStr := string(jsonData)
-		fmt.Print(jsonStr)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Print(string(jsonData))
 	} else {
 		panic("storage is not s3")
 	}

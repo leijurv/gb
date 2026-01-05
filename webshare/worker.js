@@ -15,7 +15,7 @@ function createS3Client(env) {
   });
 }
 
-async function generatePresignedUrl(env, filePath, expiresIn = 3600) {
+async function generatePresignedUrl(env, filePath, expiresIn = 30) {
   const client = createS3Client(env);
 
   const command = new GetObjectCommand({

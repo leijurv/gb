@@ -213,13 +213,16 @@
 
     const required = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
     let params;
+    let shortUrlKey = null; // If set, service worker will fetch fresh URLs on each request
     if (window.location.hash) {
         params = parseHash();
         const have = required.filter(k => k in params);
         if (have <= 1) {
+            shortUrlKey = parseShortUrl();
             params = await parseAndRequestShortURL();
         }
     } else {
+        shortUrlKey = parseShortUrl();
         params = await parseAndRequestShortURL();
     }
 
@@ -350,8 +353,8 @@
         }
     });
 
-    // Update countdown every second
-    if (expiresAt) {
+    // Update countdown every second (only meaningful for static hash URLs)
+    if (expiresAt && !shortUrlKey) {
         setInterval(() => {
             const remaining = expiresAt - Date.now();
             $('expiry-countdown').textContent = formatCountdown(remaining);
@@ -376,7 +379,8 @@
                 size: size,
                 sha256: expectedSha256,
                 compression: compression,
-                filename: filename
+                filename: filename,
+                shortUrlKey: shortUrlKey // If set, SW fetches fresh presigned URL on each request
             }
         });
     }
@@ -549,13 +553,15 @@
     if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
         showStatus('Error: HTTPS required for Service Workers', 'error');
         $('download').disabled = true;
-    } else if (isExpired) {
+    } else if (isExpired && !shortUrlKey) {
+        // Only block on expiry for static hash URLs; short URL mode fetches fresh URLs
         showStatus('This share link has expired. Ask the sender for a new link.', 'error');
         $('download').disabled = true;
     }
 
     // Initialize service worker on page load so media can stream immediately
-    if (!isExpired) {
+    // In short URL mode, always initialize since fresh URLs are fetched per request
+    if (!isExpired || shortUrlKey) {
         (async () => {
             try {
                 await registerServiceWorker();

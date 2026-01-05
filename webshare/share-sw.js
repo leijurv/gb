@@ -79,6 +79,51 @@ self.addEventListener('message', async (event) => {
     }
 });
 
+// Parse expiry from S3 presigned URL (X-Amz-Date + X-Amz-Expires)
+function parseS3Expiry(url) {
+    try {
+        const urlObj = new URL(url);
+        const amzDate = urlObj.searchParams.get('X-Amz-Date'); // format: 20260102T090602Z
+        const amzExpires = urlObj.searchParams.get('X-Amz-Expires'); // seconds
+        if (amzDate && amzExpires) {
+            const year = amzDate.slice(0, 4);
+            const month = amzDate.slice(4, 6);
+            const day = amzDate.slice(6, 8);
+            const hour = amzDate.slice(9, 11);
+            const min = amzDate.slice(11, 13);
+            const sec = amzDate.slice(13, 15);
+            const created = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}Z`);
+            return created.getTime() + parseInt(amzExpires) * 1000;
+        }
+    } catch (e) {}
+    return null;
+}
+
+// Get presigned URL, fetching fresh one only if current is expired
+async function getPresignedUrl(p) {
+    if (!p.shortUrlKey) {
+        return p.url;
+    }
+
+    // Check if cached URL is still valid (with 5 second buffer)
+    const expiresAt = parseS3Expiry(p.url);
+    if (expiresAt && expiresAt > Date.now() + 5000) {
+        return p.url;
+    }
+
+    // Fetch fresh URL
+    const response = await fetch(`/share-data/${p.shortUrlKey}.json`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch fresh URL: ${response.status}`);
+    }
+    const data = await response.json();
+
+    // Update cached URL for future requests
+    p.url = data.url;
+
+    return data.url;
+}
+
 async function notifyClients(message) {
     const clients = await self.clients.matchAll({ type: 'window' });
     for (const client of clients) {
@@ -374,6 +419,9 @@ self.addEventListener('fetch', (event) => {
                 await depsLoaded;
                 const keyBytes = hexToBytes(p.key);
 
+                // Get presigned URL (fetches fresh one if expired)
+                const s3Url = await getPresignedUrl(p);
+
                 // Calculate the byte range in the encrypted blob
                 const blobStart = p.offset + range.start;
                 const blobEnd = p.offset + range.end;
@@ -385,7 +433,7 @@ self.addEventListener('fetch', (event) => {
                 const fetchEnd = blobEnd;
 
                 const s3Range = 'bytes=' + alignedStart + '-' + fetchEnd;
-                const s3Response = await fetch(p.url, {
+                const s3Response = await fetch(s3Url, {
                     headers: { 'Range': s3Range }
                 });
 
@@ -414,6 +462,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
         await depsLoaded;
         const keyBytes = hexToBytes(p.key);
+
+        // Get presigned URL (fetches fresh one if expired)
+        const s3Url = await getPresignedUrl(p);
+
         const offset = p.offset;
         const length = p.length;
         const alignedOffset = Math.floor(offset / 16) * 16;
@@ -421,7 +473,7 @@ self.addEventListener('fetch', (event) => {
         const fetchLength = length + remainingSeek;
 
         const s3RangeHeader = 'bytes=' + alignedOffset + '-' + (alignedOffset + fetchLength - 1);
-        const s3Response = await fetch(p.url, {
+        const s3Response = await fetch(s3Url, {
             headers: { 'Range': s3RangeHeader }
         });
 

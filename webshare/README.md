@@ -18,15 +18,17 @@ bucket to allow files to be shared to other origins.
 
 ## Deploying with wrangler
 ### Setup wrangler
-`npm install -g wrangler`
+Install wrangler with your package manager or `npm install -g wrangler`
 
-`wrangler login` 
+run `wrangler login` 
+
+wrangler will open a browser window to log into cloudflare
 
 ### Deploy
 ```
 npm install
 wrangler deploy
-wrangler secret bulk <(gb wrangler-secrets)
+gb wrangler-secrets | wrangler secret bulk
 ```
 `gb wrangler-secrets` automatically generates all the secrets needed to run the worker. 
 You will be prompted to provide a new S3 key just for the worker but this is optional.

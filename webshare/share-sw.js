@@ -72,10 +72,9 @@ self.addEventListener('message', async (event) => {
     if (event.data.type === 'download') {
         const params = event.data.params;
         downloadParamsMap.set(params.sha256, params);
-    } else if (event.data.type === 'ping') {
         // Wait for dependencies before confirming ready
         await depsLoaded;
-        event.source.postMessage({ type: 'pong' });
+        event.source.postMessage({ type: 'ready', id: params.sha256 });
     }
 });
 

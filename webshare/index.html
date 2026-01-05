@@ -368,33 +368,35 @@
 
     const downloadUrl = '/gb/webshare/gb-download?id=' + encodeURIComponent(expectedSha256);
 
-    function sendParamsToServiceWorker() {
-        navigator.serviceWorker.controller?.postMessage({
-            type: 'download',
-            params: {
-                url: s3Url,
-                key: keyHex,
-                offset: offset,
-                length: length,
-                size: size,
-                sha256: expectedSha256,
-                compression: compression,
-                filename: filename,
-                shortUrlKey: shortUrlKey // If set, SW fetches fresh presigned URL on each request
-            }
-        });
-    }
+    function sendParamsAndWaitForReady() {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                navigator.serviceWorker.removeEventListener('message', handler);
+                reject(new Error('Service worker did not respond in time'));
+            }, 10000);
 
-    function waitForServiceWorkerReady() {
-        return new Promise((resolve) => {
             const handler = (event) => {
-                if (event.data.type === 'pong') {
+                if (event.data.type === 'ready' && event.data.id === expectedSha256) {
+                    clearTimeout(timeout);
                     navigator.serviceWorker.removeEventListener('message', handler);
                     resolve();
                 }
             };
             navigator.serviceWorker.addEventListener('message', handler);
-            navigator.serviceWorker.controller?.postMessage({type: 'ping'});
+            navigator.serviceWorker.controller?.postMessage({
+                type: 'download',
+                params: {
+                    url: s3Url,
+                    key: keyHex,
+                    offset: offset,
+                    length: length,
+                    size: size,
+                    sha256: expectedSha256,
+                    compression: compression,
+                    filename: filename,
+                    shortUrlKey: shortUrlKey // If set, SW fetches fresh presigned URL on each request
+                }
+            });
         });
     }
 
@@ -530,8 +532,7 @@
 
         try {
             await registerServiceWorker();
-            await waitForServiceWorkerReady();
-            sendParamsToServiceWorker();
+            await sendParamsAndWaitForReady();
 
             const iframe = document.createElement('iframe');
             iframe.style.display = 'none';
@@ -565,8 +566,7 @@
         (async () => {
             try {
                 await registerServiceWorker();
-                await waitForServiceWorkerReady();
-                sendParamsToServiceWorker();
+                await sendParamsAndWaitForReady();
                 showMediaPlayer();
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

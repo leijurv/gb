@@ -22,18 +22,27 @@ const zstdWasm = {
 };
 
 async function loadZstdWasm() {
-    // Fetch both files in parallel with integrity verification
-    const [jsResponse, wasmResponse] = await Promise.all([
-        fetch(zstdJs.url, { integrity: zstdJs.integrity }),
-        fetch(zstdWasm.url, { integrity: zstdWasm.integrity })
-    ]);
-    if (!jsResponse.ok) throw new Error(`Failed to fetch ${zstdJs.url}: ${jsResponse.status}`);
-    if (!wasmResponse.ok) throw new Error(`Failed to fetch ${zstdWasm.url}: ${wasmResponse.status}`);
+    let code, wasmBinary;
+    if (typeof ZSTD_IS_BUNDLED !== 'undefined' && ZSTD_IS_BUNDLED) {
+        code = atob(ZSTD_JS_BASE64);
+        const base64 = ZSTD_WASM_BASE64;
+        if (typeof Uint8Array.fromBase64 === 'function') {
+            wasmBinary = Uint8Array.fromBase64(base64).buffer;
+        } else {
+            wasmBinary = Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+        }
+    } else {
+        // Fetch both files in parallel with integrity verification
+        const [jsResponse, wasmResponse] = await Promise.all([
+            fetch(zstdJs.url, { integrity: zstdJs.integrity }),
+            fetch(zstdWasm.url, { integrity: zstdWasm.integrity })
+        ]);
+        if (!jsResponse.ok) throw new Error(`Failed to fetch ${zstdJs.url}: ${jsResponse.status}`);
+        if (!wasmResponse.ok) throw new Error(`Failed to fetch ${zstdWasm.url}: ${wasmResponse.status}`);
 
-    const [code, wasmBinary] = await Promise.all([
-        jsResponse.text(),
-        wasmResponse.arrayBuffer()
-    ]);
+        code = await jsResponse.text()
+        wasmBinary = await wasmResponse.arrayBuffer()
+    }
 
     eval(code);
     // Pass wasmBinary to the factory so emscripten doesn't fetch it

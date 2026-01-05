@@ -192,30 +192,37 @@
     function parseShortUrl() {
         const url = new URL(window.location.href);
         // Split the pathname by "/" and filter out empty strings
-        const pathSegments = url.pathname.split('/').filter(segment => segment.length > 0);
-        if (pathSegments.length !== 2) {
-            return; // this is probably github pages
+        let key = url.pathname.substring(1);
+        if (key.length === 0) {
+            $('content').innerHTML = `<div class="error-box">Missing path or parameters</div>`;
+            throw new Error('Missing path or parameters');
         }
-        return pathSegments
+        const hashIndex = key.indexOf('#');
+        if (hashIndex !== -1) key = key.slice(0, hashIndex);
+        return key
     }
-
-    var params = {};
-    if (window.location.hash) {
-        params = parseHash();
-    } else {
-        const shortParams = parseShortUrl();
-        if (shortParams) {
-            const response = await fetch(`/share-data/${shortParams[0]}.json`)
-            if (!response.ok) {
-                $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
-                throw new Error(`Request failed with status ${response.status}`);
-            }
-            params = await response.json()
+    async function parseAndRequestShortURL() {
+        const key = parseShortUrl();
+        const response = await fetch(`/share-data/${key}.json`)
+        if (!response.ok) {
+            $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
+            throw new Error(`Request failed with status ${response.status}`);
         }
+        return await response.json()
     }
-    console.log('params:', params)
 
     const required = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
+    let params;
+    if (window.location.hash) {
+        params = parseHash();
+        const have = required.filter(k => k in params);
+        if (have <= 1) {
+            params = await parseAndRequestShortURL();
+        }
+    } else {
+        params = await parseAndRequestShortURL();
+    }
+
     const missing = required.filter(k => !(k in params));
     if (missing.length > 0) {
         $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;

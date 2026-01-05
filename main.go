@@ -548,16 +548,20 @@ func main() {
 			},
 		},
 		{
-			Name:  "wrangler-secrets",
-			Usage: "Print the cloudflare worker secrets in json format to be passed to `wrangler secret bulk`",
+			Name:  "webshare-secrets",
+			Usage: "Print the webshare worker secrets in json format to be passed to `wrangler secret bulk`",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "label",
 					Usage: "storage label",
 				},
+				cli.BoolFlag{
+					Name:  "env",
+					Usage: ".env format instead of json",
+				},
 			},
 			Action: func(c *cli.Context) error {
-				share.WranglerSecrets(c.String("label"))
+				share.WebshareSecrets(c.String("label"), c.Bool("env"))
 				return nil
 			},
 		},

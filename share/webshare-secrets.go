@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/leijurv/gb/s3"
 	"github.com/leijurv/gb/storage"
 )
 
-func WranglerSecrets(label string) {
+func WebshareSecrets(label string, envFormat bool) {
 	store, ok := storage.StorageSelect(label)
 	if !ok {
 		panic("no storage")
@@ -23,7 +24,7 @@ func WranglerSecrets(label string) {
 		secrets["S3_BUCKET"] = s3.Data.Bucket
 		secrets["S3_GB_PATH"] = s3.NiceRootPath()
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Fprintln(os.Stderr, "It is recommended to create a new read only S3 key for the cloudflare worker. Enter the key id or enter 'n' to reuse the key used by gb")
+		fmt.Fprintln(os.Stderr, "It is recommended to create a new read only S3 key for the webshare worker. Enter the key id or enter 'n' to reuse the key used by gb")
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			panic(err)
@@ -41,12 +42,33 @@ func WranglerSecrets(label string) {
 			}
 			secrets["S3_SECRET_KEY"] = strings.TrimSpace(input)
 		}
-		jsonData, err := json.Marshal(secrets)
-		if err != nil {
-			panic(err)
+		if envFormat {
+			fmt.Print(dotEnv(secrets))
+		} else {
+			jsonData, err := json.Marshal(secrets)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Print(string(jsonData))
 		}
-		fmt.Print(string(jsonData))
 	} else {
 		panic("storage is not s3")
 	}
+}
+
+func dotEnv(m map[string]string) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	// Sort keys for deterministic output
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, k := range keys {
+		v := m[k]
+		b.WriteString(fmt.Sprintf("%s=%s\n", k, v))
+	}
+
+	return b.String()
 }

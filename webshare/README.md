@@ -28,9 +28,9 @@ wrangler will open a browser window to log into cloudflare
 ```
 npm install
 wrangler deploy
-wrangler secret bulk <<< "$(gb wrangler-secrets)"
+wrangler secret bulk <<< "$(gb webshare-secrets)"
 ```
-`gb wrangler-secrets` automatically generates all the secrets needed to run the worker. 
+`gb webshare-secrets` automatically generates all the secrets needed to run the worker. 
 You will be prompted to provide a new S3 key just for the worker but this is optional but recommended.
 S3 presigned urls can only be revoked by revoking the key that was used to make them
 
@@ -40,11 +40,11 @@ You can do this by creating a workers route. My configuration looks like this
 ![img.png](img.png)
 
 ### 5. Configure gb to create short URLs by default
-Open .gb.conf in your editor, set `share_use_cf` to `true`, and `cf_share_base_url` to the url of your worker
+Open .gb.conf in your editor, set `share_use_short_url` to `true`, and `short_url_share_base_url` to the url of your worker
 
 When running `gb share` gb will now by default generate short links to your worker
 
-gb also allows you to configure `cf_share_password_length` to generate shorter random strings in the url. 
+gb also allows you to configure `short_url_share_password_length` to generate shorter random strings in the url. 
 The default is 8.
 
 ## Self Hosting

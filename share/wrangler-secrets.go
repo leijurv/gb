@@ -21,6 +21,7 @@ func WranglerSecrets(label string) {
 		secrets["S3_ENDPOINT"] = s3.Data.Endpoint
 		secrets["S3_REGION"] = s3.Data.Region
 		secrets["S3_BUCKET"] = s3.Data.Bucket
+		secrets["S3_GB_PATH"] = s3.NiceRootPath()
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Fprintln(os.Stderr, "It is recommended to create a new read only S3 key for the cloudflare worker. Enter the key id or enter 'n' to reuse the key used by gb")
 		input, err := reader.ReadString('\n')

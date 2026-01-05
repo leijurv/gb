@@ -130,7 +130,7 @@ func (remote *S3) GetID() []byte {
 	return remote.StorageID
 }
 
-func (remote *S3) niceRootPath() string {
+func (remote *S3) NiceRootPath() string {
 	path := remote.RootPath
 	if path != "" && !strings.HasSuffix(path, "/") {
 		path += "/"
@@ -147,11 +147,11 @@ func formatPath(blobID []byte) string {
 }
 
 func (remote *S3) BeginDatabaseUpload(filename string) storage_base.StorageUpload {
-	return remote.beginUpload(nil, remote.niceRootPath()+filename)
+	return remote.beginUpload(nil, remote.NiceRootPath()+filename)
 }
 
 func (remote *S3) BeginBlobUpload(blobID []byte) storage_base.StorageUpload {
-	return remote.beginUpload(blobID, remote.niceRootPath()+formatPath(blobID))
+	return remote.beginUpload(blobID, remote.NiceRootPath()+formatPath(blobID))
 }
 
 func (remote *S3) beginUpload(blobIDOptional []byte, path string) *s3Upload {
@@ -223,7 +223,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 
 			paginator := s3.NewListObjectsV2Paginator(remote.client, &s3.ListObjectsV2Input{
 				Bucket: aws.String(remote.Data.Bucket),
-				Prefix: aws.String(remote.niceRootPath() + hex.EncodeToString([]byte{byte(prefix)}) + "/"),
+				Prefix: aws.String(remote.NiceRootPath() + hex.EncodeToString([]byte{byte(prefix)}) + "/"),
 			})
 
 			for paginator.HasMorePages() {
@@ -237,7 +237,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 					}
 					etag := *obj.ETag
 					etag = etag[1 : len(etag)-1] // aws puts double quotes around the etag lol
-					blobID, err := hex.DecodeString((*obj.Key)[len(remote.niceRootPath()+"XX/XX/"):])
+					blobID, err := hex.DecodeString((*obj.Key)[len(remote.NiceRootPath()+"XX/XX/"):])
 					if err != nil || len(blobID) != 32 {
 						panic("Unexpected file not following GB naming convention \"" + *obj.Key + "\"")
 					}

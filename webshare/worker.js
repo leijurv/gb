@@ -30,19 +30,6 @@ async function generatePresignedUrl(env, filePath, expiresIn = 30) {
   return presignedUrl;
 }
 
-async function readFromS3(env, filePath) {
-  const client = createS3Client(env);
-
-  const command = new GetObjectCommand({
-    Bucket: env.S3_BUCKET,
-    Key: filePath,
-  });
-
-  const response = await client.send(command);
-
-  return response;
-}
-
 import share from "./index.html"
 import service from "./share-sw.js.txt"
 
@@ -55,6 +42,7 @@ export default {
           if (!env.S3_BUCKET) missing.push('S3_BUCKET');
           if (!env.S3_ACCESS_KEY) missing.push('S3_ACCESS_KEY');
           if (!env.S3_SECRET_KEY) missing.push('S3_SECRET_KEY');
+          if (env.S3_GB_PATH === undefined) missing.push('S3_GB_PATH');
           // S3_GB_PATH is allowed to be empty string
           if (missing.length > 0) {
               return new Response(
@@ -74,16 +62,15 @@ export default {
           const url = new URL(request.url);
           if (url.pathname.startsWith('/share-data/')) {
             const key = url.pathname.slice("/share-data/".length);
-            const response = await readFromS3(env, `${env.S3_GB_PATH}share/${key}`)
-            const status = response.$metadata.httpStatusCode;
-            if (status > 400) {
-              if (status.status == 404) {
+            const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${key}`);
+            const response = await fetch(presignedJsonUrl);
+            if (!response.ok) {
+              if (response.status === 404) {
                 return new Response("404", { status: 404 })
               }
-              return new Response(`Error reading from S3: ${status} ${response.statusText}`, { status: 500 });
+              return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
             }
-            let text = await response.Body.transformToString();
-            const json = JSON.parse(text);
+            let json = await response.json();
             json.url = await generatePresignedUrl(env, json.path);
             return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
           }

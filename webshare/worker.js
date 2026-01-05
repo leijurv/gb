@@ -55,6 +55,7 @@ export default {
           if (!env.S3_BUCKET) missing.push('S3_BUCKET');
           if (!env.S3_ACCESS_KEY) missing.push('S3_ACCESS_KEY');
           if (!env.S3_SECRET_KEY) missing.push('S3_SECRET_KEY');
+          // S3_GB_PATH is allowed to be empty string
           if (missing.length > 0) {
               return new Response(
                   `Missing required environment variables: ${missing.join(', ')}\n\n` +
@@ -64,7 +65,8 @@ export default {
                   'S3_REGION: us-west-002\n' +
                   'S3_BUCKET: my-backup\n' +
                   'S3_ACCESS_KEY: AKIAIOSFODNN7EXAMPLE\n' +
-                  'S3_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+                  'S3_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n' +
+                  'S3_GB_PATH: ',
                   { status: 500 }
               );
           }
@@ -72,7 +74,7 @@ export default {
           const url = new URL(request.url);
           if (url.pathname.startsWith('/share-data/')) {
             const key = url.pathname.slice("/share-data/".length);
-            const response = await readFromS3(env, `share/${key}`)
+            const response = await readFromS3(env, `${env.S3_GB_PATH}share/${key}`)
             const status = response.$metadata.httpStatusCode;
             if (status > 400) {
               if (status.status == 404) {

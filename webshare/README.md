@@ -17,14 +17,14 @@ bucket to allow files to be shared to other origins.
 ![cors.png](cors.png)
 
 ## Deploying with wrangler
-### 1. Create a cloudflare API key
-The key needs permission to edit workers
-### 2. Login with wrangler
+### Setup wrangler
+`npm install -g wrangler`
+
 `wrangler login` 
 
-This gives wrangler your cloudflare api key
-### 3. Deploy
+### Deploy
 ```
+npm install
 wrangler deploy
 wrangler secret bulk <(gb wrangler-secrets)
 ```

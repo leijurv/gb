@@ -33,13 +33,13 @@ func WranglerSecrets(label string) {
 			secrets["S3_ACCESS_KEY"] = s3.Data.KeyID
 			secrets["S3_SECRET_KEY"] = s3.Data.SecretKey
 		} else {
-			secrets["S3_ACCESS_KEY"] = input
+			secrets["S3_ACCESS_KEY"] = strings.TrimSpace(input)
 			fmt.Fprintln(os.Stderr, "Now enter the secret key")
 			input, err := reader.ReadString('\n')
 			if err != nil {
 				panic(err)
 			}
-			secrets["S3_SECRET_KEY"] = input
+			secrets["S3_SECRET_KEY"] = strings.TrimSpace(input)
 		}
 		jsonData, err := json.Marshal(secrets)
 		if err != nil {

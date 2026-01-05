@@ -11,8 +11,8 @@ import (
 	"github.com/leijurv/gb/storage"
 )
 
-func WranglerSecrets() {
-	store, ok := storage.StorageSelect("")
+func WranglerSecrets(label string) {
+	store, ok := storage.StorageSelect(label)
 	if !ok {
 		panic("no storage")
 	}

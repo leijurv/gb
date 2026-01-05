@@ -550,8 +550,14 @@ func main() {
 		{
 			Name:  "wrangler-secrets",
 			Usage: "Print the cloudflare worker secrets in json format to be passed to `wrangler secret bulk`",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
 			Action: func(c *cli.Context) error {
-				share.WranglerSecrets()
+				share.WranglerSecrets(c.String("label"))
 				return nil
 			},
 		},

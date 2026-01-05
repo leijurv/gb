@@ -547,6 +547,14 @@ func main() {
 				return nil
 			},
 		},
+		{
+			Name:  "wrangler-secrets",
+			Usage: "Print the cloudflare worker secrets in json format to be passed to `wrangler secret bulk`",
+			Action: func(c *cli.Context) error {
+				share.WranglerSecrets()
+				return nil
+			},
+		},
 	}
 	err := app.Run(os.Args)
 	if err != nil {

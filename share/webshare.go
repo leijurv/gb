@@ -50,7 +50,7 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	}
 
 	cfg := config.Config()
-	if cfShare && cfg.CFShareBaseURL == "" {
+	if cfShare && cfg.ShortUrlShareBaseURL == "" {
 		log.Println("You need to set `cf_share_base_url` in your .gb.conf to use --cf-worker mode")
 		log.Println("This should be the base URL of your Cloudflare Worker, e.g. https://share.example.com")
 		return
@@ -142,7 +142,7 @@ func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, param
 		panic(err)
 	}
 
-	password := generatePassword(cfg.CFSharePasswordLength)
+	password := generatePassword(cfg.ShortUrlSharePasswordLength)
 
 	uploadPath := "share/" + password + ".json"
 
@@ -153,7 +153,7 @@ func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, param
 	}
 	upload.End()
 
-	baseURL := cfg.CFShareBaseURL
+	baseURL := cfg.ShortUrlShareBaseURL
 	for strings.HasSuffix(baseURL, "/") {
 		baseURL = baseURL[:len(baseURL)-1]
 	}

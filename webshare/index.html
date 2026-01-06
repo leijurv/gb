@@ -392,37 +392,6 @@
         throw new Error('SW never started intercepting fetches');
     }
 
-    function sendParamsAndWaitForReady() {
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                navigator.serviceWorker.removeEventListener('message', handler);
-                reject(new Error('Service worker did not respond in time'));
-            }, 10000);
-
-            const handler = (event) => {
-                if (event.data.type === 'ready' && event.data.id === expectedSha256) {
-                    clearTimeout(timeout);
-                    navigator.serviceWorker.removeEventListener('message', handler);
-                    resolve();
-                }
-            };
-            navigator.serviceWorker.addEventListener('message', handler);
-            navigator.serviceWorker.controller?.postMessage({
-                type: 'download',
-                params: {
-                    url: s3Url,
-                    key: keyHex,
-                    offset: offset,
-                    length: length,
-                    size: size,
-                    sha256: expectedSha256,
-                    compression: compression,
-                    filename: filename,
-                    shortUrlKey: shortUrlKey // If set, SW fetches fresh presigned URL on each request
-                }
-            });
-        });
-    }
 
     const ext = filename.split('.').pop().toLowerCase();
     const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
@@ -554,6 +523,23 @@
     // Start listening immediately to detect in-progress downloads
     navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
 
+    // Respond to SW asking for params (if SW was terminated and restarted)
+    navigator.serviceWorker?.addEventListener('message', (event) => {
+        if (event.data.type === 'need-params' && event.data.id === expectedSha256 && event.ports[0]) {
+            event.ports[0].postMessage({
+                url: s3Url,
+                key: keyHex,
+                offset: offset,
+                length: length,
+                size: size,
+                sha256: expectedSha256,
+                compression: compression,
+                filename: filename,
+                shortUrlKey: shortUrlKey
+            });
+        }
+    });
+
     async function downloadFile() {
         $('download').disabled = true;
         showStatus('Making request to download...', '');
@@ -561,7 +547,6 @@
         try {
             await registerServiceWorker();
             await waitForSwIntercepting();
-            await sendParamsAndWaitForReady();
 
             const iframe = document.createElement('iframe');
             iframe.style.display = 'none';
@@ -596,7 +581,6 @@
             try {
                 await registerServiceWorker();
                 await waitForSwIntercepting();
-                await sendParamsAndWaitForReady();
                 showMediaPlayer();
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

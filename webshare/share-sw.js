@@ -75,15 +75,26 @@ const depsLoaded = loadDependencies();
 
 const downloadParamsMap = new Map();
 
-self.addEventListener('message', async (event) => {
-    if (event.data.type === 'download') {
-        const params = event.data.params;
-        downloadParamsMap.set(params.sha256, params);
-        // Wait for dependencies before confirming ready
-        await depsLoaded;
-        event.source.postMessage({ type: 'ready', id: params.sha256 });
+// Ask page for params if SW was terminated and lost them
+async function requestParamsFromPage(id) {
+    const clients = await self.clients.matchAll({ type: 'window' });
+    for (const client of clients) {
+        // Create a MessageChannel to receive the response
+        const { port1, port2 } = new MessageChannel();
+        const response = new Promise((resolve) => {
+            port1.onmessage = (e) => resolve(e.data);
+            setTimeout(() => resolve(null), 2000); // timeout
+        });
+        client.postMessage({ type: 'need-params', id }, [port2]);
+        const params = await response;
+        if (params) {
+            downloadParamsMap.set(params.sha256, params);
+            return params;
+        }
     }
-});
+    return null;
+}
+
 
 // Parse expiry from S3 presigned URL (X-Amz-Date + X-Amz-Expires)
 function parseS3Expiry(url) {
@@ -416,22 +427,26 @@ self.addEventListener('fetch', (event) => {
     if (!url.pathname.endsWith('/gb-download')) return;
 
     const id = url.searchParams.get('id');
-    const p = id ? downloadParamsMap.get(id) : null;
-    if (!p) {
-        swLog('[SW] Error: unknown hash', id);
-        event.respondWith(new Response('Error: unknown hash', { status: 404 }));
-        return;
-    }
-
     const isMediaPlayback = url.searchParams.get('media') === 'true';
-    const canSeek = (p.compression === '' || p.compression === 'none');
     const rangeHeader = event.request.headers.get('Range');
 
-    // Handle Range request for uncompressed files
-    if (canSeek && rangeHeader) {
-        const range = parseRangeHeader(rangeHeader, p.size);
-        if (range) {
-            event.respondWith((async () => {
+    event.respondWith((async () => {
+        // Check cache first, then ask page if SW was restarted
+        let p = id ? downloadParamsMap.get(id) : null;
+        if (!p) {
+            p = await requestParamsFromPage(id);
+        }
+        if (!p) {
+            swLog('[SW] Error: unknown hash', id);
+            return new Response('Error: unknown hash', { status: 404 });
+        }
+
+        const canSeek = (p.compression === '' || p.compression === 'none');
+
+        // Handle Range request for uncompressed files
+        if (canSeek && rangeHeader) {
+            const range = parseRangeHeader(rangeHeader, p.size);
+            if (range) {
                 await depsLoaded;
                 const keyBytes = hexToBytes(p.key);
 
@@ -445,7 +460,6 @@ self.addEventListener('fetch', (event) => {
 
                 // Align to AES block boundary
                 const alignedStart = Math.floor(blobStart / 16) * 16;
-                const skipBytes = blobStart - alignedStart;
                 const fetchEnd = blobEnd;
 
                 const s3Range = 'bytes=' + alignedStart + '-' + fetchEnd;
@@ -469,13 +483,10 @@ self.addEventListener('fetch', (event) => {
                 });
 
                 return new Response(stream, { status: 206, headers });
-            })());
-            return;
+            }
         }
-    }
 
-    // Full file request (or compressed file)
-    event.respondWith((async () => {
+        // Full file request (or compressed file, or invalid range)
         await depsLoaded;
         const keyBytes = hexToBytes(p.key);
 

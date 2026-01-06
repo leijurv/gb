@@ -1,3 +1,10 @@
+// Relay logs to page via BroadcastChannel for easier debugging (especially Firefox)
+const logChannel = new BroadcastChannel('sw-logs');
+function swLog(...args) {
+    console.log(...args);
+    try { logChannel.postMessage(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')); } catch(e) {}
+}
+
 // Load dependencies with SRI verification
 // (importScripts doesn't support integrity, so we fetch + verify + eval via blob URL)
 const dependencies = [
@@ -400,11 +407,21 @@ function parseRangeHeader(rangeHeader, totalSize) {
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
+    // Ping endpoint to verify SW is intercepting fetches
+    if (url.pathname.endsWith('/gb-sw-ping')) {
+        event.respondWith(new Response('pong', { status: 200 }));
+        return;
+    }
+
     if (!url.pathname.endsWith('/gb-download')) return;
 
     const id = url.searchParams.get('id');
     const p = id ? downloadParamsMap.get(id) : null;
-    if (!p) return;
+    if (!p) {
+        swLog('[SW] Error: unknown hash', id);
+        event.respondWith(new Response('Error: unknown hash', { status: 404 }));
+        return;
+    }
 
     const isMediaPlayback = url.searchParams.get('media') === 'true';
     const canSeek = (p.compression === '' || p.compression === 'none');

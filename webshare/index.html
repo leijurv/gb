@@ -439,6 +439,7 @@
             const video = document.createElement('video');
             video.controls = true;
             video.preload = 'metadata';
+            video.onerror = () => location.reload();  // SW may have been terminated
             $('media-container').appendChild(video);
             video.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';

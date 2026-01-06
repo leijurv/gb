@@ -75,24 +75,30 @@ const depsLoaded = loadDependencies();
 
 const downloadParamsMap = new Map();
 
-// Ask page for params if SW was terminated and lost them
+// Ask page for params - broadcast to all clients, first response wins
 async function requestParamsFromPage(id) {
     const clients = await self.clients.matchAll({ type: 'window' });
-    for (const client of clients) {
-        // Create a MessageChannel to receive the response
-        const { port1, port2 } = new MessageChannel();
-        const response = new Promise((resolve) => {
-            port1.onmessage = (e) => resolve(e.data);
-            setTimeout(() => resolve(null), 2000); // timeout
-        });
-        client.postMessage({ type: 'need-params', id }, [port2]);
-        const params = await response;
-        if (params) {
-            downloadParamsMap.set(params.sha256, params);
-            return params;
+    if (clients.length === 0) return null;
+
+    return new Promise((resolve) => {
+        let resolved = false;
+        const timeout = setTimeout(() => {
+            if (!resolved) { resolved = true; resolve(null); }
+        }, 2000);
+
+        for (const client of clients) {
+            const { port1, port2 } = new MessageChannel();
+            port1.onmessage = (e) => {
+                if (!resolved && e.data) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    downloadParamsMap.set(e.data.sha256, e.data);
+                    resolve(e.data);
+                }
+            };
+            client.postMessage({ type: 'need-params', id }, [port2]);
         }
-    }
-    return null;
+    });
 }
 
 

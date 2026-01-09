@@ -223,7 +223,7 @@ func sanity() {
 		panic("DatabaseLocation must be absolute path")
 	}
 	// not recommended but some users might not care if the files they share can be found
-	if config.ShareUrlPasswordLength <= 2 {
+	if config.ShareUrlPasswordLength < 2 {
 		panic("short url share password length must be at least 2")
 	}
 }

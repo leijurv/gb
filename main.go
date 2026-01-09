@@ -526,15 +526,15 @@ func main() {
 					Value: 7 * 24 * time.Hour,
 				},
 				cli.BoolFlag{
-					Name:  "cf-worker",
-					Usage: "use Cloudflare Worker mode: upload share metadata to storage and generate a CF Worker URL",
+					Name:  "short-mode",
+					Usage: "use short url mode: upload share metadata to storage and generate a URL served by your server",
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.Bool("cf-worker") {
-					share.CFWorkerShare(c.Args().First(), c.String("name"), c.String("label"))
+				if c.Bool("short-mode") {
+					share.ShortUrlShare(c.Args().First(), c.String("name"), c.String("label"))
 				} else {
-					share.WebShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
+					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				}
 				return nil
 			},

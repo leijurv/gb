@@ -40,7 +40,7 @@ You can do this by creating a workers route. My configuration looks like this
 ![img.png](img.png)
 
 ### 5. Configure gb to create short URLs by default
-Open .gb.conf in your editor, set `share_use_short_url` to `true`, and `short_url_share_base_url` to the url of your worker
+Open .gb.conf in your editor, set `share_use_short_url` to `true`, and `share_server_url` to the url of your worker
 
 When running `gb share` gb will now by default generate short links to your worker
 

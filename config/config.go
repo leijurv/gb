@@ -15,29 +15,29 @@ var DatabaseLocation string
 var inited = false
 
 type ConfigData struct {
-	MinBlobSize                 int64    `json:"min_blob_size"`
-	MinCompressSize             int64    `json:"min_compress_size"`
-	DatabaseLocation            string   `json:"database_location"`
-	PaddingMinBytes             int64    `json:"padding_min_bytes"`
-	PaddingMaxBytes             int64    `json:"padding_max_bytes"`
-	PaddingMinPercent           float64  `json:"padding_min_percent"`
-	PaddingMaxPercent           float64  `json:"padding_max_percent"`
-	NumHasherThreads            int      `json:"num_hasher_threads"`
-	NumUploaderThreads          int      `json:"num_uploader_threads"`
-	UploadStatusInterval        int      `json:"upload_status_print_interval"`
-	NoCompressionExts           []string `json:"no_compression_exts"`
-	Includes                    []string `json:"includes"`
-	ExcludeSuffixes             []string `json:"exclude_suffixes"`
-	ExcludePrefixes             []string `json:"exclude_prefixes"`
-	DedupeExclude               []string `json:"dedupe_exclude"`
-	IgnorePermissionErrors      bool     `json:"ignore_permission_errors"`
-	ShareUseShortURL            bool     `json:"share_use_short_url"`
-	ShareBaseURL                string   `json:"share_base_url"`
-	ShortUrlShareBaseURL        string   `json:"short_url_share_base_url"`
-	ShortUrlSharePasswordLength int      `json:"short_url_share_password_length"`
-	DisableLeptonGo             bool     `json:"disable_lepton_go"`
-	SkipHashFailures            bool     `json:"skip_hash_failures"`
-	UseGitignore                bool     `json:"use_gitignore"`
+	MinBlobSize            int64    `json:"min_blob_size"`
+	MinCompressSize        int64    `json:"min_compress_size"`
+	DatabaseLocation       string   `json:"database_location"`
+	PaddingMinBytes        int64    `json:"padding_min_bytes"`
+	PaddingMaxBytes        int64    `json:"padding_max_bytes"`
+	PaddingMinPercent      float64  `json:"padding_min_percent"`
+	PaddingMaxPercent      float64  `json:"padding_max_percent"`
+	NumHasherThreads       int      `json:"num_hasher_threads"`
+	NumUploaderThreads     int      `json:"num_uploader_threads"`
+	UploadStatusInterval   int      `json:"upload_status_print_interval"`
+	NoCompressionExts      []string `json:"no_compression_exts"`
+	Includes               []string `json:"includes"`
+	ExcludeSuffixes        []string `json:"exclude_suffixes"`
+	ExcludePrefixes        []string `json:"exclude_prefixes"`
+	DedupeExclude          []string `json:"dedupe_exclude"`
+	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
+	ShareUseShortURL       bool     `json:"share_use_short_url"`
+	ShareParameterizedURL  string   `json:"share_parameterized_url"`
+	ShareServerURL         string   `json:"share_server_url"`
+	ShareUrlPasswordLength int      `json:"share_url_password_length"`
+	DisableLeptonGo        bool     `json:"disable_lepton_go"`
+	SkipHashFailures       bool     `json:"skip_hash_failures"`
+	UseGitignore           bool     `json:"use_gitignore"`
 }
 
 func Config() ConfigData {
@@ -118,14 +118,16 @@ var config = ConfigData{
 		// folders that you have already fully deduped against each other
 		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
-	IgnorePermissionErrors:      false,
-	ShareUseShortURL:            false,
-	ShareBaseURL:                "",
-	ShortUrlShareBaseURL:        "",
-	ShortUrlSharePasswordLength: 8,
-	DisableLeptonGo:             false,
-	SkipHashFailures:            false,
-	UseGitignore:                false,
+	IgnorePermissionErrors: false,
+	// Whether gb will by default generate a shortened share url served by `ShareServerURL`.
+	// Default to false because it requires some setup and parameterized urls will always be usable through the hardcoded default url
+	ShareUseShortURL:       false,
+	ShareParameterizedURL:  "",
+	ShareServerURL:         "",
+	ShareUrlPasswordLength: 8,
+	DisableLeptonGo:        false,
+	SkipHashFailures:       false,
+	UseGitignore:           false,
 }
 
 /*
@@ -220,8 +222,9 @@ func sanity() {
 	if config.DatabaseLocation != dbAbs {
 		panic("DatabaseLocation must be absolute path")
 	}
-	if config.ShortUrlSharePasswordLength < 8 {
-		panic("short url share password length must be at least 8")
+	// not recommended but some users might not care if the files they share can be found
+	if config.ShareUrlPasswordLength <= 2 {
+		panic("short url share password length must be at least 2")
 	}
 }
 

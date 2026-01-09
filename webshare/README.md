@@ -7,7 +7,7 @@ can use to download, decrypt, and decompress a file. This requires no setup from
 to any servers for it to work
 
 To allow for persistent and short URLs this directory includes everything needed to setup a cloudflare worker that serves
-a copy of the website that stores all of the file information in your s3 bucket, to be looked up using a short randomly generated string
+a copy of the website that stores all of the file information in your s3 bucket, to be looked up using a short randomly generated password string
 
 The following sections will explain how to setup the worker
 
@@ -39,12 +39,12 @@ Your domain needs to be proxied by cloudflare and your domain needs to be config
 You can do this by creating a workers route. My configuration looks like this
 ![img.png](img.png)
 
-### 5. Configure gb to create short URLs by default
-Open .gb.conf in your editor, set `share_use_short_url` to `true`, and `share_server_url` to the url of your worker
+### 5. Configure gb to create password URLs by default
+Open .gb.conf in your editor, set `share_use_password_url` to `true`, and `share_password_url` to the url of your worker
 
 When running `gb share` gb will now by default generate short links to your worker
 
-gb also allows you to configure `short_url_share_password_length` to generate shorter random strings in the url. 
+gb also allows you to configure `share_url_password_length` to generate shorter passwords in the url. 
 The default is 8.
 
 ## Self Hosting

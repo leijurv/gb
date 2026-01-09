@@ -37,11 +37,11 @@ func ParameterizedShare(pathOrHash string, overrideName string, label string, ex
 	webShareInternal(pathOrHash, overrideName, label, expiry, false)
 }
 
-func ShortUrlShare(pathOrHash string, overrideName string, label string) {
+func PasswordUrlShare(pathOrHash string, overrideName string, label string) {
 	webShareInternal(pathOrHash, overrideName, label, 0, true)
 }
 
-func webShareInternal(pathOrHash string, overrideName string, label string, expiry time.Duration, shortUrl bool) {
+func webShareInternal(pathOrHash string, overrideName string, label string, expiry time.Duration, passwordUrl bool) {
 	hash, sharedName := ResolvePathOrHash(pathOrHash, overrideName)
 
 	stor, ok := storage.StorageSelect(label)
@@ -50,8 +50,8 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	}
 
 	cfg := config.Config()
-	if shortUrl && cfg.ShareServerURL == "" {
-		log.Println("You need to set `share_server_url` in your .gb.conf to use --short-url mode")
+	if passwordUrl && cfg.SharePasswordURL == "" {
+		log.Println("You need to set `share_password_url` in your .gb.conf to use --password-url mode")
 		log.Println("This should be the base URL of your share server, e.g. https://share.example.com")
 		log.Println("See https://github.com/leijurv/gb/tree/master/webshare/README.md for details on how to set this up")
 		return
@@ -103,8 +103,8 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	}
 
 	var shareURL string
-	if shortUrl {
-		shareURL = generateShortURL(stor, cfg, params, pathInStorage)
+	if passwordUrl {
+		shareURL = generatePasswordURL(stor, cfg, params, pathInStorage)
 	} else {
 		shareURL = generatePresignedURL(stor, params, expiry, pathInStorage)
 	}
@@ -113,7 +113,7 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	log.Printf("File: %s", sharedName)
 	log.Printf("Size: %s uncompressed, %s compressed", utils.FormatCommas(originalSize), utils.FormatCommas(length))
 	log.Printf("Compression: %s", compressionAlg)
-	if !shortUrl {
+	if !passwordUrl {
 		log.Printf("URL EXPIRES: %s", time.Now().Add(expiry).Format(time.RFC3339))
 	}
 	fmt.Println()
@@ -136,7 +136,7 @@ func generatePresignedURL(stor storage_base.Storage, params map[string]string, e
 	return DefaultWebShareBaseURL + "#" + url_params.Encode()
 }
 
-func generateShortURL(stor storage_base.Storage, cfg config.ConfigData, params map[string]string, pathInStorage string) string {
+func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, params map[string]string, pathInStorage string) string {
 	params["path"] = pathInStorage
 	jsonData, err := json.Marshal(params)
 	if err != nil {
@@ -154,7 +154,7 @@ func generateShortURL(stor storage_base.Storage, cfg config.ConfigData, params m
 	}
 	upload.End()
 
-	baseURL := cfg.ShareServerURL
+	baseURL := cfg.SharePasswordURL
 	for strings.HasSuffix(baseURL, "/") {
 		baseURL = baseURL[:len(baseURL)-1]
 	}

@@ -31,9 +31,9 @@ type ConfigData struct {
 	ExcludePrefixes        []string `json:"exclude_prefixes"`
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
-	ShareUseShortURL       bool     `json:"share_use_short_url"`
+	ShareUsePasswordURL    bool     `json:"share_use_password_url"`
 	ShareParameterizedURL  string   `json:"share_parameterized_url"`
-	ShareServerURL         string   `json:"share_server_url"`
+	SharePasswordURL       string   `json:"share_password_url"`
 	ShareUrlPasswordLength int      `json:"share_url_password_length"`
 	DisableLeptonGo        bool     `json:"disable_lepton_go"`
 	SkipHashFailures       bool     `json:"skip_hash_failures"`
@@ -119,11 +119,11 @@ var config = ConfigData{
 		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
 	IgnorePermissionErrors: false,
-	// Whether gb will by default generate a shortened share url served by `ShareServerURL`.
-	// Default to false because it requires some setup and parameterized urls will always be usable through the hardcoded default url
-	ShareUseShortURL:       false,
+	// Whether gb will by default generate a shortened share url served by `SharePasswordURL`.
+	// Default is false because it requires some setup and parameterized urls will always be usable through the hardcoded default url
+	ShareUsePasswordURL:    false,
 	ShareParameterizedURL:  "",
-	ShareServerURL:         "",
+	SharePasswordURL:       "",
 	ShareUrlPasswordLength: 8,
 	DisableLeptonGo:        false,
 	SkipHashFailures:       false,

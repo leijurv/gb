@@ -526,13 +526,13 @@ func main() {
 					Value: 7 * 24 * time.Hour,
 				},
 				cli.BoolFlag{
-					Name:  "short-mode",
-					Usage: "use short url mode: upload share metadata to storage and generate a URL served by your server",
+					Name:  "password-mode",
+					Usage: "use password url mode: upload share metadata to storage and generate a URL served by your server",
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.Bool("short-mode") {
-					share.ShortUrlShare(c.Args().First(), c.String("name"), c.String("label"))
+				if c.Bool("password-mode") {
+					share.PasswordUrlShare(c.Args().First(), c.String("name"), c.String("label"))
 				} else {
 					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				}

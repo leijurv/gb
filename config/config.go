@@ -31,9 +31,10 @@ type ConfigData struct {
 	ExcludePrefixes        []string `json:"exclude_prefixes"`
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
-	ShareBaseURL           string   `json:"share_base_url"`
-	CFShareBaseURL         string   `json:"cf_share_base_url"`
-	CFSharePasswordLength  int      `json:"cf_share_password_length"`
+	ShareUsePasswordURL    bool     `json:"share_use_password_url"`
+	ShareParameterizedURL  string   `json:"share_parameterized_url"`
+	SharePasswordURL       string   `json:"share_password_url"`
+	ShareUrlPasswordLength int      `json:"share_url_password_length"`
 	DisableLeptonGo        bool     `json:"disable_lepton_go"`
 	SkipHashFailures       bool     `json:"skip_hash_failures"`
 	UseGitignore           bool     `json:"use_gitignore"`
@@ -118,9 +119,12 @@ var config = ConfigData{
 		// if you backup a folder, then complete a full dedupe, you should add that folder to this list (at least, until you change its contents)
 	},
 	IgnorePermissionErrors: false,
-	ShareBaseURL:           "",
-	CFShareBaseURL:         "",
-	CFSharePasswordLength:  8,
+	// Whether gb will by default generate a shortened share url served by `SharePasswordURL`.
+	// Default is false because it requires some setup and parameterized urls will always be usable through the hardcoded default url
+	ShareUsePasswordURL:    false,
+	ShareParameterizedURL:  "",
+	SharePasswordURL:       "",
+	ShareUrlPasswordLength: 12,
 	DisableLeptonGo:        false,
 	SkipHashFailures:       false,
 	UseGitignore:           false,
@@ -218,8 +222,8 @@ func sanity() {
 	if config.DatabaseLocation != dbAbs {
 		panic("DatabaseLocation must be absolute path")
 	}
-	if config.CFSharePasswordLength < 8 {
-		panic("CF share password length must be at least 8")
+	if config.ShareUrlPasswordLength < 8 {
+		panic("gb cannot in good conscience condone such an insecure password length")
 	}
 }
 

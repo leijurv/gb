@@ -1,3 +1,10 @@
+// Relay logs to page via BroadcastChannel for easier debugging (especially Firefox)
+const logChannel = new BroadcastChannel('sw-logs');
+function swLog(...args) {
+    console.log(...args);
+    try { logChannel.postMessage(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')); } catch(e) {}
+}
+
 // Load dependencies with SRI verification
 // (importScripts doesn't support integrity, so we fetch + verify + eval via blob URL)
 const dependencies = [
@@ -22,18 +29,27 @@ const zstdWasm = {
 };
 
 async function loadZstdWasm() {
-    // Fetch both files in parallel with integrity verification
-    const [jsResponse, wasmResponse] = await Promise.all([
-        fetch(zstdJs.url, { integrity: zstdJs.integrity }),
-        fetch(zstdWasm.url, { integrity: zstdWasm.integrity })
-    ]);
-    if (!jsResponse.ok) throw new Error(`Failed to fetch ${zstdJs.url}: ${jsResponse.status}`);
-    if (!wasmResponse.ok) throw new Error(`Failed to fetch ${zstdWasm.url}: ${wasmResponse.status}`);
+    let code, wasmBinary;
+    if (typeof ZSTD_IS_BUNDLED !== 'undefined' && ZSTD_IS_BUNDLED) {
+        code = atob(ZSTD_JS_BASE64);
+        const base64 = ZSTD_WASM_BASE64;
+        if (typeof Uint8Array.fromBase64 === 'function') {
+            wasmBinary = Uint8Array.fromBase64(base64).buffer;
+        } else {
+            wasmBinary = Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+        }
+    } else {
+        // Fetch both files in parallel with integrity verification
+        const [jsResponse, wasmResponse] = await Promise.all([
+            fetch(zstdJs.url, { integrity: zstdJs.integrity }),
+            fetch(zstdWasm.url, { integrity: zstdWasm.integrity })
+        ]);
+        if (!jsResponse.ok) throw new Error(`Failed to fetch ${zstdJs.url}: ${jsResponse.status}`);
+        if (!wasmResponse.ok) throw new Error(`Failed to fetch ${zstdWasm.url}: ${wasmResponse.status}`);
 
-    const [code, wasmBinary] = await Promise.all([
-        jsResponse.text(),
-        wasmResponse.arrayBuffer()
-    ]);
+        code = await jsResponse.text()
+        wasmBinary = await wasmResponse.arrayBuffer()
+    }
 
     eval(code);
     // Pass wasmBinary to the factory so emscripten doesn't fetch it
@@ -59,16 +75,88 @@ const depsLoaded = loadDependencies();
 
 const downloadParamsMap = new Map();
 
-self.addEventListener('message', async (event) => {
-    if (event.data.type === 'download') {
-        const params = event.data.params;
-        downloadParamsMap.set(params.sha256, params);
-    } else if (event.data.type === 'ping') {
-        // Wait for dependencies before confirming ready
-        await depsLoaded;
-        event.source.postMessage({ type: 'pong' });
+// Ask page for params - broadcast to all clients, first response wins
+async function requestParamsFromPage(id) {
+    const clients = await self.clients.matchAll({ type: 'window' });
+    if (clients.length === 0) return null;
+
+    return new Promise((resolve) => {
+        let resolved = false;
+        const timeout = setTimeout(() => {
+            if (!resolved) { resolved = true; resolve(null); }
+        }, 2000);
+
+        for (const client of clients) {
+            const { port1, port2 } = new MessageChannel();
+            port1.onmessage = (e) => {
+                if (!resolved && e.data) {
+                    resolved = true;
+                    clearTimeout(timeout);
+                    downloadParamsMap.set(e.data.sha256, e.data);
+                    resolve(e.data);
+                }
+            };
+            client.postMessage({ type: 'need-params', id }, [port2]);
+        }
+    });
+}
+
+
+// Parse expiry from S3 presigned URL (X-Amz-Date + X-Amz-Expires)
+function parseS3Expiry(url) {
+    try {
+        const urlObj = new URL(url);
+        const amzDate = urlObj.searchParams.get('X-Amz-Date'); // format: 20260102T090602Z
+        const amzExpires = urlObj.searchParams.get('X-Amz-Expires'); // seconds
+        if (amzDate && amzExpires) {
+            const year = amzDate.slice(0, 4);
+            const month = amzDate.slice(4, 6);
+            const day = amzDate.slice(6, 8);
+            const hour = amzDate.slice(9, 11);
+            const min = amzDate.slice(11, 13);
+            const sec = amzDate.slice(13, 15);
+            const created = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}Z`);
+            return created.getTime() + parseInt(amzExpires) * 1000;
+        }
+    } catch (e) {}
+    return null;
+}
+
+// Get presigned URL, fetching fresh one only if current is expired
+// Returns null if share has expired (and notifies clients)
+async function getPresignedUrl(p, id) {
+    if (!p.shortUrlKey) {
+        return p.url;
     }
-});
+
+    // Check if cached URL is still valid (with 5 second buffer)
+    const expiresAt = parseS3Expiry(p.url);
+    if (expiresAt && expiresAt > Date.now() + 5000) {
+        return p.url;
+    }
+
+    // Fetch fresh URL
+    const response = await fetch(`/share-data/${p.shortUrlKey}.json`);
+    if (!response.ok) {
+        if (response.status === 410) {
+            // Share has expired
+            try {
+                const errorData = await response.json();
+                if (errorData.error === 'expired' && errorData.expires_at) {
+                    notifyClients({ type: 'expired', expires_at: errorData.expires_at, id });
+                    return null;
+                }
+            } catch (e) {}
+        }
+        throw new Error(`Failed to fetch fresh URL: ${response.status}`);
+    }
+    const data = await response.json();
+
+    // Update cached URL for future requests
+    p.url = data.url;
+
+    return data.url;
+}
 
 async function notifyClients(message) {
     const clients = await self.clients.matchAll({ type: 'window' });
@@ -347,23 +435,43 @@ function parseRangeHeader(rangeHeader, totalSize) {
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
+    // Ping endpoint to verify SW is intercepting fetches
+    if (url.pathname.endsWith('/gb-sw-ping')) {
+        event.respondWith(new Response('pong', { status: 200 }));
+        return;
+    }
+
     if (!url.pathname.endsWith('/gb-download')) return;
 
     const id = url.searchParams.get('id');
-    const p = id ? downloadParamsMap.get(id) : null;
-    if (!p) return;
-
     const isMediaPlayback = url.searchParams.get('media') === 'true';
-    const canSeek = (p.compression === '' || p.compression === 'none');
     const rangeHeader = event.request.headers.get('Range');
 
-    // Handle Range request for uncompressed files
-    if (canSeek && rangeHeader) {
-        const range = parseRangeHeader(rangeHeader, p.size);
-        if (range) {
-            event.respondWith((async () => {
+    event.respondWith((async () => {
+        // Check cache first, then ask page if SW was restarted
+        let p = id ? downloadParamsMap.get(id) : null;
+        if (!p) {
+            p = await requestParamsFromPage(id);
+        }
+        if (!p) {
+            swLog('[SW] Error: unknown hash', id);
+            return new Response('Error: unknown hash', { status: 404 });
+        }
+
+        const canSeek = (p.compression === '' || p.compression === 'none');
+
+        // Handle Range request for uncompressed files
+        if (canSeek && rangeHeader) {
+            const range = parseRangeHeader(rangeHeader, p.size);
+            if (range) {
                 await depsLoaded;
                 const keyBytes = hexToBytes(p.key);
+
+                // Get presigned URL (fetches fresh one if expired)
+                const s3Url = await getPresignedUrl(p, id);
+                if (!s3Url) {
+                    return new Response('Share link expired', { status: 410 });
+                }
 
                 // Calculate the byte range in the encrypted blob
                 const blobStart = p.offset + range.start;
@@ -372,11 +480,10 @@ self.addEventListener('fetch', (event) => {
 
                 // Align to AES block boundary
                 const alignedStart = Math.floor(blobStart / 16) * 16;
-                const skipBytes = blobStart - alignedStart;
                 const fetchEnd = blobEnd;
 
                 const s3Range = 'bytes=' + alignedStart + '-' + fetchEnd;
-                const s3Response = await fetch(p.url, {
+                const s3Response = await fetch(s3Url, {
                     headers: { 'Range': s3Range }
                 });
 
@@ -396,15 +503,19 @@ self.addEventListener('fetch', (event) => {
                 });
 
                 return new Response(stream, { status: 206, headers });
-            })());
-            return;
+            }
         }
-    }
 
-    // Full file request (or compressed file)
-    event.respondWith((async () => {
+        // Full file request (or compressed file, or invalid range)
         await depsLoaded;
         const keyBytes = hexToBytes(p.key);
+
+        // Get presigned URL (fetches fresh one if expired)
+        const s3Url = await getPresignedUrl(p, id);
+        if (!s3Url) {
+            return new Response('Share link expired', { status: 410 });
+        }
+
         const offset = p.offset;
         const length = p.length;
         const alignedOffset = Math.floor(offset / 16) * 16;
@@ -412,7 +523,7 @@ self.addEventListener('fetch', (event) => {
         const fetchLength = length + remainingSeek;
 
         const s3RangeHeader = 'bytes=' + alignedOffset + '-' + (alignedOffset + fetchLength - 1);
-        const s3Response = await fetch(p.url, {
+        const s3Response = await fetch(s3Url, {
             headers: { 'Range': s3RangeHeader }
         });
 

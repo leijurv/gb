@@ -358,7 +358,7 @@ func main() {
 			Action: func(c *cli.Context) error {
 				if !c.Bool("iunderstandthisisnotauthenticated") {
 					log.Println("This command is NOT authenticated. It allows ANYONE who can connect to " + c.String("listen") + " access to browse and download your files. Confirm this by adding the option `--iunderstandthisisnotauthenticated`")
-					log.Println("To share individual files in an authenticated public-facing way, consider `gb share` and `gb shared` instead")
+					log.Println("To share individual files in an authenticated public-facing way, consider `gb share` instead")
 					return nil
 				}
 				proxy.Proxy(c.String("label"), c.String("base"), c.String("listen"))
@@ -474,7 +474,7 @@ func main() {
 		},
 		{
 			Name:  "shared",
-			Usage: "run a server that fulfills requests for files shared with `gb share`. files are served proxied from storage, not locally",
+			Usage: "run a server that fulfills requests for files shared with `gb share-url`. files are served proxied from storage, not locally",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "label",
@@ -522,19 +522,18 @@ func main() {
 				},
 				cli.DurationFlag{
 					Name:  "expiry",
-					Usage: "how long the presigned URL should be valid",
-					Value: 7 * 24 * time.Hour,
+					Usage: "how long the presigned URL should be valid (default: 7 days for parametrized, no expiry for password mode)",
 				},
 				cli.BoolFlag{
-					Name:  "cf-worker",
-					Usage: "use Cloudflare Worker mode: upload share metadata to storage and generate a CF Worker URL",
+					Name:  "password-mode",
+					Usage: "use password url mode: upload share metadata to storage and generate a URL served by your server",
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.Bool("cf-worker") {
-					share.CFWorkerShare(c.Args().First(), c.String("name"), c.String("label"))
+				if c.Bool("password-mode") != config.Config().ShareUsePasswordURL {
+					share.PasswordUrlShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				} else {
-					share.WebShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
+					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				}
 				return nil
 			},
@@ -544,6 +543,44 @@ func main() {
 			Usage: "show comprehensive backup statistics",
 			Action: func(c *cli.Context) error {
 				stats.ShowStats()
+				return nil
+			},
+		},
+		{
+			Name:  "webshare-secrets",
+			Usage: "Print the webshare worker secrets in json format to be passed to `wrangler secret bulk` (see webshare/README.md)",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+				cli.BoolFlag{
+					Name:  "env",
+					Usage: ".env format instead of json",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				share.WebshareSecrets(c.String("label"), c.Bool("env"))
+				return nil
+			},
+		},
+		{
+			Name:    "revoke",
+			Aliases: []string{"unshare"},
+			Usage:   "revoke a password-mode share URL (run without arguments to list shares)",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "label",
+					Usage: "storage label",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				password := c.Args().First()
+				if password == "" {
+					share.ListShares(c.String("label"))
+				} else {
+					share.RevokeShare(c.String("label"), password)
+				}
 				return nil
 			},
 		},

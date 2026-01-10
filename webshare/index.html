@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=">
     <title>GB File Download</title>
     <style>
         * { box-sizing: border-box; }
@@ -182,6 +183,17 @@
     </div>
 
     <script type="module">
+    // If we're being loaded as the /gb-download URL (SW didn't intercept), bail out
+    if (location.pathname.startsWith('/gb/webshare/gb-download')) {
+        console.error('ERROR: gb-download request was not intercepted by service worker');
+        document.body.innerHTML = '<pre style="color: red;">Error: Service worker not active.\nThis request should have been intercepted by the service worker.\nTry reloading the page.</pre>';
+        throw new Error('SW not intercepting');
+    }
+
+    // Receive SW logs via BroadcastChannel (for Firefox debugging)
+    const swLogChannel = new BroadcastChannel('sw-logs');
+    swLogChannel.onmessage = (e) => console.log('[SW→Page]', e.data);
+
     const $ = id => document.getElementById(id);
 
     function parseHash() {
@@ -192,30 +204,62 @@
     function parseShortUrl() {
         const url = new URL(window.location.href);
         // Split the pathname by "/" and filter out empty strings
-        const pathSegments = url.pathname.split('/').filter(segment => segment.length > 0);
-        if (pathSegments.length !== 2) {
-            return; // this is probably github pages
+        let key = url.pathname.substring(1);
+        if (key.length === 0) {
+            $('content').innerHTML = `<div class="error-box">Missing path or parameters</div>`;
+            throw new Error('Missing path or parameters');
         }
-        return pathSegments
+        const hashIndex = key.indexOf('/');
+        if (hashIndex !== -1) key = key.slice(0, hashIndex);
+        return key
+    }
+    function formatExpiredTime(unixSeconds) {
+        const date = new Date(unixSeconds * 1000);
+        return date.toLocaleString();
     }
 
-    var params = {};
-    if (window.location.hash) {
-        params = parseHash();
-    } else {
-        const shortParams = parseShortUrl();
-        if (shortParams) {
-            const response = await fetch(`/share-data/${shortParams[0]}.json`)
-            if (!response.ok) {
-                $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
-                throw new Error(`Request failed with status ${response.status}`);
-            }
-            params = await response.json()
-        }
+    function showExpiredError(expiresAtUnix) {
+        const expiredTime = formatExpiredTime(expiresAtUnix);
+        $('content').innerHTML = `<div class="error-box">This share link has expired.<br><br>Expired at: ${expiredTime}<br><br>Ask the sender for a new link.</div>`;
     }
-    console.log('params:', params)
+
+    async function parseAndRequestShortURL() {
+        const key = parseShortUrl();
+        const response = await fetch(`/share-data/${key}.json`)
+        if (!response.ok) {
+            if (response.status === 410) {
+                // Expired - parse the error response to get the expiry time
+                try {
+                    const errorData = await response.json();
+                    if (errorData.error === "expired" && errorData.expires_at) {
+                        showExpiredError(errorData.expires_at);
+                        throw new Error('Share link expired');
+                    }
+                } catch (e) {
+                    if (e.message === 'Share link expired') throw e;
+                }
+            }
+            $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
+            throw new Error(`Request failed with status ${response.status}`);
+        }
+        return await response.json()
+    }
 
     const required = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
+    let params;
+    let shortUrlKey = null; // If set, service worker will fetch fresh URLs on each request
+    if (window.location.hash) {
+        params = parseHash();
+        const have = required.filter(k => k in params);
+        if (have <= 1) {
+            shortUrlKey = parseShortUrl();
+            params = await parseAndRequestShortURL();
+        }
+    } else {
+        shortUrlKey = parseShortUrl();
+        params = await parseAndRequestShortURL();
+    }
+
     const missing = required.filter(k => !(k in params));
     if (missing.length > 0) {
         $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
@@ -343,49 +387,33 @@
         }
     });
 
-    // Update countdown every second
-    if (expiresAt) {
+    // Update countdown every second (only meaningful for static hash URLs)
+    if (expiresAt && !shortUrlKey) {
         setInterval(() => {
             const remaining = expiresAt - Date.now();
             $('expiry-countdown').textContent = formatCountdown(remaining);
             if (remaining <= 0) {
                 $('expiry-countdown').style.fontWeight = 'bold';
                 $('download').disabled = true;
-                showStatus('This share link has expired. Ask the sender for a new link.', 'error');
+                showStatus(`This share link has expired at ${formatExpiredTime(Math.floor(expiresAt / 1000))}. Ask the sender for a new link.`, 'error');
             }
         }, 1000);
     }
 
-    const downloadUrl = './gb-download?id=' + encodeURIComponent(expectedSha256);
+    const downloadUrl = '/gb/webshare/gb-download?id=' + encodeURIComponent(expectedSha256);
 
-    function sendParamsToServiceWorker() {
-        navigator.serviceWorker.controller?.postMessage({
-            type: 'download',
-            params: {
-                url: s3Url,
-                key: keyHex,
-                offset: offset,
-                length: length,
-                size: size,
-                sha256: expectedSha256,
-                compression: compression,
-                filename: filename
-            }
-        });
+    // Wait for SW to actually be intercepting fetches (not just controlling)
+    async function waitForSwIntercepting() {
+        for (let i = 0; i < 50; i++) {  // max 5 seconds
+            try {
+                const resp = await fetch('/gb-sw-ping');
+                if (await resp.text() === 'pong') return;
+            } catch (e) {}
+            await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error('SW never started intercepting fetches');
     }
 
-    function waitForServiceWorkerReady() {
-        return new Promise((resolve) => {
-            const handler = (event) => {
-                if (event.data.type === 'pong') {
-                    navigator.serviceWorker.removeEventListener('message', handler);
-                    resolve();
-                }
-            };
-            navigator.serviceWorker.addEventListener('message', handler);
-            navigator.serviceWorker.controller?.postMessage({type: 'ping'});
-        });
-    }
 
     const ext = filename.split('.').pop().toLowerCase();
     const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
@@ -396,37 +424,40 @@
     const mediaUrl = downloadUrl + '&media=true';
 
     function showMediaPlayer() {
+        // IMPORTANT: Always set src AFTER appendChild - Firefox doesn't route
+        // requests through SW for elements not yet in the DOM
         if (isVideo) {
             const video = document.createElement('video');
             video.controls = true;
             video.preload = 'metadata';
-            video.src = mediaUrl;
+            video.onerror = () => location.reload();  // SW may have been terminated
             $('media-container').appendChild(video);
+            video.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';
         } else if (isAudio) {
             const audio = document.createElement('audio');
             audio.controls = true;
             audio.preload = 'metadata';
-            audio.src = mediaUrl;
             $('media-container').appendChild(audio);
+            audio.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';
         } else if (isImage) {
             const img = document.createElement('img');
-            img.src = mediaUrl;
             img.alt = filename;
             img.style.maxWidth = '80vw';
             img.style.maxHeight = 'calc(100vh - 300px)';
             img.style.borderRadius = '6px';
             $('media-container').appendChild(img);
+            img.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';
         } else if (isPdf) {
             const iframe = document.createElement('iframe');
-            iframe.src = mediaUrl;
             iframe.style.width = '80vw';
             iframe.style.height = 'calc(100vh - 300px)';
             iframe.style.border = 'none';
             iframe.style.borderRadius = '6px';
             $('media-container').appendChild(iframe);
+            iframe.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';
         }
     }
@@ -443,7 +474,7 @@
             throw new Error('Service Workers not supported');
         }
 
-        const registration = await navigator.serviceWorker.register('share-sw.js');
+        const registration = await navigator.serviceWorker.register('/gb/webshare/share-sw.js', { scope: '/', updateViaCache: 'all' });
 
         if (registration.installing) {
             await new Promise(resolve => {
@@ -465,7 +496,8 @@
             // If still no controller (hard reload), do a soft reload to let SW take control
             if (!navigator.serviceWorker.controller) {
                 window.location.reload();
-                return;
+                // Block forever - page is reloading, don't let caller continue
+                await new Promise(() => {});
             }
         }
 
@@ -507,11 +539,33 @@
             showStatus('Error: ' + data.message, 'error');
             $('progress-container').style.display = 'none';
             $('download').disabled = false;
+        } else if (data.type === 'expired') {
+            // Share has expired (detected during download/streaming)
+            $('progress-container').style.display = 'none';
+            showStatus(`This share link has expired at ${formatExpiredTime(data.expires_at)}. Ask the sender for a new link.`, 'error');
+            $('download').disabled = true;
         }
     }
 
     // Start listening immediately to detect in-progress downloads
     navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
+
+    // Respond to SW asking for params (if SW was terminated and restarted)
+    navigator.serviceWorker?.addEventListener('message', (event) => {
+        if (event.data.type === 'need-params' && event.data.id === expectedSha256 && event.ports[0]) {
+            event.ports[0].postMessage({
+                url: s3Url,
+                key: keyHex,
+                offset: offset,
+                length: length,
+                size: size,
+                sha256: expectedSha256,
+                compression: compression,
+                filename: filename,
+                shortUrlKey: shortUrlKey
+            });
+        }
+    });
 
     async function downloadFile() {
         $('download').disabled = true;
@@ -519,13 +573,12 @@
 
         try {
             await registerServiceWorker();
-            await waitForServiceWorkerReady();
-            sendParamsToServiceWorker();
+            await waitForSwIntercepting();
 
             const iframe = document.createElement('iframe');
             iframe.style.display = 'none';
-            iframe.src = downloadUrl;
             document.body.appendChild(iframe);
+            iframe.src = downloadUrl;  // src AFTER appendChild (Firefox SW fix)
 
             setTimeout(() => iframe.remove(), 5000);
 
@@ -542,18 +595,19 @@
     if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
         showStatus('Error: HTTPS required for Service Workers', 'error');
         $('download').disabled = true;
-    } else if (isExpired) {
-        showStatus('This share link has expired. Ask the sender for a new link.', 'error');
+    } else if (isExpired && !shortUrlKey) {
+        // Only block on expiry for static hash URLs; short URL mode fetches fresh URLs
+        showStatus(`This share link has expired at ${formatExpiredTime(Math.floor(expiresAt / 1000))}. Ask the sender for a new link.`, 'error');
         $('download').disabled = true;
     }
 
     // Initialize service worker on page load so media can stream immediately
-    if (!isExpired) {
+    // In short URL mode, always initialize since fresh URLs are fetched per request
+    if (!isExpired || shortUrlKey) {
         (async () => {
             try {
                 await registerServiceWorker();
-                await waitForServiceWorkerReady();
-                sendParamsToServiceWorker();
+                await waitForSwIntercepting();
                 showMediaPlayer();
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

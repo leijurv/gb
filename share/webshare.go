@@ -33,15 +33,20 @@ func generatePassword(length int) string {
 	return string(b)
 }
 
-func WebShare(pathOrHash string, overrideName string, label string, expiry time.Duration) {
+func ParameterizedShare(pathOrHash string, overrideName string, label string, expiry time.Duration) {
+	// For parametrized mode, empty expiry defaults to 7 days
+	if expiry == 0 {
+		expiry = 7 * 24 * time.Hour
+	}
 	webShareInternal(pathOrHash, overrideName, label, expiry, false)
 }
 
-func CFWorkerShare(pathOrHash string, overrideName string, label string) {
-	webShareInternal(pathOrHash, overrideName, label, 0, true)
+func PasswordUrlShare(pathOrHash string, overrideName string, label string, expiry time.Duration) {
+	// For password mode, empty expiry means no expiry
+	webShareInternal(pathOrHash, overrideName, label, expiry, true)
 }
 
-func webShareInternal(pathOrHash string, overrideName string, label string, expiry time.Duration, cfShare bool) {
+func webShareInternal(pathOrHash string, overrideName string, label string, expiry time.Duration, passwordUrl bool) {
 	hash, sharedName := ResolvePathOrHash(pathOrHash, overrideName)
 
 	stor, ok := storage.StorageSelect(label)
@@ -50,9 +55,10 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	}
 
 	cfg := config.Config()
-	if cfShare && cfg.CFShareBaseURL == "" {
-		log.Println("You need to set `cf_share_base_url` in your .gb.conf to use --cf-worker mode")
-		log.Println("This should be the base URL of your Cloudflare Worker, e.g. https://share.example.com")
+	if passwordUrl && cfg.SharePasswordURL == "" {
+		log.Println("You need to set `share_password_url` in your .gb.conf to use --password-url mode")
+		log.Println("This should be the base URL of your share server, e.g. https://gb.example.com")
+		log.Println("See https://github.com/leijurv/gb/tree/master/webshare/README.md for details on how to set this up")
 		return
 	}
 
@@ -102,8 +108,8 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	}
 
 	var shareURL string
-	if cfShare {
-		shareURL = generateCFWorkerURL(stor, cfg, params, pathInStorage)
+	if passwordUrl {
+		shareURL = generatePasswordURL(stor, cfg, params, pathInStorage, expiry)
 	} else {
 		shareURL = generatePresignedURL(stor, params, expiry, pathInStorage)
 	}
@@ -112,7 +118,13 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	log.Printf("File: %s", sharedName)
 	log.Printf("Size: %s uncompressed, %s compressed", utils.FormatCommas(originalSize), utils.FormatCommas(length))
 	log.Printf("Compression: %s", compressionAlg)
-	if !cfShare {
+	if passwordUrl {
+		if expiry > 0 {
+			log.Printf("URL EXPIRES: %s", time.Now().Add(expiry).Format(time.RFC3339))
+		} else {
+			log.Printf("URL EXPIRES: never (no expiry set)")
+		}
+	} else {
 		log.Printf("URL EXPIRES: %s", time.Now().Add(expiry).Format(time.RFC3339))
 	}
 	fmt.Println()
@@ -135,14 +147,17 @@ func generatePresignedURL(stor storage_base.Storage, params map[string]string, e
 	return DefaultWebShareBaseURL + "#" + url_params.Encode()
 }
 
-func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, params map[string]string, pathInStorage string) string {
+func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, params map[string]string, pathInStorage string, expiry time.Duration) string {
 	params["path"] = pathInStorage
+	if expiry > 0 {
+		params["expires_at"] = fmt.Sprintf("%d", time.Now().Add(expiry).Unix())
+	}
 	jsonData, err := json.Marshal(params)
 	if err != nil {
 		panic(err)
 	}
 
-	password := generatePassword(cfg.CFSharePasswordLength)
+	password := generatePassword(cfg.ShareUrlPasswordLength)
 
 	uploadPath := "share/" + password + ".json"
 
@@ -153,9 +168,11 @@ func generateCFWorkerURL(stor storage_base.Storage, cfg config.ConfigData, param
 	}
 	upload.End()
 
-	baseURL := cfg.CFShareBaseURL
+	baseURL := cfg.SharePasswordURL
 	for strings.HasSuffix(baseURL, "/") {
 		baseURL = baseURL[:len(baseURL)-1]
 	}
-	return fmt.Sprintf("%s/%s/%s", baseURL, password, url.PathEscape(params["name"]))
+	urlFriendlyName := strings.Replace(params["name"], " ", "_", -1)
+	urlFriendlyName = url.PathEscape(urlFriendlyName) // might not actually be necessary
+	return fmt.Sprintf("%s/%s/%s", baseURL, password, urlFriendlyName)
 }

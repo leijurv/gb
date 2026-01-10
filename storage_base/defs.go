@@ -14,6 +14,9 @@ type Storage interface {
 	// it is like always faster to get a large list of path, checksum, size than to do it one file at a time
 	ListBlobs() []UploadedBlob
 
+	// list files with a given prefix (e.g., "share/")
+	ListPrefix(prefix string) []ListedFile
+
 	Metadata(path string) (string, int64) // checksum (can be empty) and size
 
 	// delete a blob by its path
@@ -26,6 +29,14 @@ type Storage interface {
 	GetID() []byte
 
 	String() string
+}
+
+// a file listed from storage
+type ListedFile struct {
+	Path     string    // full path (for S3) or file ID (for GDrive)
+	Name     string    // filename without the prefix (e.g., "abc123.json" from "share/abc123.json")
+	Size     int64
+	Modified time.Time
 }
 
 // metadata about a blob that has been successfully uploaded

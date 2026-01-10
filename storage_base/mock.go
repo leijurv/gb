@@ -75,6 +75,23 @@ func (m *MockStorage) ListBlobs() []UploadedBlob {
 	return result
 }
 
+func (m *MockStorage) ListPrefix(prefix string) []ListedFile {
+	m.blobLock.RLock()
+	defer m.blobLock.RUnlock()
+	result := make([]ListedFile, 0)
+	for path, blob := range m.blobs {
+		if len(path) >= len(prefix) && path[:len(prefix)] == prefix {
+			result = append(result, ListedFile{
+				Path:     path,
+				Name:     path[len(prefix):],
+				Size:     int64(len(blob.data)),
+				Modified: time.Now(), // mock doesn't track modification time
+			})
+		}
+	}
+	return result
+}
+
 func (m *MockStorage) Metadata(path string) (string, int64) {
 	m.blobLock.RLock()
 	defer m.blobLock.RUnlock()

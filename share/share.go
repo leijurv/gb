@@ -63,12 +63,12 @@ func ResolvePathOrHash(pathOrHash string, overrideName string) (hash []byte, sha
 
 func CreateShareURL(pathOrHash string, overrideName string) {
 	hash, sharedName := ResolvePathOrHash(pathOrHash, overrideName)
-	shareBase := config.Config().ShareBaseURL
+	shareBase := config.Config().ShareParameterizedURL
 	if shareBase == "" {
-		log.Println("You don't appear to have `share_base_url` set in your .gb.conf")
-		log.Println("If you were running `gb shared` on \"https://gb.yourdomain.com\", you'd want to set the `share_base_url` to that, then I can print out the full URL right here instead of just the path")
+		log.Println("You don't appear to have `share_parameterized_url` set in your .gb.conf")
+		log.Println("If you were running `gb shared` on \"https://gb.yourdomain.com\", you'd want to set the `share_parameterized_url` to that, then I can print out the full URL right here instead of just the path")
 	} else {
-		log.Printf("Using the share base URL of `%s` as defined in `share_base_url` of your .gb.conf\n", shareBase)
+		log.Printf("Using the share base URL of `%s` as defined in `share_parameterized_url` of your .gb.conf\n", shareBase)
 	}
 	for strings.HasSuffix(shareBase, "/") {
 		shareBase = shareBase[:len(shareBase)-1]

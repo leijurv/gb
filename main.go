@@ -358,7 +358,7 @@ func main() {
 			Action: func(c *cli.Context) error {
 				if !c.Bool("iunderstandthisisnotauthenticated") {
 					log.Println("This command is NOT authenticated. It allows ANYONE who can connect to " + c.String("listen") + " access to browse and download your files. Confirm this by adding the option `--iunderstandthisisnotauthenticated`")
-					log.Println("To share individual files in an authenticated public-facing way, consider `gb share` and `gb shared` instead")
+					log.Println("To share individual files in an authenticated public-facing way, consider `gb share` instead")
 					return nil
 				}
 				proxy.Proxy(c.String("label"), c.String("base"), c.String("listen"))
@@ -474,7 +474,7 @@ func main() {
 		},
 		{
 			Name:  "shared",
-			Usage: "run a server that fulfills requests for files shared with `gb share`. files are served proxied from storage, not locally",
+			Usage: "run a server that fulfills requests for files shared with `gb share-url`. files are served proxied from storage, not locally",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "label",
@@ -531,7 +531,7 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.Bool("password-mode") {
+				if c.Bool("password-mode") != config.Config().ShareUsePasswordURL {
 					share.PasswordUrlShare(c.Args().First(), c.String("name"), c.String("label"))
 				} else {
 					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
@@ -549,7 +549,7 @@ func main() {
 		},
 		{
 			Name:  "webshare-secrets",
-			Usage: "Print the webshare worker secrets in json format to be passed to `wrangler secret bulk`",
+			Usage: "Print the webshare worker secrets in json format to be passed to `wrangler secret bulk` (see webshare/README.md)",
 			Flags: []cli.Flag{
 				cli.StringFlag{
 					Name:  "label",

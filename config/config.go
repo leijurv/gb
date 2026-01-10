@@ -124,7 +124,7 @@ var config = ConfigData{
 	ShareUsePasswordURL:    false,
 	ShareParameterizedURL:  "",
 	SharePasswordURL:       "",
-	ShareUrlPasswordLength: 8,
+	ShareUrlPasswordLength: 12,
 	DisableLeptonGo:        false,
 	SkipHashFailures:       false,
 	UseGitignore:           false,
@@ -222,9 +222,8 @@ func sanity() {
 	if config.DatabaseLocation != dbAbs {
 		panic("DatabaseLocation must be absolute path")
 	}
-	// not recommended but some users might not care if the files they share can be found
-	if config.ShareUrlPasswordLength < 2 {
-		panic("short url share password length must be at least 2")
+	if config.ShareUrlPasswordLength < 8 {
+		panic("gb cannot in good conscience condone such an insecure password length")
 	}
 }
 

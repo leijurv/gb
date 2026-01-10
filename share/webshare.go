@@ -52,7 +52,7 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	cfg := config.Config()
 	if passwordUrl && cfg.SharePasswordURL == "" {
 		log.Println("You need to set `share_password_url` in your .gb.conf to use --password-url mode")
-		log.Println("This should be the base URL of your share server, e.g. https://share.example.com")
+		log.Println("This should be the base URL of your share server, e.g. https://gb.example.com")
 		log.Println("See https://github.com/leijurv/gb/tree/master/webshare/README.md for details on how to set this up")
 		return
 	}

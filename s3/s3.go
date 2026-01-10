@@ -277,6 +277,33 @@ func (remote *S3) DeleteBlob(path string) {
 	log.Println("Successfully deleted S3 object:", path)
 }
 
+func (remote *S3) ListPrefix(prefix string) []storage_base.ListedFile {
+	fullPrefix := remote.NiceRootPath() + prefix
+	paginator := s3.NewListObjectsV2Paginator(remote.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(remote.Data.Bucket),
+		Prefix: aws.String(fullPrefix),
+	})
+
+	files := make([]storage_base.ListedFile, 0)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.Background())
+		if err != nil {
+			panic(err)
+		}
+		for _, obj := range page.Contents {
+			// Extract filename from full path (remove rootPath + prefix)
+			name := strings.TrimPrefix(*obj.Key, fullPrefix)
+			files = append(files, storage_base.ListedFile{
+				Path:     *obj.Key,
+				Name:     name,
+				Size:     *obj.Size,
+				Modified: *obj.LastModified,
+			})
+		}
+	}
+	return files
+}
+
 func (remote *S3) PresignedURL(path string, expiry time.Duration) (string, error) {
 	presignClient := s3.NewPresignClient(remote.client)
 	input := &s3.GetObjectInput{

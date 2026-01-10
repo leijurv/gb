@@ -153,6 +153,41 @@ func (gds *gDriveStorage) DeleteBlob(path string) {
 	log.Println("Successfully deleted Google Drive file:", path)
 }
 
+func (gds *gDriveStorage) ListPrefix(prefix string) []storage_base.ListedFile {
+	// In GDrive, files are stored with their full path as the filename
+	// We need to list all files in the root folder and filter by name prefix
+	query := gds.srv.Files.List().PageSize(1000).Q("'" + gds.root + "' in parents and trashed = false and name contains '" + strings.Split(prefix, "/")[0] + "'").Fields("nextPageToken, files(id, name, size, modifiedTime)")
+	files := make([]storage_base.ListedFile, 0)
+	for {
+		r, err := query.Do()
+		if err != nil {
+			panic(err)
+		}
+		for _, i := range r.Files {
+			if !strings.HasPrefix(i.Name, prefix) {
+				continue
+			}
+			modTime, err := time.Parse(time.RFC3339, i.ModifiedTime)
+			if err != nil {
+				panic(err)
+			}
+			// Extract filename without the prefix
+			name := strings.TrimPrefix(i.Name, prefix)
+			files = append(files, storage_base.ListedFile{
+				Path:     i.Id, // GDrive uses file ID as path
+				Name:     name,
+				Size:     i.Size,
+				Modified: modTime,
+			})
+		}
+		if r.NextPageToken == "" {
+			break
+		}
+		query.PageToken(r.NextPageToken)
+	}
+	return files
+}
+
 func (gds *gDriveStorage) PresignedURL(path string, expiry time.Duration) (string, error) {
 	return "", errors.New("presigned URLs are not supported for Google Drive")
 }

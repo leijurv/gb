@@ -123,7 +123,8 @@ function parseS3Expiry(url) {
 }
 
 // Get presigned URL, fetching fresh one only if current is expired
-async function getPresignedUrl(p) {
+// Returns null if share has expired (and notifies clients)
+async function getPresignedUrl(p, id) {
     if (!p.shortUrlKey) {
         return p.url;
     }
@@ -137,6 +138,16 @@ async function getPresignedUrl(p) {
     // Fetch fresh URL
     const response = await fetch(`/share-data/${p.shortUrlKey}.json`);
     if (!response.ok) {
+        if (response.status === 410) {
+            // Share has expired
+            try {
+                const errorData = await response.json();
+                if (errorData.error === 'expired' && errorData.expires_at) {
+                    notifyClients({ type: 'expired', expires_at: errorData.expires_at, id });
+                    return null;
+                }
+            } catch (e) {}
+        }
         throw new Error(`Failed to fetch fresh URL: ${response.status}`);
     }
     const data = await response.json();
@@ -457,7 +468,10 @@ self.addEventListener('fetch', (event) => {
                 const keyBytes = hexToBytes(p.key);
 
                 // Get presigned URL (fetches fresh one if expired)
-                const s3Url = await getPresignedUrl(p);
+                const s3Url = await getPresignedUrl(p, id);
+                if (!s3Url) {
+                    return new Response('Share link expired', { status: 410 });
+                }
 
                 // Calculate the byte range in the encrypted blob
                 const blobStart = p.offset + range.start;
@@ -497,7 +511,10 @@ self.addEventListener('fetch', (event) => {
         const keyBytes = hexToBytes(p.key);
 
         // Get presigned URL (fetches fresh one if expired)
-        const s3Url = await getPresignedUrl(p);
+        const s3Url = await getPresignedUrl(p, id);
+        if (!s3Url) {
+            return new Response('Share link expired', { status: 410 });
+        }
 
         const offset = p.offset;
         const length = p.length;

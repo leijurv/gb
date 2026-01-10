@@ -34,11 +34,16 @@ func generatePassword(length int) string {
 }
 
 func ParameterizedShare(pathOrHash string, overrideName string, label string, expiry time.Duration) {
+	// For parametrized mode, empty expiry defaults to 7 days
+	if expiry == 0 {
+		expiry = 7 * 24 * time.Hour
+	}
 	webShareInternal(pathOrHash, overrideName, label, expiry, false)
 }
 
-func PasswordUrlShare(pathOrHash string, overrideName string, label string) {
-	webShareInternal(pathOrHash, overrideName, label, 0, true)
+func PasswordUrlShare(pathOrHash string, overrideName string, label string, expiry time.Duration) {
+	// For password mode, empty expiry means no expiry
+	webShareInternal(pathOrHash, overrideName, label, expiry, true)
 }
 
 func webShareInternal(pathOrHash string, overrideName string, label string, expiry time.Duration, passwordUrl bool) {
@@ -104,7 +109,7 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 
 	var shareURL string
 	if passwordUrl {
-		shareURL = generatePasswordURL(stor, cfg, params, pathInStorage)
+		shareURL = generatePasswordURL(stor, cfg, params, pathInStorage, expiry)
 	} else {
 		shareURL = generatePresignedURL(stor, params, expiry, pathInStorage)
 	}
@@ -113,7 +118,13 @@ func webShareInternal(pathOrHash string, overrideName string, label string, expi
 	log.Printf("File: %s", sharedName)
 	log.Printf("Size: %s uncompressed, %s compressed", utils.FormatCommas(originalSize), utils.FormatCommas(length))
 	log.Printf("Compression: %s", compressionAlg)
-	if !passwordUrl {
+	if passwordUrl {
+		if expiry > 0 {
+			log.Printf("URL EXPIRES: %s", time.Now().Add(expiry).Format(time.RFC3339))
+		} else {
+			log.Printf("URL EXPIRES: never (no expiry set)")
+		}
+	} else {
 		log.Printf("URL EXPIRES: %s", time.Now().Add(expiry).Format(time.RFC3339))
 	}
 	fmt.Println()
@@ -136,8 +147,11 @@ func generatePresignedURL(stor storage_base.Storage, params map[string]string, e
 	return DefaultWebShareBaseURL + "#" + url_params.Encode()
 }
 
-func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, params map[string]string, pathInStorage string) string {
+func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, params map[string]string, pathInStorage string, expiry time.Duration) string {
 	params["path"] = pathInStorage
+	if expiry > 0 {
+		params["expires_at"] = fmt.Sprintf("%d", time.Now().Add(expiry).Unix())
+	}
 	jsonData, err := json.Marshal(params)
 	if err != nil {
 		panic(err)

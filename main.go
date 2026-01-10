@@ -522,8 +522,7 @@ func main() {
 				},
 				cli.DurationFlag{
 					Name:  "expiry",
-					Usage: "how long the presigned URL should be valid",
-					Value: 7 * 24 * time.Hour,
+					Usage: "how long the presigned URL should be valid (default: 7 days for parametrized, no expiry for password mode)",
 				},
 				cli.BoolFlag{
 					Name:  "password-mode",
@@ -532,7 +531,7 @@ func main() {
 			},
 			Action: func(c *cli.Context) error {
 				if c.Bool("password-mode") != config.Config().ShareUsePasswordURL {
-					share.PasswordUrlShare(c.Args().First(), c.String("name"), c.String("label"))
+					share.PasswordUrlShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				} else {
 					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				}

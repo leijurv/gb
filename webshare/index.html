@@ -213,10 +213,32 @@
         if (hashIndex !== -1) key = key.slice(0, hashIndex);
         return key
     }
+    function formatExpiredTime(unixSeconds) {
+        const date = new Date(unixSeconds * 1000);
+        return date.toLocaleString();
+    }
+
+    function showExpiredError(expiresAtUnix) {
+        const expiredTime = formatExpiredTime(expiresAtUnix);
+        $('content').innerHTML = `<div class="error-box">This share link has expired.<br><br>Expired at: ${expiredTime}<br><br>Ask the sender for a new link.</div>`;
+    }
+
     async function parseAndRequestShortURL() {
         const key = parseShortUrl();
         const response = await fetch(`/share-data/${key}.json`)
         if (!response.ok) {
+            if (response.status === 410) {
+                // Expired - parse the error response to get the expiry time
+                try {
+                    const errorData = await response.json();
+                    if (errorData.error === "expired" && errorData.expires_at) {
+                        showExpiredError(errorData.expires_at);
+                        throw new Error('Share link expired');
+                    }
+                } catch (e) {
+                    if (e.message === 'Share link expired') throw e;
+                }
+            }
             $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
             throw new Error(`Request failed with status ${response.status}`);
         }
@@ -373,7 +395,7 @@
             if (remaining <= 0) {
                 $('expiry-countdown').style.fontWeight = 'bold';
                 $('download').disabled = true;
-                showStatus('This share link has expired. Ask the sender for a new link.', 'error');
+                showStatus(`This share link has expired at ${formatExpiredTime(Math.floor(expiresAt / 1000))}. Ask the sender for a new link.`, 'error');
             }
         }, 1000);
     }
@@ -517,6 +539,11 @@
             showStatus('Error: ' + data.message, 'error');
             $('progress-container').style.display = 'none';
             $('download').disabled = false;
+        } else if (data.type === 'expired') {
+            // Share has expired (detected during download/streaming)
+            $('progress-container').style.display = 'none';
+            showStatus(`This share link has expired at ${formatExpiredTime(data.expires_at)}. Ask the sender for a new link.`, 'error');
+            $('download').disabled = true;
         }
     }
 
@@ -570,7 +597,7 @@
         $('download').disabled = true;
     } else if (isExpired && !shortUrlKey) {
         // Only block on expiry for static hash URLs; short URL mode fetches fresh URLs
-        showStatus('This share link has expired. Ask the sender for a new link.', 'error');
+        showStatus(`This share link has expired at ${formatExpiredTime(Math.floor(expiresAt / 1000))}. Ask the sender for a new link.`, 'error');
         $('download').disabled = true;
     }
 

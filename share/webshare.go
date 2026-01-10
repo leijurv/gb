@@ -18,7 +18,7 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-const DefaultWebShareBaseURL = "https://leijurv.github.io/gb/share/"
+const DefaultWebShareBaseURL = "https://leijurv.github.io/gb/webshare/"
 
 // generatePassword creates a random alphanumeric password of the given length
 func generatePassword(length int) string {

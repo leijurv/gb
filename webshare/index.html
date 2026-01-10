@@ -474,7 +474,11 @@
             throw new Error('Service Workers not supported');
         }
 
-        const registration = await navigator.serviceWorker.register('/gb/webshare/share-sw.js', { scope: '/', updateViaCache: 'all' });
+        var swRegistrationParams = {updateViaCache: 'all'};
+        if (window.location.pathname !== '/gb/webshare/') { // detect github pages vs cf worker for sw scope
+            swRegistrationParams.scope = '/';
+        }
+        const registration = await navigator.serviceWorker.register('/gb/webshare/share-sw.js', swRegistrationParams);
 
         if (registration.installing) {
             await new Promise(resolve => {

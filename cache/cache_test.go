@@ -311,6 +311,10 @@ func (fs *fakeStorage) ListBlobs() []storage_base.UploadedBlob {
 	panic("not implemented")
 }
 
+func (fs *fakeStorage) ListPrefix(prefix string) []storage_base.ListedFile {
+	panic("not implemented")
+}
+
 func (fs *fakeStorage) Metadata(path string) (string, int64) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -368,6 +372,10 @@ func (eis *errorInjectingStorage) BeginDatabaseUpload(filename string) storage_b
 
 func (eis *errorInjectingStorage) ListBlobs() []storage_base.UploadedBlob {
 	return eis.baseStorage.ListBlobs()
+}
+
+func (eis *errorInjectingStorage) ListPrefix(prefix string) []storage_base.ListedFile {
+	return eis.baseStorage.ListPrefix(prefix)
 }
 
 func (eis *errorInjectingStorage) Metadata(path string) (string, int64) {

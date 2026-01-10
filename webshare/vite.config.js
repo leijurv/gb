@@ -1,12 +1,16 @@
 import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 import { readFileSync } from 'fs';
+import { createHash } from 'crypto';
+
+const swHash = createHash('sha256').update(readFileSync('share-sw.js')).digest('hex').slice(0, 8);
 
 export default defineConfig({
   define: {
     ZSTD_IS_BUNDLED: 'true',
     ZSTD_JS_BASE64: JSON.stringify(readFileSync('zstd/zstd.js').toString('base64')),
-    ZSTD_WASM_BASE64: JSON.stringify(readFileSync('zstd/zstd.wasm').toString('base64'))
+    ZSTD_WASM_BASE64: JSON.stringify(readFileSync('zstd/zstd.wasm').toString('base64')),
+    SW_HASH: JSON.stringify(swHash)
   },
   plugins: [
     {
@@ -23,7 +27,8 @@ export default defineConfig({
       targets: [
         {
             src: 'index.html',
-            dest: '.'
+            dest: '.',
+            transform: (content) => content.replace('/gb/webshare/share-sw.js', `/gb/webshare/share-sw-${swHash}.js`)
         },
       ],
     }),

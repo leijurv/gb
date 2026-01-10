@@ -79,7 +79,7 @@ export default {
           if (path === "gb/webshare/share-sw.js") {
             return new Response(service,  { headers: {
               'Content-Type': "application/javascript; charset=utf-8",
-              'Content-Length': String(share.length),
+              'Content-Length': String(service.length),
               'Cache-Control': 'public, max-age=3600',
               'Service-Worker-Allowed': '/'
             }});

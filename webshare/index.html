@@ -279,8 +279,8 @@
         $('content').innerHTML = `<div class="error-box">Invalid encryption key: must be 32 hex characters</div>`;
         throw new Error('Invalid key');
     }
-    if (compression !== "zstd" && compression !== "") {
-        $('content').innerHTML = `<div class="error-box">Invalid compression: only zstd is supported</div>`;
+    if (compression !== "zstd" && compression !== "lepton" && compression !== "") {
+        $('content').innerHTML = `<div class="error-box">Invalid compression: only zstd and lepton are supported</div>`;
         throw new Error('Invalid compression');
     }
 
@@ -309,7 +309,7 @@
     const isExpired = expiresAt && expiresAt < Date.now();
 
     $('filename').textContent = filename;
-    $('meta').textContent = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression === 'zstd' ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
+    $('meta').textContent = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
 
     // Generate the curl command following paranoia/file.go
     function generateCurlCommand() {
@@ -334,6 +334,8 @@
         cmd += `head -c ${length}`;
         if (compression === 'zstd') {
             cmd += ` | zstd -d`;
+        } else if (compression === 'lepton') {
+            cmd += ` | lepton -`;  // lepton reads from stdin, writes to stdout
         }
         cmd += ` > '${filename.replace(/'/g, "'\\''")}'`;
         return cmd;
@@ -367,7 +369,7 @@
     const sha256Hex = sha256ToHex(expectedSha256);
     let infoHtml = `
         <div class="info-row"><span class="info-label">Shared with:</span> <a href="https://github.com/leijurv/gb" style="color: #00d4ff;">gb</a></div>
-        <div class="info-row"><span class="info-label">File size:</span> ${size.toLocaleString()} bytes${compression === 'zstd' ? ` (${length.toLocaleString()} bytes compressed)` : ''}</div>
+        <div class="info-row"><span class="info-label">File size:</span> ${size.toLocaleString()} bytes${compression ? ` (${length.toLocaleString()} bytes compressed)` : ''}</div>
         <div class="info-row"><span class="info-label">SHA-256:</span> ${sha256Hex}</div>
         <div class="info-row"><span class="info-label">Compression:</span> ${compression || 'none'}</div>
         ${expiresAt ? `<div class="info-row"><span class="info-label">URL expires in:</span> <span class="expiry-countdown" id="expiry-countdown">${formatCountdown(expiresAt - Date.now())}</span></div>` : ''}

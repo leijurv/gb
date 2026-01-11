@@ -56,6 +56,55 @@ async function loadZstdWasm() {
     ZStd = await ZSTD({ wasmBinary: wasmBinary });
 }
 
+// Lepton JPEG codec - Go WASM port (from github.com/leijurv/lepton_jpeg_go)
+// Decodes .lep files back to JPEG (non-streaming: buffers entire input)
+// Loaded on-demand only when needed (not bundled due to size)
+let leptonDecode = null;
+let leptonLoading = null;  // Promise for lazy loading
+
+const leptonJs = {
+    url: 'https://leijurv.github.io/gb/webshare/lepton/wasm_exec.js',
+    integrity: 'sha384-KwjovEIUCt0BqP151QPbh8Mp1Wdb6TelOOTotZvkRQWrOIG4OEj2fMs/UysQTu1q'
+};
+const leptonWasm = {
+    url: 'https://leijurv.github.io/gb/webshare/lepton/lepton.wasm',
+    integrity: 'sha384-nD8ZMZRNSI2IRCH1GmY/5lonQ6Kp69dLe7IHX5+hoE8oePIJgx9ZeOEusNDN9hP3'
+};
+
+async function loadLeptonWasm() {
+    // Fetch both files in parallel with integrity verification
+    const [jsResponse, wasmResponse] = await Promise.all([
+        fetch(leptonJs.url, { integrity: leptonJs.integrity }),
+        fetch(leptonWasm.url, { integrity: leptonWasm.integrity })
+    ]);
+    if (!jsResponse.ok) throw new Error(`Failed to fetch ${leptonJs.url}: ${jsResponse.status}`);
+    if (!wasmResponse.ok) throw new Error(`Failed to fetch ${leptonWasm.url}: ${wasmResponse.status}`);
+
+    const code = await jsResponse.text();
+    const wasmBinary = new Uint8Array(await wasmResponse.arrayBuffer());
+
+    // Go's wasm_exec.js creates a global Go class
+    eval(code);
+
+    const go = new Go();
+    const result = await WebAssembly.instantiate(wasmBinary, go.importObject);
+
+    // Run the Go program (non-blocking, sets up leptonDecode global)
+    go.run(result.instance);
+
+    // leptonDecode is now available as a global function
+    leptonDecode = self.leptonDecode;
+}
+
+// Lazy load lepton only when needed because the wasm is several megabytes
+async function ensureLeptonLoaded() {
+    if (leptonDecode) return;
+    if (!leptonLoading) {
+        leptonLoading = loadLeptonWasm();
+    }
+    await leptonLoading;
+}
+
 async function loadDependencies() {
     const tasks = [];
     for (const dep of dependencies) {
@@ -321,6 +370,40 @@ function createZstdDecompressTransform() {
     });
 }
 
+function createLeptonDecompressTransform() {
+    /* don't await */ ensureLeptonLoaded();  // Start loading in parallel with data download
+
+    // Lepton is not a streaming decoder - must buffer entire input
+    const chunks = [];
+
+    return new TransformStream({
+        transform(chunk, controller) {
+            chunks.push(chunk);
+        },
+        async flush(controller) {
+            // Load lepton on-demand (not bundled due to size)
+            await ensureLeptonLoaded();
+
+            // Combine all chunks
+            const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+            const input = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+                input.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            // Decode lepton to JPEG
+            const result = leptonDecode(input);
+            if (result.error) {
+                throw new Error('Lepton decode error: ' + result.error);
+            }
+
+            controller.enqueue(new Uint8Array(result.data));
+        }
+    });
+}
+
 function createHashAndProgressTransform(expectedSha256) {
     const hasher = sha256.create();
     let totalBytes = 0;
@@ -475,6 +558,8 @@ self.addEventListener('fetch', (event) => {
 
         if (p.compression === 'zstd') {
             stream = stream.pipeThrough(createZstdDecompressTransform());
+        } else if (p.compression === 'lepton') {
+            stream = stream.pipeThrough(createLeptonDecompressTransform());
         }
 
         // Only track progress/hash for actual downloads, not media playback

@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy'
 import { readFileSync } from 'fs';
 import { createHash } from 'crypto';
+import { transform } from 'esbuild';
 
 const swHash = createHash('sha256').update(readFileSync('share-sw.js')).digest('hex').slice(0, 8);
 
@@ -32,6 +33,16 @@ export default defineConfig({
         delete bundle['share-sw.js'];
       }
     },
+    {
+      name: 'minify-except-sw',
+      async renderChunk(code, chunk) {
+        if (chunk.fileName !== 'share-sw.js') {
+          const result = await transform(code, { minify: true });
+          return result.code;
+        }
+        return null;
+      }
+    },
     viteStaticCopy({
       targets: [
         {
@@ -60,6 +71,7 @@ export default defineConfig({
       external: ['./index.html', './share-sw.js.txt', './zstd.js.txt', './zstd.wasm.bin']
     },
     outDir: 'dist',
-    emptyOutDir: true
+    emptyOutDir: true,
+    minify: false
   }
 });

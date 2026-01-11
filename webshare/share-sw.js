@@ -18,6 +18,7 @@ const dependencies = [
 // Uses official libzstd compiled to WASM - no window size limitations
 // Zstd frame format is stable: old decoders can decompress new encoder output
 let ZStd = null;
+let zstdLoading = null;  // Promise for lazy loading
 
 const zstdJs = {
     url: 'https://leijurv.github.io/gb/webshare/zstd/zstd.js',
@@ -54,6 +55,15 @@ async function loadZstdWasm() {
     eval(code);
     // Pass wasmBinary to the factory so emscripten doesn't fetch it
     ZStd = await ZSTD({ wasmBinary: wasmBinary });
+}
+
+// Lazy load zstd only when needed
+async function ensureZstdLoaded() {
+    if (ZStd) return;
+    if (!zstdLoading) {
+        zstdLoading = loadZstdWasm();
+    }
+    await zstdLoading;
 }
 
 // Lepton JPEG codec - Go WASM port (from github.com/leijurv/lepton_jpeg_go)
@@ -116,7 +126,6 @@ async function loadDependencies() {
             eval(code);
         })());
     }
-    tasks.push(loadZstdWasm());
     await Promise.all(tasks);
 }
 
@@ -296,6 +305,8 @@ function createDecryptTransform(keyBytes, startOffset) {
 }
 
 function createZstdDecompressTransform() {
+    /* don't await */ ensureZstdLoaded();  // Start loading in parallel with data download
+
     // WASM streaming decompression using zstd-emscripten
     // Buffer size for input/output chunks (128KB each)
     const BUFFER_SIZE = 131072;
@@ -305,7 +316,8 @@ function createZstdDecompressTransform() {
     let buffIn, buffInPos, buffOut, buffOutPos;
 
     return new TransformStream({
-        start() {
+        async start() {
+            await ensureZstdLoaded();
             // Allocate WASM memory for buffers
             // Layout: [inPos(4)] [input(BUFFER_SIZE-4)] [outPos(4)] [output(BUFFER_SIZE-4)]
             buffersPtr = ZStd._malloc(BUFFER_SIZE * 2);

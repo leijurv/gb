@@ -5,13 +5,22 @@ import { createHash } from 'crypto';
 
 const swHash = createHash('sha256').update(readFileSync('share-sw.js')).digest('hex').slice(0, 8);
 
+// Set BUNDLE_ZSTD=true to embed zstd in the service worker (larger bundle, no external fetch)
+// Default: fetch zstd from GitHub Pages at runtime
+const bundleZstd = process.env.BUNDLE_ZSTD === 'true';
+
+const defines = {
+  ZSTD_IS_BUNDLED: bundleZstd ? 'true' : 'false',
+  SW_HASH: JSON.stringify(swHash)
+};
+
+if (bundleZstd) {
+  defines.ZSTD_JS_BASE64 = JSON.stringify(readFileSync('zstd/zstd.js').toString('base64'));
+  defines.ZSTD_WASM_BASE64 = JSON.stringify(readFileSync('zstd/zstd.wasm').toString('base64'));
+}
+
 export default defineConfig({
-  define: {
-    ZSTD_IS_BUNDLED: 'true',
-    ZSTD_JS_BASE64: JSON.stringify(readFileSync('zstd/zstd.js').toString('base64')),
-    ZSTD_WASM_BASE64: JSON.stringify(readFileSync('zstd/zstd.wasm').toString('base64')),
-    SW_HASH: JSON.stringify(swHash)
-  },
+  define: defines,
   plugins: [
     {
       name: 'rename-files',

@@ -20,11 +20,11 @@ const dependencies = [
 let ZStd = null;
 
 const zstdJs = {
-    url: 'zstd/zstd.js',  // relative to service worker
+    url: 'https://leijurv.github.io/gb/webshare/zstd/zstd.js',
     integrity: 'sha384-78z6VYTAbieb/uF4afnBJAjPzgKIxv0MgekAbfoEKEDZIVwGWxfKPToG5VKCU3TR'
 };
 const zstdWasm = {
-    url: 'zstd/zstd.wasm',
+    url: 'https://leijurv.github.io/gb/webshare/zstd/zstd.wasm',
     integrity: 'sha384-Wu2F+8X9C4paG5l9Zp/TMb/hJhIX0rB9bIsxZmdqixBwdIymHYS3RQognZWsAk0I'
 };
 

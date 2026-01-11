@@ -1,33 +1,47 @@
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-
-function createS3Client(env) {
+async function generatePresignedUrl(env, filePath, expiresIn = 30) {
   let endpoint = env.S3_ENDPOINT;
-  if (!endpoint.includes(env.S3_REGION)) endpoint = `s3.${env.S3_REGION}.${endpoint}`;
+  if (!endpoint.includes(env.S3_REGION)) {
+    endpoint = `s3.${env.S3_REGION}.${endpoint}`;
+  }
 
-  return new S3Client({
-    region: env.S3_REGION,
-    endpoint: `https://${endpoint}`,
-    credentials: {
-      accessKeyId: env.S3_ACCESS_KEY,
-      secretAccessKey: env.S3_SECRET_KEY,
-    },
-  });
+  const url = new URL(`https://${env.S3_BUCKET}.${endpoint}/${filePath}`);
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const scope = `${amzDate.slice(0, 8)}/${env.S3_REGION}/s3/aws4_request`;
+
+  url.searchParams.set('X-Amz-Algorithm', 'AWS4-HMAC-SHA256');
+  url.searchParams.set('X-Amz-Credential', `${env.S3_ACCESS_KEY}/${scope}`);
+  url.searchParams.set('X-Amz-Date', amzDate);
+  url.searchParams.set('X-Amz-Expires', String(expiresIn));
+  url.searchParams.set('X-Amz-SignedHeaders', 'host');
+
+  const canonicalRequest = `GET\n/${filePath}\n${url.searchParams}\nhost:${url.host}\n\nhost\nUNSIGNED-PAYLOAD`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await sha256(canonicalRequest)}`;
+
+  let key = `AWS4${env.S3_SECRET_KEY}`;
+  for (const part of [amzDate.slice(0, 8), env.S3_REGION, 's3', 'aws4_request']) {
+    key = await hmac(key, part);
+  }
+  url.searchParams.set('X-Amz-Signature', toHex(await hmac(key, stringToSign)));
+
+  return url.toString();
 }
 
-async function generatePresignedUrl(env, filePath, expiresIn = 30) {
-  const client = createS3Client(env);
+function encode(str) {
+  return new TextEncoder().encode(str);
+}
 
-  const command = new GetObjectCommand({
-    Bucket: env.S3_BUCKET,
-    Key: filePath,
-  });
+function toHex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
-  const presignedUrl = await getSignedUrl(client, command, {
-    expiresIn,
-  });
+async function sha256(str) {
+  return toHex(await crypto.subtle.digest('SHA-256', encode(str)));
+}
 
-  return presignedUrl;
+async function hmac(key, msg) {
+  key = typeof key === 'string' ? encode(key) : key;
+  key = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return crypto.subtle.sign('HMAC', key, encode(msg));
 }
 
 import share from "./index.html"

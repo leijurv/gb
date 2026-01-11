@@ -289,23 +289,6 @@ function createDecryptTransform(keyBytes, startOffset) {
     });
 }
 
-function createLengthLimitTransform(maxLength) {
-    let written = 0;
-    return new TransformStream({
-        transform(chunk, controller) {
-            const remaining = maxLength - written;
-            if (remaining <= 0) return;
-            if (chunk.length <= remaining) {
-                controller.enqueue(chunk);
-                written += chunk.length;
-            } else {
-                controller.enqueue(chunk.slice(0, remaining));
-                written += remaining;
-            }
-        }
-    });
-}
-
 function createZstdDecompressTransform() {
     // WASM streaming decompression using zstd-emscripten
     // Buffer size for input/output chunks (128KB each)
@@ -406,6 +389,22 @@ function createHashAndProgressTransform(expectedSha256) {
     });
 }
 
+async function fetchS3Range(url, start, end) {
+    const expectedLength = end - start + 1;
+    const response = await fetch(url, {
+        headers: { 'Range': `bytes=${start}-${end}` }
+    });
+    if (response.status !== 206) {
+        throw new Error('S3 fetch failed: expected 206, got ' + response.status);
+    }
+    const contentLength = parseInt(response.headers.get('Content-Length'));
+    if (contentLength !== expectedLength) {
+        throw new Error(`S3 Content-Length mismatch: expected ${expectedLength}, got ${contentLength}`);
+    }
+    // we can't verify Content-Range entirely because we don't know the total size of the blob, and verifying Content-Length alone is (more than) enough to be confident that S3 is behaving
+    return response;
+}
+
 function parseRangeHeader(rangeHeader, totalSize) {
     // Parse "bytes=start-end" or "bytes=start-" or "bytes=-suffix"
     const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
@@ -480,20 +479,14 @@ self.addEventListener('fetch', (event) => {
 
                 // Align to AES block boundary
                 const alignedStart = Math.floor(blobStart / 16) * 16;
-                const fetchEnd = blobEnd;
-
-                const s3Range = 'bytes=' + alignedStart + '-' + fetchEnd;
-                const s3Response = await fetch(s3Url, {
-                    headers: { 'Range': s3Range }
-                });
-
-                if (!s3Response.ok && s3Response.status !== 206) {
-                    return new Response('S3 fetch failed: ' + s3Response.status, { status: 502 });
+                let s3Response;
+                try {
+                    s3Response = await fetchS3Range(s3Url, alignedStart, blobEnd);
+                } catch (e) {
+                    return new Response(e.message, { status: 502 });
                 }
-
                 const stream = s3Response.body
-                    .pipeThrough(createDecryptTransform(keyBytes, blobStart))
-                    .pipeThrough(createLengthLimitTransform(rangeLength));
+                    .pipeThrough(createDecryptTransform(keyBytes, blobStart));
 
                 const headers = new Headers({
                     'Content-Type': getMimeType(p.filename),
@@ -522,18 +515,14 @@ self.addEventListener('fetch', (event) => {
         const remainingSeek = offset % 16;
         const fetchLength = length + remainingSeek;
 
-        const s3RangeHeader = 'bytes=' + alignedOffset + '-' + (alignedOffset + fetchLength - 1);
-        const s3Response = await fetch(s3Url, {
-            headers: { 'Range': s3RangeHeader }
-        });
-
-        if (!s3Response.ok && s3Response.status !== 206) {
-            return new Response('S3 fetch failed: ' + s3Response.status, { status: 502 });
+        let s3Response;
+        try {
+            s3Response = await fetchS3Range(s3Url, alignedOffset, alignedOffset + fetchLength - 1);
+        } catch (e) {
+            return new Response(e.message, { status: 502 });
         }
-
         let stream = s3Response.body
-            .pipeThrough(createDecryptTransform(keyBytes, offset))
-            .pipeThrough(createLengthLimitTransform(length));
+            .pipeThrough(createDecryptTransform(keyBytes, offset));
 
         if (p.compression === 'zstd') {
             stream = stream.pipeThrough(createZstdDecompressTransform());

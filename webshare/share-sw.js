@@ -198,31 +198,21 @@ function getMimeType(filename) {
     return mimeTypes[ext] || 'application/octet-stream';
 }
 
-function calcIVAndSeek(offset) {
-    const blockNum = Math.floor(offset / 16);
-    const iv = new Uint8Array(16);
-    let n = blockNum;
-    for (let i = 15; i >= 0 && n > 0; i--) {
-        iv[i] = n & 0xff;
-        n = Math.floor(n / 256);
-    }
-    return { iv, remainingSeek: offset % 16 };
-}
-
+// AES-CTR decryption transform that handles arbitrary byte offsets.
+// Each chunk is fully processed immediately by padding both ends:
+// prepend zeros to align to block boundary, append zeros to round up.
 function createDecryptTransform(keyBytes, startOffset) {
-    const { iv, remainingSeek } = calcIVAndSeek(startOffset);
     let cryptoKey = null;
-    let counter = new Uint8Array(iv);
-    let skipBytes = remainingSeek;
-    let pendingBytes = new Uint8Array(0);
+    let currentPos = startOffset;
 
-    function incrementCounter(ctr, times) {
-        for (let t = 0; t < times; t++) {
-            for (let i = 15; i >= 0; i--) {
-                ctr[i]++;
-                if (ctr[i] !== 0) break;
-            }
+    function makeCounter(bytePos) {
+        const counter = new Uint8Array(16);
+        let n = Math.floor(bytePos / 16);
+        for (let i = 15; i >= 0 && n > 0; i--) {
+            counter[i] = n & 0xff;
+            n = Math.floor(n / 256);
         }
+        return counter;
     }
 
     return new TransformStream({
@@ -232,59 +222,26 @@ function createDecryptTransform(keyBytes, startOffset) {
             );
         },
         async transform(chunk, controller) {
-            const combined = new Uint8Array(pendingBytes.length + chunk.length);
-            combined.set(pendingBytes, 0);
-            combined.set(chunk, pendingBytes.length);
+            if (chunk.length === 0) return;
 
-            const fullBlocks = Math.floor(combined.length / 16);
-            const toProcess = fullBlocks * 16;
+            // Pad to align: [prefix zeros to block boundary][chunk][suffix zeros to round up]
+            const prefixLen = currentPos % 16;
+            const paddedLen = Math.ceil((prefixLen + chunk.length) / 16) * 16;
+            const toDecrypt = new Uint8Array(paddedLen);
+            toDecrypt.set(chunk, prefixLen);
 
-            if (toProcess > 0) {
-                const toDecrypt = combined.slice(0, toProcess);
-                // CTR mode is symmetric: encrypt(ciphertext) = decrypt(ciphertext)
-                // Web Crypto only exposes encrypt() for AES-CTR, which works for decryption too
-                const decrypted = await crypto.subtle.encrypt(
-                    { name: 'AES-CTR', counter: counter, length: 64 },
-                    cryptoKey,
-                    toDecrypt
-                );
+            const counter = makeCounter(currentPos - prefixLen);
 
-                incrementCounter(counter, fullBlocks);
+            // CTR mode is symmetric: encrypt(ciphertext) = decrypt(ciphertext)
+            const decrypted = await crypto.subtle.encrypt(
+                { name: 'AES-CTR', counter, length: 128 },
+                cryptoKey,
+                toDecrypt
+            );
 
-                let result = new Uint8Array(decrypted);
-
-                if (skipBytes > 0) {
-                    result = result.slice(skipBytes);
-                    skipBytes = 0;
-                }
-
-                if (result.length > 0) {
-                    controller.enqueue(result);
-                }
-            }
-
-            pendingBytes = combined.slice(toProcess);
-        },
-        async flush(controller) {
-            if (pendingBytes.length > 0) {
-                const padded = new Uint8Array(16);
-                padded.set(pendingBytes, 0);
-                // CTR mode is symmetric (see comment above)
-                const decrypted = await crypto.subtle.encrypt(
-                    { name: 'AES-CTR', counter: counter, length: 64 },
-                    cryptoKey,
-                    padded
-                );
-                let result = new Uint8Array(decrypted).slice(0, pendingBytes.length);
-
-                if (skipBytes > 0) {
-                    result = result.slice(skipBytes);
-                }
-
-                if (result.length > 0) {
-                    controller.enqueue(result);
-                }
-            }
+            // Extract only the bytes corresponding to the original chunk
+            controller.enqueue(new Uint8Array(decrypted).slice(prefixLen, prefixLen + chunk.length));
+            currentPos += chunk.length;
         }
     });
 }
@@ -477,11 +434,9 @@ self.addEventListener('fetch', (event) => {
                 const blobEnd = p.offset + range.end;
                 const rangeLength = range.end - range.start + 1;
 
-                // Align to AES block boundary
-                const alignedStart = Math.floor(blobStart / 16) * 16;
                 let s3Response;
                 try {
-                    s3Response = await fetchS3Range(s3Url, alignedStart, blobEnd);
+                    s3Response = await fetchS3Range(s3Url, blobStart, blobEnd);
                 } catch (e) {
                     return new Response(e.message, { status: 502 });
                 }
@@ -509,20 +464,14 @@ self.addEventListener('fetch', (event) => {
             return new Response('Share link expired', { status: 410 });
         }
 
-        const offset = p.offset;
-        const length = p.length;
-        const alignedOffset = Math.floor(offset / 16) * 16;
-        const remainingSeek = offset % 16;
-        const fetchLength = length + remainingSeek;
-
         let s3Response;
         try {
-            s3Response = await fetchS3Range(s3Url, alignedOffset, alignedOffset + fetchLength - 1);
+            s3Response = await fetchS3Range(s3Url, p.offset, p.offset + p.length - 1);
         } catch (e) {
             return new Response(e.message, { status: 502 });
         }
         let stream = s3Response.body
-            .pipeThrough(createDecryptTransform(keyBytes, offset));
+            .pipeThrough(createDecryptTransform(keyBytes, p.offset));
 
         if (p.compression === 'zstd') {
             stream = stream.pipeThrough(createZstdDecompressTransform());

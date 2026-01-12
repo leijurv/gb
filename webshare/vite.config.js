@@ -34,11 +34,6 @@ export default defineConfig({
           bundle[dotTxt] = chunk;
           delete bundle[filename];
         }
-        // Rename share-sw.js to share-sw.js.txt
-        /*const chunk = bundle['share-sw.js'];
-        chunk.fileName = 'share-sw.js.txt';
-        bundle['share-sw.js.txt'] = chunk;
-        delete bundle['share-sw.js'];*/
       }
     },
     {
@@ -86,7 +81,7 @@ export default defineConfig({
         entryFileNames: '[name].js',  // Outputs as worker.js and share-sw.js
         chunkFileNames: '[name].js',
       },
-      external: ['./index.html', './share-sw.js.txt', './jszip.js.txt' ]
+      external: ['./index.html', './share-sw.js.txt' ]
     },
     outDir: 'dist',
     emptyOutDir: true,

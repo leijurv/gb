@@ -84,19 +84,30 @@ export default {
               }
               return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
             }
+            async function setUrl(json, now) {
+              let presignedExpiry = 30; // default
+              if (json.expires_at) {
+                const expiresAt = parseInt(json.expires_at);
+                if (now >= expiresAt) {
+                  return new Response(JSON.stringify({ error: "expired", expires_at: expiresAt }), { status: 410, headers: { "Content-Type": "application/json" } });
+                }
+                // Clamp presigned URL expiry to not exceed the share expiry
+                presignedExpiry = Math.min(presignedExpiry, expiresAt - now);
+              }
+              json.url = await generatePresignedUrl(env, json.path, presignedExpiry);
+            }
+
             let json = await response.json();
             // Check if the share has expired
             const now = Math.floor(Date.now() / 1000);
-            let presignedExpiry = 30; // default
-            if (json.expires_at) {
-              const expiresAt = parseInt(json.expires_at);
-              if (now >= expiresAt) {
-                return new Response(JSON.stringify({ error: "expired", expires_at: expiresAt }), { status: 410, headers: { "Content-Type": "application/json" } });
+            if (Array.isArray(json)) {
+              for (let inner of json) {
+                await setUrl(inner, now);
               }
-              // Clamp presigned URL expiry to not exceed the share expiry
-              presignedExpiry = Math.min(presignedExpiry, expiresAt - now);
+            } else {
+              await setUrl(json, now);
             }
-            json.url = await generatePresignedUrl(env, json.path, presignedExpiry);
+
             return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
           }
 

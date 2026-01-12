@@ -78,6 +78,17 @@
             border-radius: 6px;
             margin-top: 20px;
         }
+        #zip-container {
+            margin: 20px auto;
+            display: none;
+            background-color: #121221;
+            border: 1px solid #3a5287;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        #zip-container li {
+            list-style: none;
+        }
         #media-container {
             margin: 20px 0;
             display: none;
@@ -179,6 +190,7 @@
             <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
             <div class="progress-text" id="progress-text">0%</div>
         </div>
+        <div id="zip-container"></div>
         <div id="media-container"></div>
     </div>
 
@@ -245,6 +257,24 @@
         return await response.json()
     }
 
+    function parseZipFileName() {
+        const url = new URL(window.location.href);
+        const idx = url.pathname.lastIndexOf('/');
+        const name = url.pathname.slice(idx + 1);
+        if (name.endsWith('.zip')) {
+            return name;
+        }
+        return 'download.zip';
+    }
+    // TODO: use client-zip to compute actual length
+    function computeZipSize(array) {
+        let size = 0;
+        for (let p of array) {
+            size += p.size;
+        }
+        return size;
+    }
+
     const required = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
     let params;
     let shortUrlKey = null; // If set, service worker will fetch fresh URLs on each request
@@ -259,173 +289,193 @@
         shortUrlKey = parseShortUrl();
         params = await parseAndRequestShortURL();
     }
-
-    const missing = required.filter(k => !(k in params));
-    if (missing.length > 0) {
-        $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
-        throw new Error('Missing params');
+    // variables assigned by single file and zip mode
+    let expectedDownloadId; // sha256 in single download mode
+    let isExpired = false;
+    let downloadUrl;
+    function parseParams(p) {
+        return {
+            compression: p.cmp,
+            key: p.key.toLowerCase(),
+            length: parseInt(p.length),
+            offset: parseInt(p.offset),
+            size: parseInt(p.size),
+            name: p.name,
+            filename: p.name,
+            path: p.path,
+            sha256: p.sha256,
+            url: p.url,
+            shortUrlKey: shortUrlKey
+        };
     }
+    if (Array.isArray(params)) {
+        expectedDownloadId = shortUrlKey
+        params = params.map(parseParams);
+        const zipFileName = parseZipFileName();
+        $('filename').textContent = zipFileName;
+        $('meta').innerHTML = `${(computeZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} ${params.length > 1 ? "files" : "file"}`;
+        $('more-info').remove();
+        console.log(params);
+        downloadUrl = `/gb/webshare/gb-download?zip-id=${shortUrlKey}&download-filename=${parseZipFileName()}`;
 
-    const filename = params.name;
-    const s3Url = params.url;
-    const keyHex = params.key.toLowerCase();
-    const offset = parseInt(params.offset);
-    const length = parseInt(params.length);
-    const size = parseInt(params.size);
-    const expectedSha256 = params.sha256;
-    const compression = params.cmp;
+        $('zip-container').style.display = 'table';
+        // TODO: embed and individual download buttons
+        $('zip-container').innerHTML = params.map(p => `<li>${p.filename} (${formatBytes(p.size)})</li>`).join('');
+    } else {
+        const missing = required.filter(k => !(k in params));
+        if (missing.length > 0) {
+            $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
+            throw new Error('Missing params');
+        }
+        params = parseParams(params);
 
-    if (!/^[0-9a-f]{32}$/.test(keyHex)) {
-        $('content').innerHTML = `<div class="error-box">Invalid encryption key: must be 32 hex characters</div>`;
-        throw new Error('Invalid key');
-    }
-    if (compression !== "zstd" && compression !== "lepton" && compression !== "") {
+        const filename = params.name;
+        const s3Url = params.url;
+        const keyHex = params.key.toLowerCase();
+        const offset = parseInt(params.offset);
+        const length = parseInt(params.length);
+        const size = parseInt(params.size);
+        expectedDownloadId = params.sha256;
+        const compression = params.compression;
+
+        if (!/^[0-9a-f]{32}$/.test(keyHex)) {
+            $('content').innerHTML = `<div class="error-box">Invalid encryption key: must be 32 hex characters</div>`;
+            throw new Error('Invalid key');
+        }
+        if (compression !== "zstd" && compression !== "lepton" && compression !== "") {
         $('content').innerHTML = `<div class="error-box">Invalid compression: only zstd and lepton are supported</div>`;
-        throw new Error('Invalid compression');
-    }
-
-    // Parse expiry from S3 presigned URL (X-Amz-Date + X-Amz-Expires)
-    function parseS3Expiry(url) {
-        try {
-            const urlObj = new URL(url);
-            const amzDate = urlObj.searchParams.get('X-Amz-Date'); // format: 20260102T090602Z
-            const amzExpires = urlObj.searchParams.get('X-Amz-Expires'); // seconds
-            if (amzDate && amzExpires) {
-                const year = amzDate.slice(0, 4);
-                const month = amzDate.slice(4, 6);
-                const day = amzDate.slice(6, 8);
-                const hour = amzDate.slice(9, 11);
-                const min = amzDate.slice(11, 13);
-                const sec = amzDate.slice(13, 15);
-                const created = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}Z`);
-                return created.getTime() + parseInt(amzExpires) * 1000;
-            }
-        } catch (e) {
-        }
-        return null;
-    }
-
-    const expiresAt = parseS3Expiry(s3Url);
-    const isExpired = expiresAt && expiresAt < Date.now();
-
-    $('filename').textContent = filename;
-    $('meta').textContent = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
-
-    // Generate the curl command following paranoia/file.go
-    function generateCurlCommand() {
-        const alignedOffset = Math.floor(offset / 16) * 16;
-        const remainingSeek = offset % 16;
-        const fetchLength = length + remainingSeek;
-
-        // Calculate IV (AES-CTR counter from block number)
-        const blockNum = Math.floor(offset / 16);
-        let iv = '';
-        let n = blockNum;
-        for (let i = 0; i < 16; i++) {
-            iv = (n & 0xff).toString(16).padStart(2, '0') + iv;
-            n = Math.floor(n / 256);
+            throw new Error('Invalid compression');
         }
 
-        let cmd = `curl -H 'Range: bytes=${alignedOffset}-${alignedOffset + fetchLength - 1}' '${s3Url}' | `;
-        cmd += `openssl enc -aes-128-ctr -d -K ${keyHex} -iv ${iv} 2>/dev/null | `;
-        if (remainingSeek > 0) {
-            cmd += `{ dd bs=${remainingSeek} skip=1 count=0 status=none; cat; } | `;
-        }
-        cmd += `head -c ${length}`;
-        if (compression === 'zstd') {
-            cmd += ` | zstd -d`;
-        } else if (compression === 'lepton') {
-            cmd += ` | lepton -`;  // lepton reads from stdin, writes to stdout
-        }
-        cmd += ` > '${filename.replace(/'/g, "'\\''")}'`;
-        return cmd;
-    }
-
-    // Convert base64url sha256 to hex for display
-    function sha256ToHex(b64url) {
-        const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
-        const padded = b64 + '=='.slice(0, (4 - b64.length % 4) % 4);
-        const binary = atob(padded);
-        return Array.from(binary, c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
-    }
-
-    // Format countdown
-    function formatCountdown(ms) {
-        if (ms <= 0) return 'EXPIRED';
-        const hours = Math.floor(ms / 3600000);
-        const mins = Math.floor((ms % 3600000) / 60000);
-        const secs = Math.floor((ms % 60000) / 1000);
-        if (hours > 24) {
-            const days = Math.floor(hours / 24);
-            return `${days}d ${hours % 24}h`;
-        }
-        if (hours > 0) return `${hours}h ${mins}m`;
-        if (mins > 0) return `${mins}m ${secs}s`;
-        return `${secs}s`;
-    }
-
-    // Populate info section
-    const curlCmd = generateCurlCommand();
-    const sha256Hex = sha256ToHex(expectedSha256);
-    let infoHtml = `
-        <div class="info-row"><span class="info-label">Shared with:</span> <a href="https://github.com/leijurv/gb" style="color: #00d4ff;">gb</a></div>
-        <div class="info-row"><span class="info-label">File size:</span> ${size.toLocaleString()} bytes${compression ? ` (${length.toLocaleString()} bytes compressed)` : ''}</div>
-        <div class="info-row"><span class="info-label">SHA-256:</span> ${sha256Hex}</div>
-        <div class="info-row"><span class="info-label">Compression:</span> ${compression || 'none'}</div>
-        ${expiresAt ? `<div class="info-row"><span class="info-label">URL expires in:</span> <span class="expiry-countdown" id="expiry-countdown">${formatCountdown(expiresAt - Date.now())}</span></div>` : ''}
-        <div class="info-row"><span class="info-label">Manual download command:</span></div>
-        <div class="cmd-box" id="cmd-box">${curlCmd.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-    `;
-    $('info-content').innerHTML = infoHtml;
-
-    // Click to copy
-    $('cmd-box').addEventListener('click', async () => {
-        try {
-            await navigator.clipboard.writeText(curlCmd);
-            $('cmd-box').classList.add('copied');
-            setTimeout(() => $('cmd-box').classList.remove('copied'), 2000);
-        } catch (e) {
-            console.error('Copy failed:', e);
-        }
-    });
-
-    // Update countdown every second (only meaningful for static hash URLs)
-    if (expiresAt && !shortUrlKey) {
-        setInterval(() => {
-            const remaining = expiresAt - Date.now();
-            $('expiry-countdown').textContent = formatCountdown(remaining);
-            if (remaining <= 0) {
-                $('expiry-countdown').style.fontWeight = 'bold';
-                $('download').disabled = true;
-                showStatus(`This share link has expired at ${formatExpiredTime(Math.floor(expiresAt / 1000))}. Ask the sender for a new link.`, 'error');
-            }
-        }, 1000);
-    }
-
-    const downloadUrl = '/gb/webshare/gb-download?id=' + encodeURIComponent(expectedSha256);
-
-    // Wait for SW to actually be intercepting fetches (not just controlling)
-    async function waitForSwIntercepting() {
-        for (let i = 0; i < 50; i++) {  // max 5 seconds
+        // Parse expiry from S3 presigned URL (X-Amz-Date + X-Amz-Expires)
+        function parseS3Expiry(url) {
             try {
-                const resp = await fetch('/gb-sw-ping');
-                if (await resp.text() === 'pong') return;
-            } catch (e) {}
-            await new Promise(r => setTimeout(r, 100));
+                const urlObj = new URL(url);
+                const amzDate = urlObj.searchParams.get('X-Amz-Date'); // format: 20260102T090602Z
+                const amzExpires = urlObj.searchParams.get('X-Amz-Expires'); // seconds
+                if (amzDate && amzExpires) {
+                    const year = amzDate.slice(0, 4);
+                    const month = amzDate.slice(4, 6);
+                    const day = amzDate.slice(6, 8);
+                    const hour = amzDate.slice(9, 11);
+                    const min = amzDate.slice(11, 13);
+                    const sec = amzDate.slice(13, 15);
+                    const created = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}Z`);
+                    return created.getTime() + parseInt(amzExpires) * 1000;
+                }
+            } catch (e) {
+            }
+            return null;
         }
-        throw new Error('SW never started intercepting fetches');
+
+        const expiresAt = parseS3Expiry(s3Url);
+        isExpired = expiresAt && expiresAt < Date.now();
+
+        $('filename').textContent = filename;
+        $('meta').textContent = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
+
+        // Generate the curl command following paranoia/file.go
+        function generateCurlCommand() {
+            const alignedOffset = Math.floor(offset / 16) * 16;
+            const remainingSeek = offset % 16;
+            const fetchLength = length + remainingSeek;
+
+            // Calculate IV (AES-CTR counter from block number)
+            const blockNum = Math.floor(offset / 16);
+            let iv = '';
+            let n = blockNum;
+            for (let i = 0; i < 16; i++) {
+                iv = (n & 0xff).toString(16).padStart(2, '0') + iv;
+                n = Math.floor(n / 256);
+            }
+
+            let cmd = `curl -H 'Range: bytes=${alignedOffset}-${alignedOffset + fetchLength - 1}' '${s3Url}' | `;
+            cmd += `openssl enc -aes-128-ctr -d -K ${keyHex} -iv ${iv} 2>/dev/null | `;
+            if (remainingSeek > 0) {
+                cmd += `{ dd bs=${remainingSeek} skip=1 count=0 status=none; cat; } | `;
+            }
+            cmd += `head -c ${length}`;
+            if (compression === 'zstd') {
+                cmd += ` | zstd -d`;
+            } else if (compression === 'lepton') {
+                cmd += ` | lepton -`;  // lepton reads from stdin, writes to stdout
+            }
+            cmd += ` > '${filename.replace(/'/g, "'\\''")}'`;
+            return cmd;
+        }
+
+        // Convert base64url sha256 to hex for display
+        function sha256ToHex(b64url) {
+            const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+            const padded = b64 + '=='.slice(0, (4 - b64.length % 4) % 4);
+            const binary = atob(padded);
+            return Array.from(binary, c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+        }
+
+        // Format countdown
+        function formatCountdown(ms) {
+            if (ms <= 0) return 'EXPIRED';
+            const hours = Math.floor(ms / 3600000);
+            const mins = Math.floor((ms % 3600000) / 60000);
+            const secs = Math.floor((ms % 60000) / 1000);
+            if (hours > 24) {
+                const days = Math.floor(hours / 24);
+                return `${days}d ${hours % 24}h`;
+            }
+            if (hours > 0) return `${hours}h ${mins}m`;
+            if (mins > 0) return `${mins}m ${secs}s`;
+            return `${secs}s`;
+        }
+
+        // Populate info section
+        const curlCmd = generateCurlCommand();
+        const sha256Hex = sha256ToHex(expectedDownloadId);
+        let infoHtml = `
+            <div class="info-row"><span class="info-label">Shared with:</span> <a href="https://github.com/leijurv/gb" style="color: #00d4ff;">gb</a></div>
+            <div class="info-row"><span class="info-label">File size:</span> ${size.toLocaleString()} bytes${compression ? ` (${length.toLocaleString()} bytes compressed)` : ''}</div>
+            <div class="info-row"><span class="info-label">SHA-256:</span> ${sha256Hex}</div>
+            <div class="info-row"><span class="info-label">Compression:</span> ${compression || 'none'}</div>
+            ${expiresAt ? `<div class="info-row"><span class="info-label">URL expires in:</span> <span class="expiry-countdown" id="expiry-countdown">${formatCountdown(expiresAt - Date.now())}</span></div>` : ''}
+            <div class="info-row"><span class="info-label">Manual download command:</span></div>
+            <div class="cmd-box" id="cmd-box">${curlCmd.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        `;
+        $('info-content').innerHTML = infoHtml;
+
+        // Click to copy
+        $('cmd-box').addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(curlCmd);
+                $('cmd-box').classList.add('copied');
+                setTimeout(() => $('cmd-box').classList.remove('copied'), 2000);
+            } catch (e) {
+                console.error('Copy failed:', e);
+            }
+        });
+
+        // Update countdown every second (only meaningful for static hash URLs)
+        if (expiresAt && !shortUrlKey) {
+            setInterval(() => {
+                const remaining = expiresAt - Date.now();
+                $('expiry-countdown').textContent = formatCountdown(remaining);
+                if (remaining <= 0) {
+                    $('expiry-countdown').style.fontWeight = 'bold';
+                    $('download').disabled = true;
+                    showStatus(`This share link has expired at ${formatExpiredTime(Math.floor(expiresAt / 1000))}. Ask the sender for a new link.`, 'error');
+                }
+            }, 1000);
+        }
+
+        downloadUrl = '/gb/webshare/gb-download?hash=' + encodeURIComponent(expectedDownloadId);
     }
+    function showMediaPlayer(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
+        const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
+        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+        const isPdf = ext === 'pdf';
 
+        const mediaUrl = downloadUrl + '&media=true';
 
-    const ext = filename.split('.').pop().toLowerCase();
-    const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
-    const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
-    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
-    const isPdf = ext === 'pdf';
-
-    const mediaUrl = downloadUrl + '&media=true';
-
-    function showMediaPlayer() {
         // IMPORTANT: Always set src AFTER appendChild - Firefox doesn't route
         // requests through SW for elements not yet in the DOM
         if (isVideo) {
@@ -464,6 +514,18 @@
         }
     }
 
+    // Wait for SW to actually be intercepting fetches (not just controlling)
+    async function waitForSwIntercepting() {
+        for (let i = 0; i < 50; i++) {  // max 5 seconds
+            try {
+                const resp = await fetch('/gb-sw-ping');
+                if (await resp.text() === 'pong') return;
+            } catch (e) {}
+            await new Promise(r => setTimeout(r, 100));
+        }
+        throw new Error('SW never started intercepting fetches');
+    }
+
     function showStatus(msg, type = '') {
         const status = $('status');
         status.style.display = 'block';
@@ -496,7 +558,7 @@
         if (window.location.pathname !== '/gb/webshare/') { // detect github pages vs cf worker for sw scope
             swRegistrationParams.scope = '/';
         }
-        const registration = await navigator.serviceWorker.register(swUrl, swRegistrationParams);
+        const registration = await navigator.serviceWorker.register(swUrl, { scope: '/', updateViaCache: 'all' });
 
         if (registration.installing) {
             await new Promise(resolve => {
@@ -535,7 +597,7 @@
 
     function handleServiceWorkerMessage(event) {
         const data = event.data;
-        if (data.id !== expectedSha256) return; // ignore messages for other downloads
+        if (data.id !== expectedDownloadId) return; // ignore messages for other downloads
 
         if (data.type === 'progress') {
             // If we see progress, ensure UI reflects download in progress
@@ -544,18 +606,24 @@
             $('status').style.display = 'block';
             $('status').className = '';
             $('status').textContent = 'Downloading... (check your browser\'s downloads)';
-
+            const size = data.size;
             const pct = Math.min(100, (data.bytes / size) * 100);
             $('progress-fill').style.width = pct + '%';
             $('progress-text').textContent = `${formatBytes(data.bytes)} / ${formatBytes(size)} (${pct.toFixed(1)}%)`;
-        } else if (data.type === 'complete') {
+        } else if (data.type === 'complete') { // TODO: send complete events for each file in a zip but only for integrity checking?
             $('progress-fill').style.width = '100%';
-            if (data.sha256 === expectedSha256) {
+            if (data.id === expectedDownloadId) {
                 $('progress-container').style.display = 'none';
-                showStatus('Download completed and verified ✓\n(check your browser\'s downloads)', 'success');
-            } else {
-                showStatus('INTEGRITY CHECK FAILED - file may be corrupted!', 'error');
-                alert('INTEGRITY CHECK FAILED!\n\nExpected: ' + expectedSha256 + '\nGot: ' + data.sha256 + '\n\nThe downloaded file may be corrupted or tampered with.');
+                if (data.expectedSha256) {
+                    if (data.expectedSha256 === data.sha256) {
+                        showStatus('Download completed and verified ✓\n(check your browser\'s downloads)', 'success');
+                    } else {
+                        showStatus('INTEGRITY CHECK FAILED - file may be corrupted!', 'error');
+                        alert('INTEGRITY CHECK FAILED!\n\nExpected: ' + expectedDownloadId + '\nGot: ' + data.sha256 + '\n\nThe downloaded file may be corrupted or tampered with.');
+                    }
+                } else{
+                    showStatus('Download completed\n(check your browser\'s downloads)', 'success');
+                }
             }
         } else if (data.type === 'error') {
             showStatus('Error: ' + data.message, 'error');
@@ -574,18 +642,13 @@
 
     // Respond to SW asking for params (if SW was terminated and restarted)
     navigator.serviceWorker?.addEventListener('message', (event) => {
-        if (event.data.type === 'need-params' && event.data.id === expectedSha256 && event.ports[0]) {
+        if (event.data.type === 'need-params' && event.data.id === expectedDownloadId && event.ports[0]) {
+            event.ports[0].postMessage(params);
+        } else if (event.data.type === 'need-params-directory' && event.data.id === expectedDownloadId) {
             event.ports[0].postMessage({
-                url: s3Url,
-                key: keyHex,
-                offset: offset,
-                length: length,
-                size: size,
-                sha256: expectedSha256,
-                compression: compression,
-                filename: filename,
-                shortUrlKey: shortUrlKey
-            });
+                password: shortUrlKey,
+                files: params
+            })
         }
     });
 
@@ -630,7 +693,9 @@
             try {
                 await registerServiceWorker();
                 await waitForSwIntercepting();
-                showMediaPlayer();
+                if (!Array.isArray(params)) {
+                    showMediaPlayer(params.filename);
+                }
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);
             }

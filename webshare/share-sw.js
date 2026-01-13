@@ -1,3 +1,6 @@
+// Service Worker for gb/webshare
+// Handles encrypted downloads with streaming decryption and decompression
+
 // Relay logs to page via BroadcastChannel for easier debugging (especially Firefox)
 const logChannel = new BroadcastChannel('sw-logs');
 function swLog(...args) {
@@ -6,7 +9,7 @@ function swLog(...args) {
 }
 
 // Load dependencies with SRI verification
-// (importScripts doesn't support integrity, so we fetch + verify + eval via blob URL)
+// (fetch + verify + eval since we're in a module context)
 const dependencies = [
     {
         url: 'https://cdn.jsdelivr.net/npm/js-sha256@0.11.0/src/sha256.min.js',
@@ -66,54 +69,38 @@ async function ensureZstdLoaded() {
     await zstdLoading;
 }
 
-// Lepton JPEG codec - Go WASM port (from github.com/leijurv/lepton_jpeg_go)
-// Decodes .lep files back to JPEG (non-streaming: buffers entire input)
-// Loaded on-demand only when needed (not bundled due to size)
-let leptonDecode = null;
-let leptonLoading = null;  // Promise for lazy loading
+// Lepton JPEG codec - Rust WASM with rayon multi-threading
+// Main page hosts the worker since SWs can't spawn Workers
+// SW communicates with page via MessageChannel
+let leptonRequestId = 0;
 
-const leptonJs = {
-    url: 'https://leijurv.github.io/gb/webshare/lepton/wasm_exec.js',
-    integrity: 'sha384-KwjovEIUCt0BqP151QPbh8Mp1Wdb6TelOOTotZvkRQWrOIG4OEj2fMs/UysQTu1q'
-};
-const leptonWasm = {
-    url: 'https://leijurv.github.io/gb/webshare/lepton/lepton.wasm',
-    integrity: 'sha384-nD8ZMZRNSI2IRCH1GmY/5lonQ6Kp69dLe7IHX5+hoE8oePIJgx9ZeOEusNDN9hP3'
-};
-
-async function loadLeptonWasm() {
-    // Fetch both files in parallel with integrity verification
-    const [jsResponse, wasmResponse] = await Promise.all([
-        fetch(leptonJs.url, { integrity: leptonJs.integrity }),
-        fetch(leptonWasm.url, { integrity: leptonWasm.integrity })
-    ]);
-    if (!jsResponse.ok) throw new Error(`Failed to fetch ${leptonJs.url}: ${jsResponse.status}`);
-    if (!wasmResponse.ok) throw new Error(`Failed to fetch ${leptonWasm.url}: ${wasmResponse.status}`);
-
-    const code = await jsResponse.text();
-    const wasmBinary = new Uint8Array(await wasmResponse.arrayBuffer());
-
-    // Go's wasm_exec.js creates a global Go class
-    eval(code);
-
-    const go = new Go();
-    const result = await WebAssembly.instantiate(wasmBinary, go.importObject);
-
-    // Run the Go program (non-blocking, sets up leptonDecode global)
-    go.run(result.instance);
-
-    // leptonDecode is now available as a global function
-    leptonDecode = self.leptonDecode;
-}
-
-// Lazy load lepton only when needed because the wasm is several megabytes
-async function ensureLeptonLoaded() {
-    if (leptonDecode) return;
-    if (!leptonLoading) {
-        leptonLoading = loadLeptonWasm();
+async function decodeLeptonViaPage(data) {
+    // Find a client (page) to handle the decode
+    const clients = await self.clients.matchAll({ type: 'window' });
+    if (clients.length === 0) {
+        throw new Error('No page available for lepton decode');
     }
-    await leptonLoading;
+
+    const id = ++leptonRequestId;
+    const client = clients[0];
+
+    return new Promise((resolve, reject) => {
+        const { port1, port2 } = new MessageChannel();
+
+        port1.onmessage = (e) => {
+            if (e.data.error) {
+                reject(new Error(e.data.error));
+            } else {
+                resolve(e.data.result);
+            }
+        };
+
+        client.postMessage({ type: 'lepton-decode', id, data }, [port2, data.buffer]);
+    });
 }
+
+// No-op since page handles initialization
+async function ensureLeptonLoaded() {}
 
 async function loadDependencies() {
     const tasks = [];
@@ -393,7 +380,7 @@ function createLeptonDecompressTransform() {
             chunks.push(chunk);
         },
         async flush(controller) {
-            // Load lepton on-demand (not bundled due to size)
+            // Load lepton on-demand
             await ensureLeptonLoaded();
 
             // Combine all chunks
@@ -405,13 +392,9 @@ function createLeptonDecompressTransform() {
                 offset += chunk.length;
             }
 
-            // Decode lepton to JPEG
-            const result = leptonDecode(input);
-            if (result.error) {
-                throw new Error('Lepton decode error: ' + result.error);
-            }
-
-            controller.enqueue(new Uint8Array(result.data));
+            // Decode lepton to JPEG via page's worker (multi-threaded)
+            const result = await decodeLeptonViaPage(input);
+            controller.enqueue(new Uint8Array(result));
         }
     });
 }
@@ -483,6 +466,87 @@ function parseRangeHeader(rangeHeader, totalSize) {
     return { start, end };
 }
 
+// Add COOP/COEP headers to enable SharedArrayBuffer (coi-serviceworker style)
+function addCoiHeaders(response) {
+    if (response.status === 0) {
+        return response;  // Opaque response, can't modify
+    }
+
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
+    newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+    });
+}
+
+// Proxy lepton files from GitHub Pages with COOP/COEP headers for SharedArrayBuffer support
+// Cache responses in memory for SW lifetime (these files never change)
+const LEPTON_GITHUB_BASE = 'https://leijurv.github.io/gb/webshare/lepton';
+const leptonCache = new Map();  // path -> { body: ArrayBuffer|string, contentType: string }
+
+// SRI hashes for lepton files (verified on fetch from GitHub Pages)
+const leptonIntegrity = {
+    '/lepton_rust.js': 'sha384-pPPidBbrirqvbJ4vVQ24oOM3nCkO2B3L6BQg9yInBWsXB6aT7ffLASo7YGMwObfN',
+    '/lepton_rust.wasm': 'sha384-fLOeSO2Kkh5ngSpJR2f4ZRFgNIlcVEihXYjCFz+qOQ7TmRWGCtZN0PJSQ+DkRrpe',
+    '/lepton-worker.js': 'sha384-7yfbqiu+j4M4LyS0G0E/wvcqZxvorhkXsLMPrVEmpVE3xtm3KfIt4zW7oTUVjbx1',
+    '/snippets/wasm-bindgen-rayon-38edf6e439f6d70d/src/workerHelpers.no-bundler.js': 'sha384-hUWHQYRixf7a9bhQ/Ga09aCXo/QEhlkN2B9PaK598KNdt8gZpRvb8Pizjbi9H6Um'
+};
+
+function getLeptonContentType(path) {
+    if (path.endsWith('.js')) return 'application/javascript';
+    if (path.endsWith('.wasm')) return 'application/wasm';
+    return 'application/octet-stream';
+}
+
+async function proxyLeptonFile(pathname) {
+    // Extract the path after /lepton/ (handles both /lepton/... and /gb/webshare/lepton/...)
+    const leptonPath = pathname.substring(pathname.indexOf('/lepton/') + '/lepton'.length);
+    const contentType = getLeptonContentType(leptonPath);
+    const isText = contentType.includes('javascript');
+
+    // Check cache first
+    const cached = leptonCache.get(leptonPath);
+    if (cached) {
+        const headers = new Headers({
+            'Content-Type': contentType,
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Embedder-Policy': 'require-corp'
+        });
+        // Clone the body for each response (can't reuse same ArrayBuffer)
+        const body = isText ? cached.body : cached.body.slice(0);
+        return new Response(body, { status: 200, headers });
+    }
+
+    // Verify integrity hash is known for this file
+    const integrity = leptonIntegrity[leptonPath];
+    if (!integrity) {
+        return new Response(`Unknown lepton file: ${leptonPath}`, { status: 404 });
+    }
+
+    // Fetch from GitHub Pages with SRI verification
+    const githubUrl = LEPTON_GITHUB_BASE + leptonPath;
+    const response = await fetch(githubUrl, { integrity });
+    if (!response.ok) {
+        return new Response(`Failed to fetch ${leptonPath}`, { status: response.status });
+    }
+
+    // Cache the response body (integrity already verified by fetch)
+    const body = isText ? await response.text() : await response.arrayBuffer();
+    leptonCache.set(leptonPath, { body });
+
+    // Return response with COOP/COEP headers
+    const headers = new Headers({
+        'Content-Type': contentType,
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp'
+    });
+    return new Response(isText ? body : body.slice(0), { status: 200, headers });
+}
+
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
@@ -492,7 +556,22 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    if (!url.pathname.endsWith('/gb-download')) return;
+    // Proxy lepton files with COOP/COEP headers for multi-threading support
+    if (url.pathname.includes('/lepton/') && url.origin === location.origin) {
+        event.respondWith(proxyLeptonFile(url.pathname));
+        return;
+    }
+
+    // For non-download requests, add COOP/COEP headers to enable SharedArrayBuffer
+    if (!url.pathname.endsWith('/gb-download')) {
+        // Only intercept same-origin requests (not CDN resources, etc.)
+        if (url.origin === location.origin) {
+            event.respondWith(
+                fetch(event.request).then(addCoiHeaders)
+            );
+        }
+        return;
+    }
 
     const id = url.searchParams.get('id');
     const isMediaPlayback = url.searchParams.get('media') === 'true';

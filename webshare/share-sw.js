@@ -478,27 +478,43 @@ function createLeptonDecompressTransform() {
     });
 }
 
-function createHashAndProgressTransform(id, size, expectedSha256) {
+// Verifies SHA-256 integrity of stream, throws on mismatch
+function createIntegrityTransform(id, expectedSha256, filename) {
     const hasher = sha256.create();
+    return new TransformStream({
+        transform(chunk, controller) {
+            hasher.update(chunk);
+            controller.enqueue(chunk);
+        },
+        async flush() {
+            const hashBytes = new Uint8Array(hasher.arrayBuffer());
+            const actualSha256 = bytesToBase64Url(hashBytes);
+            if (actualSha256 !== expectedSha256) {
+                const message = `Integrity check failed for "${filename}": expected ${expectedSha256}, got ${actualSha256}`;
+                await notifyClients({ type: 'error', message, id });
+                throw new Error(message);
+            }
+        }
+    });
+}
+
+function createProgressTransform(id, size) {
     let totalBytes = 0;
     let lastProgressTime = 0;
 
     return new TransformStream({
         transform(chunk, controller) {
-            hasher.update(chunk);
             totalBytes += chunk.length;
             controller.enqueue(chunk);
 
             const now = Date.now();
             if (now - lastProgressTime > 100) {
                 lastProgressTime = now;
-                notifyClients({ type: 'progress', bytes: totalBytes, size: size, id: id, expectedSha256: expectedSha256 });
+                notifyClients({ type: 'progress', bytes: totalBytes, size: size, id: id });
             }
         },
         flush() {
-            const hashBytes = new Uint8Array(hasher.arrayBuffer());
-            const hashBase64Url = bytesToBase64Url(hashBytes);
-            notifyClients({ type: 'complete', bytes: totalBytes, sha256: hashBase64Url, id: id, expectedSha256: expectedSha256 });
+            notifyClients({ type: 'complete', bytes: totalBytes, id: id });
         }
     });
 }
@@ -581,7 +597,7 @@ async function uncompressedRangedGet(range, params, id) {
     return new Response(stream, { status: 206, headers });
 }
 
-async function fullFileGet(params, s3Url, canSeek, isMediaPlayback, clientEvents) {
+async function fullFileGet(params, s3Url, canSeek, isMediaPlayback, clientEvents, notifyId) {
     await depsLoaded;
     const keyBytes = hexToBytes(params.key);
 
@@ -605,9 +621,11 @@ async function fullFileGet(params, s3Url, canSeek, isMediaPlayback, clientEvents
         stream = stream.pipeThrough(createLeptonDecompressTransform());
     }
 
-    // Only track progress/hash for actual downloads, not media playback
+    stream = stream.pipeThrough(createIntegrityTransform(notifyId, params.sha256, params.filename));
+
+    // Only report progress for interactive downloads
     if (!isMediaPlayback && clientEvents) {
-        stream = stream.pipeThrough(createHashAndProgressTransform(params.sha256, params.size, params.sha256));
+        stream = stream.pipeThrough(createProgressTransform(notifyId, params.size));
     }
 
     const headers = new Headers({
@@ -645,13 +663,12 @@ async function* fileResponses(paramArray, id) {
                 }
                 url = urlByHash.get(p.sha256);
             }
-            // TODO: hash checks
-            yield fullFileGet(p, url, false, false, false);
+            yield fullFileGet(p, url, false, false, false, id);
         }
     } catch(e) {
         // downloadZip seems to be swallowing errors so print here them if any happen
         console.log('exception: ', e);
-        notifyClients({ type: 'error', message: 'canceled', id: id });
+        notifyClients({ type: 'error', message: e.message, id: id });
         throw e;
     }
 }
@@ -707,7 +724,7 @@ self.addEventListener('fetch', (event) => {
                 return new Response('Share link expired', { status: 410 });
             }
             // Full file request (or compressed file, or invalid range)
-            return await fullFileGet(p, s3Url, canSeek, isMediaPlayback, true);
+            return await fullFileGet(p, s3Url, canSeek, isMediaPlayback, true, id);
         })());
     } else if (zipId) {
         event.respondWith((async () => {
@@ -723,7 +740,7 @@ self.addEventListener('fetch', (event) => {
             const headers = new Headers(zipResponse.headers);
             headers.set('Content-Disposition', `attachment; filename="${downloadFilename}"`);
             const length = parseInt(headers.get("Content-Length"))
-            const body = zipResponse.body.pipeThrough(createHashAndProgressTransform(zipId, length, undefined));
+            const body = zipResponse.body.pipeThrough(createProgressTransform(zipId, length));
             return new Response(body, {
                 status: zipResponse.status,
                 statusText: zipResponse.statusText,

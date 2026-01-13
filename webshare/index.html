@@ -613,11 +613,14 @@
         return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
     }
 
+    let downloadErrored = false;
     function handleServiceWorkerMessage(event) {
         const data = event.data;
+        console.log('[Page] SW message:', data.type, 'id:', data.id, 'expected:', expectedDownloadId);
         if (data.id !== expectedDownloadId) return; // ignore messages for other downloads
 
         if (data.type === 'progress') {
+            if (downloadErrored) return; // don't overwrite error state
             // If we see progress, ensure UI reflects download in progress
             $('download').disabled = true;
             $('progress-container').style.display = 'block';
@@ -628,22 +631,14 @@
             const pct = Math.min(100, (data.bytes / size) * 100);
             $('progress-fill').style.width = pct + '%';
             $('progress-text').textContent = `${formatBytes(data.bytes)} / ${formatBytes(size)} (${pct.toFixed(1)}%)`;
-        } else if (data.type === 'complete') { // TODO: send complete events for each file in a zip but only for integrity checking?
+        } else if (data.type === 'complete') {
             $('progress-fill').style.width = '100%';
             if (data.id === expectedDownloadId) {
                 $('progress-container').style.display = 'none';
-                if (data.expectedSha256) {
-                    if (data.expectedSha256 === data.sha256) {
-                        showStatus('Download completed and verified ✓\n(check your browser\'s downloads)', 'success');
-                    } else {
-                        showStatus('INTEGRITY CHECK FAILED - file may be corrupted!', 'error');
-                        alert('INTEGRITY CHECK FAILED!\n\nExpected: ' + expectedDownloadId + '\nGot: ' + data.sha256 + '\n\nThe downloaded file may be corrupted or tampered with.');
-                    }
-                } else{
-                    showStatus('Download completed\n(check your browser\'s downloads)', 'success');
-                }
+                showStatus('Download completed and verified ✓\n(check your browser\'s downloads)', 'success');
             }
         } else if (data.type === 'error') {
+            downloadErrored = true;
             showStatus('Error: ' + data.message, 'error');
             $('progress-container').style.display = 'none';
             $('download').disabled = false;

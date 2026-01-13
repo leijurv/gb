@@ -45,17 +45,7 @@ export default defineConfig({
         }
         return null;
       }
-    },
-    {
-      name: 'minify-except-sw',
-      async renderChunk(code, chunk) {
-        if (chunk.fileName !== 'share-sw.js') {
-          const result = await transform(code, { minify: true });
-          return result.code;
-        }
-        return null;
-      }
-    },
+    },,
     viteStaticCopy({
       targets: [
         {

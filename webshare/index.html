@@ -267,12 +267,11 @@
 
     function parseZipFileName() {
         const url = new URL(window.location.href);
-        const idx = url.pathname.lastIndexOf('/');
-        const name = url.pathname.slice(idx + 1);
-        if (name.endsWith('.zip')) {
-            return name;
+        const pathSegments = url.pathname.split('/').filter(segment => segment !== '');
+        if (pathSegments[1]) {
+            return pathSegments[1].endsWith('.zip') ? pathSegments[1] : pathSegments[1] + '.zip'
         }
-        return 'download.zip';
+        return 'download.zip'
     }
     // TODO: use client-zip to compute actual length
     function computeZipSize(array) {

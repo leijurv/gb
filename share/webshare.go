@@ -215,7 +215,7 @@ func webShareInternal(inputs []string, overrideName string, label string, expiry
 		if err != nil {
 			panic(err)
 		}
-		overrideName = filepath.Base(abs) + ".zip"
+		overrideName = filepath.Base(abs)
 	}
 	if len(resolvedInputs) > 1 && overrideName == "" {
 		fmt.Println("Enter a name for the zip file (or leave empty):")
@@ -225,9 +225,6 @@ func webShareInternal(inputs []string, overrideName string, label string, expiry
 			panic(err)
 		}
 		overrideName = strings.TrimSpace(input)
-		if overrideName != "" && !strings.HasSuffix(overrideName, ".zip") {
-			overrideName = overrideName + ".zip"
-		}
 	}
 
 	var common string

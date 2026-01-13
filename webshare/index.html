@@ -329,9 +329,85 @@
 
         $('zip-container').style.display = 'table';
         // Make each file a clickable link to preview that individual file
-        $('zip-container').innerHTML = params.map((p, i) =>
+        /*$('zip-container').innerHTML = params.map((p, i) =>
             `<li><a href="/${shortUrlKey}-${i}/${zipFileName}" style="color: #00d4ff;">${p.filename}</a> (${formatBytes(p.size)})</li>`
+        ).join('');*/
+
+        window.toggleDropdown = function(filename, sha256, index) {
+            const dropdown = document.getElementById(`dropdown-${index}`);
+            const btn = document.getElementById(`btn-${index}`);
+            if (dropdown.style.display === 'none') {
+                dropdown.style.display = 'block';
+                btn.textContent = '▲';
+                showMediaPlayer2(filename, sha256, index);
+            } else {
+                dropdown.style.display = 'none';
+                btn.textContent = '▼';
+                $(`media-container-${index}`).innerHTML = '';
+            }
+        }
+
+        function showMediaPlayer2(filename, sha256, containerId) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
+            const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
+            const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+            const isPdf = ext === 'pdf';
+
+            const mediaUrl = `/gb/webshare/gb-download?hash=${sha256}&media=true`;
+            const elemId = `media-container-${containerId}`;
+            // IMPORTANT: Always set src AFTER appendChild - Firefox doesn't route
+            // requests through SW for elements not yet in the DOM
+            if (isVideo) {
+                const video = document.createElement('video');
+                video.controls = true;
+                video.preload = 'metadata';
+                video.onerror = () => location.reload();  // SW may have been terminated
+                $(elemId).appendChild(video);
+                video.src = mediaUrl;  // src AFTER appendChild
+                $(elemId).style.display = 'block';
+            } else if (isAudio) {
+                const audio = document.createElement('audio');
+                audio.controls = true;
+                audio.preload = 'metadata';
+                audio.style = 'width: 100%;';
+                $(elemId).appendChild(audio);
+                audio.src = mediaUrl;  // src AFTER appendChild
+                $(elemId).style.display = 'block';
+            } else if (isImage) {
+                const img = document.createElement('img');
+                img.alt = filename;
+                img.style.maxWidth = '80vw';
+                img.style.maxHeight = 'calc(100vh - 300px)';
+                img.style.borderRadius = '6px';
+                $(elemId).appendChild(img);
+                img.src = mediaUrl;  // src AFTER appendChild
+                $(elemId).style.display = 'block';
+            } else if (isPdf) {
+                const iframe = document.createElement('iframe');
+                iframe.style.width = '80vw';
+                iframe.style.height = 'calc(100vh - 300px)';
+                iframe.style.border = 'none';
+                iframe.style.borderRadius = '6px';
+                $(elemId).appendChild(iframe);
+                iframe.src = mediaUrl;  // src AFTER appendChild
+                $(elemId).style.display = 'block';
+            }
+        }
+
+        $('zip-container').innerHTML = params.map((p, i) =>
+            `<li style="list-style: none; margin-bottom: 5px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="btn-${i}" onclick="toggleDropdown('${p.filename}', '${p.sha256}', ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
+                    <a href="/${shortUrlKey}-${i}/${zipFileName}" style="color: #00d4ff;">${p.filename}</a>
+                    <span>(${formatBytes(p.size)})</span>
+                </div>
+                <div id="dropdown-${i}" style="display: none; margin-left: 30px; margin-top: 5px; padding: 10px; background-color: #f0f0f0; border: 1px solid #ccc;">
+                    <div id="media-container-${i}"></div>
+                </div>
+            </li>`
         ).join('');
+
     } else {
         const missing = required.filter(k => !(k in params));
         if (missing.length > 0) {
@@ -654,8 +730,17 @@
 
     // Respond to SW asking for params (if SW was terminated and restarted)
     navigator.serviceWorker?.addEventListener('message', (event) => {
-        if (event.data.type === 'need-params' && event.data.id === expectedDownloadId && event.ports[0]) {
-            event.ports[0].postMessage(params);
+        if (event.data.type === 'need-params' && event.ports[0]) {
+            console.log('got need-params');
+            let allParams = [params].flat()
+            for (let p of allParams) {
+                if (p.sha256 === event.data.id) {
+                    event.ports[0].postMessage(p);
+                    console.log('send params');
+                    return;
+                }
+            }
+            console.log('sent nothing');
         } else if (event.data.type === 'need-params-directory' && event.data.id === expectedDownloadId) {
             event.ports[0].postMessage({
                 password: shortUrlKey,

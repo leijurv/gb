@@ -262,19 +262,17 @@ async function getPresignedUrl(p, id) {
     const data = await response.json();
     // Update cached URL for future requests
     if (Array.isArray(data)) {
-        console.log('getPresignedUrl updated a directory url?');
         for (let d of data) {
             if (d.sha256 == p.sha256) {
-                console.log('updated url');
                 p.url = d.url;
-                break;
+                return p.url;
             }
         }
+        throw new Error('response json array doesnt have out sha256');
     } else {
         p.url = data.url;
+        return p.url;
     }
-
-    return data.url;
 }
 
 async function notifyClients(message) {

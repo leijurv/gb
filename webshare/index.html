@@ -225,6 +225,14 @@
         if (hashIndex !== -1) key = key.slice(0, hashIndex);
         return key
     }
+    // Parse file index from shortUrlKey (e.g., "password-5" -> {baseKey: "password", fileIndex: 5})
+    function parseFileIndex(key) {
+        const match = key.match(/^(.+)-(\d+)$/);
+        if (match) {
+            return { baseKey: match[1], fileIndex: parseInt(match[2]) };
+        }
+        return { baseKey: key, fileIndex: null };
+    }
     function formatExpiredTime(unixSeconds) {
         const date = new Date(unixSeconds * 1000);
         return date.toLocaleString();
@@ -293,6 +301,8 @@
     let expectedDownloadId; // sha256 in single download mode
     let isExpired = false;
     let downloadUrl;
+    // Track if this is an individual file from a folder (via -N suffix in URL)
+    const { baseKey: folderBaseKey, fileIndex: fileIndexFromFolder } = shortUrlKey ? parseFileIndex(shortUrlKey) : { baseKey: null, fileIndex: null };
     function parseParams(p) {
         return {
             compression: p.cmp,
@@ -319,8 +329,10 @@
         downloadUrl = `/gb/webshare/gb-download?zip-id=${shortUrlKey}&download-filename=${parseZipFileName()}`;
 
         $('zip-container').style.display = 'table';
-        // TODO: embed and individual download buttons
-        $('zip-container').innerHTML = params.map(p => `<li>${p.filename} (${formatBytes(p.size)})</li>`).join('');
+        // Make each file a clickable link to preview that individual file
+        $('zip-container').innerHTML = params.map((p, i) =>
+            `<li><a href="/${shortUrlKey}-${i}/${zipFileName}" style="color: #00d4ff;">${p.filename}</a> (${formatBytes(p.size)})</li>`
+        ).join('');
     } else {
         const missing = required.filter(k => !(k in params));
         if (missing.length > 0) {
@@ -372,7 +384,13 @@
         isExpired = expiresAt && expiresAt < Date.now();
 
         $('filename').textContent = filename;
-        $('meta').textContent = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
+        $('meta').innerHTML = `${(size / 1024 / 1024).toFixed(2)} MB` + (compression ? ` (${(length / 1024 / 1024).toFixed(2)} MB compressed)` : '');
+
+        // Show folder reference if this is an individual file from a folder
+        if (fileIndexFromFolder !== null) {
+            const folderUrl = `/${folderBaseKey}/${parseZipFileName()}`;
+            $('meta').innerHTML += `<br><span style="color: #fff;">This is file ${fileIndexFromFolder + 1} from a <a href="${folderUrl}" style="color: #00d4ff;">shared folder</a></span>`;
+        }
 
         // Generate the curl command following paranoia/file.go
         function generateCurlCommand() {

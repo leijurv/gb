@@ -84,7 +84,14 @@ export default {
 
           const url = new URL(request.url);
           if (url.pathname.startsWith('/share-data/')) {
-            const key = url.pathname.slice("/share-data/".length);
+            let key = url.pathname.slice("/share-data/".length);
+            // Check for -N suffix pattern (e.g., "password-5.json" -> extract index 5)
+            let fileIndex = null;
+            const indexMatch = key.match(/^(.+)-(\d+)(\.json)$/);
+            if (indexMatch) {
+              key = indexMatch[1] + indexMatch[3]; // Reconstruct as "password.json"
+              fileIndex = parseInt(indexMatch[2]);
+            }
             const signingKey = await beginSignature(env);
             const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${key}`, signingKey);
             const response = await fetch(presignedJsonUrl);
@@ -94,7 +101,8 @@ export default {
               }
               return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
             }
-            async function setUrl(json, now) {
+            const now = Math.floor(Date.now() / 1000);
+            async function setUrl(json) {
               let presignedExpiry = 30; // default
               if (json.expires_at) {
                 const expiresAt = parseInt(json.expires_at);
@@ -108,12 +116,20 @@ export default {
             }
 
             let json = await response.json();
-            // Check if the share has expired
-            const now = Math.floor(Date.now() / 1000);
+
+            if (fileIndex !== null) {
+              if (!Array.isArray(json)) {
+                return new Response("Cannot use file index on non-directory share", { status: 400 });
+              }
+              if (fileIndex < 0 || fileIndex >= json.length) {
+                return new Response("File index out of range", { status: 404 });
+              }
+              json = json[fileIndex];
+            }
             if (Array.isArray(json)) {
-              await Promise.all(json.map(inner => setUrl(inner, now)));
+              await Promise.all(json.map(inner => setUrl(inner)));
             } else {
-              await setUrl(json, now);
+              await setUrl(json);
             }
 
             return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });

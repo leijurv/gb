@@ -73,7 +73,7 @@ func commonPath0(paths []string) string {
 	}
 
 	if len(paths) == 1 {
-		return paths[0]
+		return filepath.Dir(paths[0])
 	}
 
 	// Split all paths into components
@@ -93,9 +93,10 @@ func commonPath0(paths []string) string {
 		}
 	}
 
-	// Find common components
+	// Find common components, but stop before the last component
+	// (since we want the directory, not the file)
 	var common []string
-	for i := 0; i < minLen; i++ {
+	for i := 0; i < minLen-1; i++ { // Changed: minLen-1 instead of minLen
 		component := splitPaths[0][i]
 		allMatch := true
 

@@ -335,7 +335,7 @@
 
         window.toggleDropdown = function(filename, sha256, index) {
             const dropdown = document.getElementById(`dropdown-${index}`);
-            const btn = document.getElementById(`btn-${index}`);
+            const btn = document.getElementById(`dropdown-btn-${index}`);
             if (dropdown.style.display === 'none') {
                 dropdown.style.display = 'block';
                 btn.textContent = '▲';
@@ -362,6 +362,7 @@
                 const video = document.createElement('video');
                 video.controls = true;
                 video.preload = 'metadata';
+                // do we actually want this?
                 video.onerror = () => location.reload();  // SW may have been terminated
                 $(elemId).appendChild(video);
                 video.src = mediaUrl;  // src AFTER appendChild
@@ -395,11 +396,20 @@
             }
         }
 
+        function escape(text) {
+            return text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         $('zip-container').innerHTML = params.map((p, i) =>
             `<li style="list-style: none; margin-bottom: 5px;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="btn-${i}" onclick="toggleDropdown('${p.filename}', '${p.sha256}', ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
-                    <a href="/${shortUrlKey}-${i}/${zipFileName}" style="color: #00d4ff;">${p.filename}</a>
+                    <button id="dropdown-btn-${i}" onclick="toggleDropdown('${escape(p.filename)}', '${p.sha256}', ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
+                    <a href="/${escape(shortUrlKey)}-${i}/${escape(zipFileName)}" style="color: #00d4ff;">${escape(p.filename)}</a>
                     <span>(${formatBytes(p.size)})</span>
                 </div>
                 <div id="dropdown-${i}" style="display: none; margin-left: 30px; margin-top: 5px; padding: 10px; background-color: #f0f0f0; border: 1px solid #ccc;">

@@ -274,12 +274,61 @@
         return 'download.zip'
     }
     // TODO: use client-zip to compute actual length
-    function computeZipSize(array) {
+    function estimateZipSize(array) {
         let size = 0;
         for (let p of array) {
             size += p.size;
         }
         return size;
+    }
+
+    function showMediaPlayer(filename, sha256, elementId) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
+        const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
+        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
+        const isPdf = ext === 'pdf';
+
+        const mediaUrl = `/gb/webshare/gb-download?hash=${sha256}&media=true`;
+        //const elemId = `media-container-${containerId}`;
+        // IMPORTANT: Always set src AFTER appendChild - Firefox doesn't route
+        // requests through SW for elements not yet in the DOM
+        if (isVideo) {
+            const video = document.createElement('video');
+            video.controls = true;
+            video.preload = 'metadata';
+            // do we actually want this?
+            video.onerror = () => location.reload();  // SW may have been terminated
+            $(elementId).appendChild(video);
+            video.src = mediaUrl;  // src AFTER appendChild
+            $(elementId).style.display = 'block';
+        } else if (isAudio) {
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.preload = 'metadata';
+            audio.style = 'width: 100%;';
+            $(elementId).appendChild(audio);
+            audio.src = mediaUrl;  // src AFTER appendChild
+            $(elementId).style.display = 'block';
+        } else if (isImage) {
+            const img = document.createElement('img');
+            img.alt = filename;
+            img.style.maxWidth = '80vw';
+            img.style.maxHeight = 'calc(100vh - 300px)';
+            img.style.borderRadius = '6px';
+            $(elementId).appendChild(img);
+            img.src = mediaUrl;  // src AFTER appendChild
+            $(elementId).style.display = 'block';
+        } else if (isPdf) {
+            const iframe = document.createElement('iframe');
+            iframe.style.width = '80vw';
+            iframe.style.height = 'calc(100vh - 300px)';
+            iframe.style.border = 'none';
+            iframe.style.borderRadius = '6px';
+            $(elementId).appendChild(iframe);
+            iframe.src = mediaUrl;  // src AFTER appendChild
+            $(elementId).style.display = 'block';
+        }
     }
 
     const required = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
@@ -322,16 +371,12 @@
         params = params.map(parseParams);
         const zipFileName = parseZipFileName();
         $('filename').textContent = zipFileName;
-        $('meta').innerHTML = `${(computeZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} ${params.length > 1 ? "files" : "file"}`;
+        $('meta').innerHTML = `${(estimateZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} ${params.length > 1 ? "files" : "file"}`;
         $('more-info').remove();
         console.log(params);
         downloadUrl = `/gb/webshare/gb-download?zip-id=${shortUrlKey}&download-filename=${parseZipFileName()}`;
 
         $('zip-container').style.display = 'table';
-        // Make each file a clickable link to preview that individual file
-        /*$('zip-container').innerHTML = params.map((p, i) =>
-            `<li><a href="/${shortUrlKey}-${i}/${zipFileName}" style="color: #00d4ff;">${p.filename}</a> (${formatBytes(p.size)})</li>`
-        ).join('');*/
 
         window.toggleDropdown = function(filename, sha256, index) {
             const dropdown = document.getElementById(`dropdown-${index}`);
@@ -339,60 +384,11 @@
             if (dropdown.style.display === 'none') {
                 dropdown.style.display = 'block';
                 btn.textContent = '▲';
-                showMediaPlayer2(filename, sha256, index);
+                showMediaPlayer(filename, sha256, `media-container-${index}`);
             } else {
                 dropdown.style.display = 'none';
                 btn.textContent = '▼';
                 $(`media-container-${index}`).innerHTML = '';
-            }
-        }
-
-        function showMediaPlayer2(filename, sha256, containerId) {
-            const ext = filename.split('.').pop().toLowerCase();
-            const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
-            const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
-            const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
-            const isPdf = ext === 'pdf';
-
-            const mediaUrl = `/gb/webshare/gb-download?hash=${sha256}&media=true`;
-            const elemId = `media-container-${containerId}`;
-            // IMPORTANT: Always set src AFTER appendChild - Firefox doesn't route
-            // requests through SW for elements not yet in the DOM
-            if (isVideo) {
-                const video = document.createElement('video');
-                video.controls = true;
-                video.preload = 'metadata';
-                // do we actually want this?
-                video.onerror = () => location.reload();  // SW may have been terminated
-                $(elemId).appendChild(video);
-                video.src = mediaUrl;  // src AFTER appendChild
-                $(elemId).style.display = 'block';
-            } else if (isAudio) {
-                const audio = document.createElement('audio');
-                audio.controls = true;
-                audio.preload = 'metadata';
-                audio.style = 'width: 100%;';
-                $(elemId).appendChild(audio);
-                audio.src = mediaUrl;  // src AFTER appendChild
-                $(elemId).style.display = 'block';
-            } else if (isImage) {
-                const img = document.createElement('img');
-                img.alt = filename;
-                img.style.maxWidth = '80vw';
-                img.style.maxHeight = 'calc(100vh - 300px)';
-                img.style.borderRadius = '6px';
-                $(elemId).appendChild(img);
-                img.src = mediaUrl;  // src AFTER appendChild
-                $(elemId).style.display = 'block';
-            } else if (isPdf) {
-                const iframe = document.createElement('iframe');
-                iframe.style.width = '80vw';
-                iframe.style.height = 'calc(100vh - 300px)';
-                iframe.style.border = 'none';
-                iframe.style.borderRadius = '6px';
-                $(elemId).appendChild(iframe);
-                iframe.src = mediaUrl;  // src AFTER appendChild
-                $(elemId).style.display = 'block';
             }
         }
 
@@ -428,10 +424,10 @@
 
         const filename = params.name;
         const s3Url = params.url;
-        const keyHex = params.key.toLowerCase();
-        const offset = parseInt(params.offset);
-        const length = parseInt(params.length);
-        const size = parseInt(params.size);
+        const keyHex = params.key;
+        const offset = params.offset;
+        const length = params.length;
+        const size = params.size;
         expectedDownloadId = params.sha256;
         const compression = params.compression;
 
@@ -569,52 +565,6 @@
         }
 
         downloadUrl = '/gb/webshare/gb-download?hash=' + encodeURIComponent(expectedDownloadId);
-    }
-    function showMediaPlayer(filename) {
-        const ext = filename.split('.').pop().toLowerCase();
-        const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
-        const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
-        const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext);
-        const isPdf = ext === 'pdf';
-
-        const mediaUrl = downloadUrl + '&media=true';
-
-        // IMPORTANT: Always set src AFTER appendChild - Firefox doesn't route
-        // requests through SW for elements not yet in the DOM
-        if (isVideo) {
-            const video = document.createElement('video');
-            video.controls = true;
-            video.preload = 'metadata';
-            video.onerror = () => location.reload();  // SW may have been terminated
-            $('media-container').appendChild(video);
-            video.src = mediaUrl;  // src AFTER appendChild
-            $('media-container').style.display = 'block';
-        } else if (isAudio) {
-            const audio = document.createElement('audio');
-            audio.controls = true;
-            audio.preload = 'metadata';
-            $('media-container').appendChild(audio);
-            audio.src = mediaUrl;  // src AFTER appendChild
-            $('media-container').style.display = 'block';
-        } else if (isImage) {
-            const img = document.createElement('img');
-            img.alt = filename;
-            img.style.maxWidth = '80vw';
-            img.style.maxHeight = 'calc(100vh - 300px)';
-            img.style.borderRadius = '6px';
-            $('media-container').appendChild(img);
-            img.src = mediaUrl;  // src AFTER appendChild
-            $('media-container').style.display = 'block';
-        } else if (isPdf) {
-            const iframe = document.createElement('iframe');
-            iframe.style.width = '80vw';
-            iframe.style.height = 'calc(100vh - 300px)';
-            iframe.style.border = 'none';
-            iframe.style.borderRadius = '6px';
-            $('media-container').appendChild(iframe);
-            iframe.src = mediaUrl;  // src AFTER appendChild
-            $('media-container').style.display = 'block';
-        }
     }
 
     // Wait for SW to actually be intercepting fetches (not just controlling)
@@ -801,7 +751,7 @@
                 await registerServiceWorker();
                 await waitForSwIntercepting();
                 if (!Array.isArray(params)) {
-                    showMediaPlayer(params.filename);
+                    showMediaPlayer(params.filename, params.sha256, 'media-container');
                 }
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

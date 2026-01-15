@@ -73,8 +73,8 @@ github.com/googleapis/enterprise-certificate-proxy v0.3.7 h1:zrn2Ee/nWmHulBx5sAV
 github.com/googleapis/enterprise-certificate-proxy v0.3.7/go.mod h1:MkHOF77EYAE7qfSuSS9PU6g4Nt4e11cnsDUowfwewLA=
 github.com/googleapis/gax-go/v2 v2.15.0 h1:SyjDc1mGgZU5LncH8gimWo9lW1DtIfPibOG81vgd/bo=
 github.com/googleapis/gax-go/v2 v2.15.0/go.mod h1:zVVkkxAQHa1RQpg9z2AUCMnKhi0Qld9rcmyfL1OZhoc=
-github.com/leijurv/lepton_jpeg_go v0.0.0-20260102084457-eb7d2e9d62dc h1:F0RXxPQAiIbPsF/AJcLEh3gseVSpaZolhM8GX9EwRlI=
-github.com/leijurv/lepton_jpeg_go v0.0.0-20260102084457-eb7d2e9d62dc/go.mod h1:uOyxnz4gG+5OQf4Ti62McK/Iup48Yab7almmBUR4Wss=
+github.com/leijurv/lepton_jpeg_go v0.0.0-20260115033201-3a80e408255a h1:2fj7MKhnxpl9DgOKKlxh0vygGsCiwVIf/vKz0iErVLU=
+github.com/leijurv/lepton_jpeg_go v0.0.0-20260115033201-3a80e408255a/go.mod h1:uOyxnz4gG+5OQf4Ti62McK/Iup48Yab7almmBUR4Wss=
 github.com/mattn/go-runewidth v0.0.10/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRCM46jaSJTDAk=
 github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
 github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=

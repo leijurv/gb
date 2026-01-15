@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.6
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.43 // pinned to pre-v1.73.0 due to aws-chunked encoding breaking Oracle Cloud compatibility (see github.com/aws/aws-sdk-go-v2/discussions/2960)
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.72.0 // pinned to pre-v1.73.0 due to aws-chunked encoding breaking Oracle Cloud compatibility
-	github.com/leijurv/lepton_jpeg_go v0.0.0-20260102084457-eb7d2e9d62dc
+	github.com/leijurv/lepton_jpeg_go v0.0.0-20260115033201-3a80e408255a
 	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/tyler-smith/go-bip39 v1.1.0
 	github.com/urfave/cli v1.22.17

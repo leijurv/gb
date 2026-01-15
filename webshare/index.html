@@ -160,6 +160,13 @@
         .expiry-countdown {
             color: #ff6b6b;
         }
+        .img-wrapper {
+            display: inline-grid;
+            place-items: center;
+        }
+        .img-wrapper > * {
+            grid-area: 1 / 1;
+        }
     </style>
 </head>
 <body>
@@ -508,12 +515,18 @@
             audio.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';
         } else if (isImage) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'img-wrapper';
+            wrapper.innerHTML = `<style spin>@keyframes spin { to { transform: rotate(360deg); } } [spin] { display: block; font:0 x; width:33Q; height:33Q; border-radius: 33Q; border: 4px solid grey; border-top-color: blue; animation: spin linear 1s infinite }</style>`;
+            const spinner = wrapper.querySelector('[spin]');
             const img = document.createElement('img');
             img.alt = filename;
             img.style.maxWidth = '80vw';
             img.style.maxHeight = 'calc(100vh - 300px)';
             img.style.borderRadius = '6px';
-            $('media-container').appendChild(img);
+            img.onload = () => spinner.remove();
+            wrapper.appendChild(img);
+            $('media-container').appendChild(wrapper);
             img.src = mediaUrl;  // src AFTER appendChild
             $('media-container').style.display = 'block';
         } else if (isPdf) {

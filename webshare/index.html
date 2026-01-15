@@ -209,7 +209,7 @@
     // Auto-reload for cross-origin isolation (needed for SharedArrayBuffer/multi-threading)
     // On first visit, SW isn't active yet so page loads without COOP/COEP headers.
     // Once SW is ready, reload to get the headers.
-    (function() {
+    {
         const COI_FLAG = 'coi-reload-attempted';
 
         if (crossOriginIsolated) {
@@ -231,7 +231,7 @@
                 }
             });
         }
-    })();
+    }
 
     const $ = id => document.getElementById(id);
 
@@ -400,22 +400,24 @@
     let shortUrlKey = null; // If set, service worker will fetch fresh URLs on each request
     if (window.location.hash) {
         params = parseHash();
-        const have = required.filter(k => k in params);
-        if (have <= 1) {
-            shortUrlKey = parseShortUrl();
-            params = await parseAndRequestShortURL();
+        const missing = required.filter(k => !(k in params));
+        if (missing.length > 0) {
+            $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
+            throw new Error('Missing params');
         }
+        params = [params];
     } else {
         shortUrlKey = parseShortUrl();
         params = await parseAndRequestShortURL();
     }
+
     // variables assigned by single file and zip mode
     let expectedDownloadId; // sha256 in single download mode
     let isExpired = false;
     let downloadUrl;
     // Track if this is an individual file from a folder (via -N suffix in URL)
     const { baseKey: folderBaseKey, fileIndex: fileIndexFromFolder } = shortUrlKey ? parseFileIndex(shortUrlKey) : { baseKey: null, fileIndex: null };
-    function parseParams(p) {
+    params = params.map(p => {
         return {
             compression: p.cmp,
             key: p.key.toLowerCase(),
@@ -429,13 +431,13 @@
             url: p.url,
             shortUrlKey: shortUrlKey
         };
-    }
-    if (Array.isArray(params)) {
+    });
+
+    if (params.length > 1) {
         expectedDownloadId = shortUrlKey
-        params = params.map(parseParams);
         const zipFileName = parseZipFileName();
         $('filename').textContent = zipFileName;
-        $('meta').innerHTML = `${(estimateZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} ${params.length > 1 ? "files" : "file"}`;
+        $('meta').innerHTML = `${(estimateZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} "files"}`;
         $('more-info').remove();
         console.log(params);
         downloadUrl = `/gb/webshare/gb-download?zip-id=${shortUrlKey}&download-filename=${parseZipFileName()}`;
@@ -479,21 +481,14 @@
         ).join('');
 
     } else {
-        const missing = required.filter(k => !(k in params));
-        if (missing.length > 0) {
-            $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
-            throw new Error('Missing params');
-        }
-        params = parseParams(params);
-
-        const filename = params.name;
-        const s3Url = params.url;
-        const keyHex = params.key;
-        const offset = params.offset;
-        const length = params.length;
-        const size = params.size;
-        expectedDownloadId = params.sha256;
-        const compression = params.compression;
+        const filename = params[0].name;
+        const s3Url = params[0].url;
+        const keyHex = params[0].key;
+        const offset = params[0].offset;
+        const length = params[0].length;
+        const size = params[0].size;
+        expectedDownloadId = params[0].sha256;
+        const compression = params[0].compression;
 
         if (!/^[0-9a-f]{32}$/.test(keyHex)) {
             $('content').innerHTML = `<div class="error-box">Invalid encryption key: must be 32 hex characters</div>`;
@@ -850,8 +845,8 @@
             try {
                 await registerServiceWorker();
                 await waitForSwIntercepting();
-                if (!Array.isArray(params)) {
-                    showMediaPlayer(params.filename, params.sha256, 'media-container');
+                if (params.length === 1) {
+                    showMediaPlayer(params[0].filename, params[0].sha256, 'media-container');
                 }
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

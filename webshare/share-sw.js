@@ -184,8 +184,17 @@ function isUrlExpired(url) {
     return expiresAt && expiresAt < (Date.now() + 5000);
 }
 
-function parseShareJson(jsonResponse, shortUrlKey) {
-    function convert(p) {
+async function queryAndParseParameters(shortUrlKey) {
+    const response = await fetch(`/share-data/${shortUrlKey}.json`);
+    if (!response.ok) {
+        if (response.status === 410) {
+            // Share has expired
+            throw new Error(`Share has expired`);
+        }
+        throw new Error(`Failed to fetch fresh URL: ${response.status}`);
+    }
+    const json = await response.json();
+    return json.map(p => {
         return {
             compression: p.cmp,
             key: p.key.toLowerCase(),
@@ -198,25 +207,8 @@ function parseShareJson(jsonResponse, shortUrlKey) {
             sha256: p.sha256,
             url: p.url,
             shortUrlKey: shortUrlKey
-        }
-    }
-    if (Array.isArray(jsonResponse)) {
-        return jsonResponse.map(convert);
-    }
-    return convert(jsonResponse);
-}
-
-async function queryAndParseParameters(shortUrlKey) {
-    const response = await fetch(`/share-data/${shortUrlKey}.json`);
-    if (!response.ok) {
-        if (response.status === 410) {
-            // Share has expired
-            throw new Error(`Share has expired`);
-        }
-        throw new Error(`Failed to fetch fresh URL: ${response.status}`);
-    }
-    const json = await response.json();
-    return parseShareJson(json, shortUrlKey);
+        };
+    });
 }
 
 // Get presigned URL, fetching fresh one only if current is expired
@@ -248,18 +240,13 @@ async function getPresignedUrl(p, id) {
     }
     const data = await response.json();
     // Update cached URL for future requests
-    if (Array.isArray(data)) {
-        for (let d of data) {
-            if (d.sha256 == p.sha256) {
-                p.url = d.url;
-                return p.url;
-            }
+    for (let d of data) {
+        if (d.sha256 == p.sha256) {
+            p.url = d.url;
+            return p.url;
         }
-        throw new Error('response json array doesnt have out sha256');
-    } else {
-        p.url = data.url;
-        return p.url;
     }
+    throw new Error('response json doesnt have our sha256');
 }
 
 async function notifyClients(message) {

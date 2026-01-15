@@ -118,19 +118,13 @@ export default {
             let json = await response.json();
 
             if (fileIndex !== null) {
-              if (!Array.isArray(json)) {
-                return new Response("Cannot use file index on non-directory share", { status: 400 });
-              }
               if (fileIndex < 0 || fileIndex >= json.length) {
                 return new Response("File index out of range", { status: 404 });
               }
-              json = json[fileIndex];
+              json = [json[fileIndex]];
             }
-            if (Array.isArray(json)) {
-              await Promise.all(json.map(inner => setUrl(inner)));
-            } else {
-              await setUrl(json);
-            }
+
+            await Promise.all(json.map(inner => setUrl(inner)));
 
             return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
           }

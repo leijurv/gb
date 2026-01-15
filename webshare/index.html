@@ -206,6 +206,33 @@
     const swLogChannel = new BroadcastChannel('sw-logs');
     swLogChannel.onmessage = (e) => console.log('[SW→Page]', e.data);
 
+    // Auto-reload for cross-origin isolation (needed for SharedArrayBuffer/multi-threading)
+    // On first visit, SW isn't active yet so page loads without COOP/COEP headers.
+    // Once SW is ready, reload to get the headers.
+    (function() {
+        const COI_FLAG = 'coi-reload-attempted';
+
+        if (crossOriginIsolated) {
+            // Already isolated - clear flag so future SW changes can trigger reload
+            sessionStorage.removeItem(COI_FLAG);
+        } else if (!navigator.serviceWorker?.controller) {
+            // No SW controller (first visit, force reload, or SW unregistered) - clear flag
+            sessionStorage.removeItem(COI_FLAG);
+        }
+
+        // If not isolated and haven't attempted reload this session, try once SW is ready
+        if (!crossOriginIsolated && !sessionStorage.getItem(COI_FLAG)) {
+            navigator.serviceWorker?.ready.then(() => {
+                // Double-check we're still not isolated (ready event might fire late)
+                if (!crossOriginIsolated) {
+                    console.log('[COI] Reloading to enable cross-origin isolation for multi-threading');
+                    sessionStorage.setItem(COI_FLAG, '1');
+                    window.location.reload();
+                }
+            });
+        }
+    })();
+
     const $ = id => document.getElementById(id);
 
     function parseHash() {
@@ -242,6 +269,43 @@
         const expiredTime = formatExpiredTime(expiresAtUnix);
         $('content').innerHTML = `<div class="error-box">This share link has expired.<br><br>Expired at: ${expiredTime}<br><br>Ask the sender for a new link.</div>`;
     }
+
+    // Lepton worker for multi-threaded JPEG decompression (SW can't spawn workers)
+    // Initialize immediately to overlap WASM/thread pool setup with .lep download
+    let leptonWorker = null;
+    let leptonWorkerReady = null;
+
+    function initLeptonWorker() {
+        if (leptonWorkerReady) return leptonWorkerReady;
+
+        leptonWorkerReady = new Promise((resolve, reject) => {
+            // Use path relative to current location (works on both GitHub Pages and CF Workers)
+            const leptonWorkerUrl = new URL('lepton/lepton-worker.js', location.href);
+            // Allow thread count override via ?lepton_threads=N for debugging
+            const threadOverride = new URLSearchParams(location.search).get('lepton_threads');
+            if (threadOverride) {
+                leptonWorkerUrl.searchParams.set('threads', threadOverride);
+            }
+            leptonWorker = new Worker(leptonWorkerUrl.href, { type: 'module' });
+
+            leptonWorker.onerror = (e) => {
+                console.error('[Page] Lepton worker error:', e);
+                reject(e);
+            };
+
+            // Wait for worker to signal it's ready (after WASM + thread pool init)
+            leptonWorker.onmessage = (e) => {
+                if (e.data.type === 'ready') {
+                    resolve();
+                }
+            };
+        });
+
+        return leptonWorkerReady;
+    }
+
+    // Start loading lepton worker immediately (don't wait for it to be needed)
+    initLeptonWorker();
 
     async function parseAndRequestShortURL() {
         const key = parseShortUrl();
@@ -706,6 +770,42 @@
                 password: shortUrlKey,
                 files: params
             })
+        }
+    });
+
+    // Handle lepton decode requests from SW
+    navigator.serviceWorker?.addEventListener('message', async (event) => {
+        if (event.data.type === 'lepton-decode') {
+            const { id, data } = event.data;
+            const port = event.ports[0];
+
+            try {
+                await initLeptonWorker();
+
+                // Copy data to ensure it's transferable (not backed by WASM memory)
+                const dataCopy = new Uint8Array(data);
+
+                // Send to worker and wait for response
+                const result = await new Promise((resolve, reject) => {
+                    const handler = (e) => {
+                        if (e.data.id === id) {
+                            leptonWorker.removeEventListener('message', handler);
+                            if (e.data.error) {
+                                reject(new Error(e.data.error));
+                            } else {
+                                resolve(e.data.result);
+                            }
+                        }
+                    };
+                    leptonWorker.addEventListener('message', handler);
+                    leptonWorker.postMessage({ id, data: dataCopy }, [dataCopy.buffer]);
+                });
+
+                port.postMessage({ result }, [result.buffer]);
+            } catch (error) {
+                console.error('[Page] Lepton decode error:', error);
+                port.postMessage({ error: error.message });
+            }
         }
     });
 

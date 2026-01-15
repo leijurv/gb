@@ -314,19 +314,9 @@ func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, files
 			params["expires_at"] = fmt.Sprintf("%d", time.Now().Add(expiry).Unix())
 		}
 	}
-	var jsonData []byte
-	if len(filesParams) > 1 {
-		json, err := json.Marshal(filesParams)
-		if err != nil {
-			panic(err)
-		}
-		jsonData = json
-	} else {
-		json, err := json.Marshal(filesParams[0])
-		if err != nil {
-			panic(err)
-		}
-		jsonData = json
+	jsonBytes, err := json.Marshal(filesParams)
+	if err != nil {
+		panic(err)
 	}
 
 	password := generatePassword(cfg.ShareUrlPasswordLength)
@@ -334,7 +324,7 @@ func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, files
 	uploadPath := "share/" + password + ".json"
 
 	upload := stor.BeginDatabaseUpload(uploadPath)
-	_, err := upload.Writer().Write(jsonData)
+	_, err = upload.Writer().Write(jsonBytes)
 	if err != nil {
 		panic(err)
 	}

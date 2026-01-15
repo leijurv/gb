@@ -530,7 +530,13 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.Bool("password-mode") != config.Config().ShareUsePasswordURL {
+				var usePassword bool
+				if c.IsSet("password-mode") {
+					usePassword = c.Bool("password-mode")
+				} else {
+					usePassword = config.Config().ShareUsePasswordURL
+				}
+				if usePassword {
 					share.PasswordUrlShare(c.Args(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				} else {
 					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))

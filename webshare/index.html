@@ -90,7 +90,7 @@
             list-style: none;
         }
         #media-container {
-            margin: 20px 0;
+            margin: 20px auto;
             display: none;
         }
         #media-container video {
@@ -236,13 +236,14 @@
     async function readStreamWithLimitButItMustBeTextOrIReturnNull(reader, maxBytes) {
         const chunks = [];
         let bytesRead = 0;
-
+        let truncated = false;
         while (bytesRead < maxBytes) {
             const { done, value } = await reader.read();
             if (done) break;
 
             const bytesToTake = Math.min(value.length, maxBytes - bytesRead);
             if (bytesToTake < value.length) {
+                truncated = true;
                 // Only take part of this chunk
                 let slice = value.slice(0, bytesToTake);
                 if (slice.includes(0)) {
@@ -272,7 +273,7 @@
             offset += chunk.length;
         }
 
-        return combined.buffer;
+        return [combined.buffer, truncated];
     }
 
     const $ = id => document.getElementById(id);
@@ -407,7 +408,7 @@
             video.onerror = () => location.reload();  // SW may have been terminated
             $(elementId).appendChild(video);
             video.src = mediaUrl;  // src AFTER appendChild
-            $(elementId).style.display = 'block';
+            $(elementId).style.display = 'table';
         } else if (isAudio) {
             const audio = document.createElement('audio');
             audio.controls = true;
@@ -415,7 +416,7 @@
             audio.style = 'width: 100%;';
             $(elementId).appendChild(audio);
             audio.src = mediaUrl;  // src AFTER appendChild
-            $(elementId).style.display = 'block';
+            $(elementId).style.display = 'table';
         } else if (isImage) {
             const img = document.createElement('img');
             img.alt = filename;
@@ -424,7 +425,7 @@
             img.style.borderRadius = '6px';
             $(elementId).appendChild(img);
             img.src = mediaUrl;  // src AFTER appendChild
-            $(elementId).style.display = 'block';
+            $(elementId).style.display = 'table';
         } else if (isPdf) {
             const iframe = document.createElement('iframe');
             iframe.style.width = '80vw';
@@ -433,22 +434,39 @@
             iframe.style.borderRadius = '6px';
             $(elementId).appendChild(iframe);
             iframe.src = mediaUrl;  // src AFTER appendChild
-            $(elementId).style.display = 'block';
+            $(elementId).style.display = 'table';
         } else {
             (async () => {
                 try {
                     const response = await fetch(mediaUrl);
                     const reader = response.body.getReader();
-                    const buffer = await readStreamWithLimitButItMustBeTextOrIReturnNull(reader, 10_000_000);
+                    const [buffer, truncated] = await readStreamWithLimitButItMustBeTextOrIReturnNull(reader, 10_000_000);
                     // Cancel the reader to stop downloading more
                     if (buffer !== null) {
+                        if (truncated) {
+                            const warning = document.createElement('div');
+                            warning.textContent = '⚠️ Preview truncated to 10MB';
+                            warning.style.color = '#b45309';            // dark orange
+                            warning.style.backgroundColor = '#fff7ed';  // light orange
+                            warning.style.border = '1px solid #f59e0b';
+                            warning.style.padding = '8px 12px';
+                            warning.style.marginBottom = '8px';
+                            warning.style.fontFamily = 'sans-serif';
+                            warning.style.fontSize = '0.9em';
+
+                            $(elementId).appendChild(warning);
+                        }
+
                         const container = document.createElement('div');
                         container.style.width = '80vw';
                         container.style.maxHeight = 'calc(100vh - 300px)';
                         container.style.overflow = 'auto';
-                        container.style.border = '1px solid #ccc';
+                        // same look as the zip container
+                        container.style.backgroundColor = '#121221';
+                        container.style.border = "1px solid #3a5287";
+                        container.style.borderRadius = '5px';
                         container.style.padding = '12px';
-                        container.style.backgroundColor = 'transparent';
+                        //container.style.backgroundColor = 'transparent';
                         container.style.fontFamily = 'monospace';
                         container.style.whiteSpace = 'pre-wrap';
                         container.style.wordBreak = 'break-word';
@@ -456,7 +474,7 @@
                         container.textContent = new TextDecoder('utf-8').decode(buffer);
 
                         $(elementId).appendChild(container);
-                        $(elementId).style.display = 'block';
+                        $(elementId).style.display = 'table';
                     } else if (embedError) {
                         const error = document.createElement('div');
                         error.style.padding = '12px';
@@ -464,7 +482,7 @@
                         error.textContent = 'This file is not text';
 
                         $(elementId).appendChild(error);
-                        $(elementId).style.display = 'block';
+                        $(elementId).style.display = 'table';
                     }
                 } catch (error) {
                     console.error('Failed to fetch and display file:', error);
@@ -559,6 +577,8 @@
         ).join('');
 
     } else {
+        $('media-container').style.display = 'table';
+
         const filename = params[0].name;
         const s3Url = params[0].url;
         const keyHex = params[0].key;

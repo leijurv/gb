@@ -233,10 +233,46 @@
         }
     }
 
-    function isBinaryData(arraybuf) {
-        let sampleSize = Math.min(4000, arraybuf.byteLength);
-        const bytes = new Uint8Array(arraybuf, 0, sampleSize);
-        return bytes.indexOf(0) != -1;
+    async function readStreamWithLimitButItMustBeTextOrIReturnNull(reader, maxBytes) {
+        const chunks = [];
+        let bytesRead = 0;
+
+        while (bytesRead < maxBytes) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const bytesToTake = Math.min(value.length, maxBytes - bytesRead);
+            if (bytesToTake < value.length) {
+                // Only take part of this chunk
+                let slice = value.slice(0, bytesToTake);
+                if (slice.includes(0)) {
+                    await reader.cancel();
+                    return null;
+                }
+                chunks.push(slice);
+                bytesRead += bytesToTake;
+                break;
+            } else {
+                if (value.includes(0)) {
+                    await reader.cancel();
+                    return null;
+                }
+                chunks.push(value);
+                bytesRead += value.length;
+            }
+        }
+
+        await reader.cancel();
+
+        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const combined = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+            combined.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        return combined.buffer;
     }
 
     const $ = id => document.getElementById(id);
@@ -352,7 +388,7 @@
         return size;
     }
 
-    function showMediaPlayer(filename, sha256, size, elementId) {
+    function showMediaPlayer(filename, sha256, size, embedError, elementId) {
         const ext = filename.split('.').pop().toLowerCase();
         const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
         const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
@@ -400,39 +436,38 @@
             $(elementId).style.display = 'block';
         } else {
             (async () => {
-                if (size < 50000) {
-                    try {
-                        const response = await fetch(mediaUrl);
-                        const arrayBuffer = await response.arrayBuffer();
+                try {
+                    const response = await fetch(mediaUrl);
+                    const reader = response.body.getReader();
+                    const buffer = await readStreamWithLimitButItMustBeTextOrIReturnNull(reader, 10_000_000);
+                    // Cancel the reader to stop downloading more
+                    if (buffer !== null && false) {
+                        const container = document.createElement('div');
+                        container.style.width = '80vw';
+                        container.style.maxHeight = 'calc(100vh - 300px)';
+                        container.style.overflow = 'auto';
+                        container.style.border = '1px solid #ccc';
+                        container.style.padding = '12px';
+                        container.style.backgroundColor = 'transparent';
+                        container.style.fontFamily = 'monospace';
+                        container.style.whiteSpace = 'pre-wrap';
+                        container.style.wordBreak = 'break-word';
+                        container.style.textAlign = 'left';
+                        container.textContent = new TextDecoder('utf-8').decode(buffer);
 
-                        if (!isBinaryData(arrayBuffer)) {
-                            const container = document.createElement('div');
-                            container.style.width = '80vw';
-                            container.style.maxHeight = 'calc(100vh - 300px)';
-                            container.style.overflow = 'auto';
-                            container.style.border = '1px solid #ccc';
-                            container.style.padding = '12px';
-                            container.style.backgroundColor = 'transparent';
-                            container.style.fontFamily = 'monospace';
-                            container.style.whiteSpace = 'pre-wrap';
-                            container.style.wordBreak = 'break-word';
-                            container.style.textAlign = 'left';
-                            container.textContent = new TextDecoder('utf-8').decode(arrayBuffer);;
+                        $(elementId).appendChild(container);
+                        $(elementId).style.display = 'block';
+                    } else if (embedError) {
+                        const error = document.createElement('div');
+                        error.style.padding = '12px';
+                        error.style.color = '#d32f2f';
+                        error.textContent = 'This file is not text';
 
-                            $(elementId).appendChild(container);
-                            $(elementId).style.display = 'block';
-                        } else {
-                            const error = document.createElement('div');
-                            error.style.padding = '12px';
-                            error.style.color = '#d32f2f';
-                            error.textContent = 'This file is not text';
-
-                            $(elementId).appendChild(error);
-                            $(elementId).style.display = 'block';
-                        }
-                    } catch (error) {
-                        console.error('Failed to fetch and display file:', error);
+                        $(elementId).appendChild(error);
+                        $(elementId).style.display = 'block';
                     }
+                } catch (error) {
+                    console.error('Failed to fetch and display file:', error);
                 }
             })();
         }
@@ -493,7 +528,7 @@
             if (dropdown.style.display === 'none') {
                 dropdown.style.display = 'block';
                 btn.textContent = '▲';
-                showMediaPlayer(filename, sha256, size, `media-container-${index}`);
+                showMediaPlayer(filename, sha256, size, true, `media-container-${index}`);
             } else {
                 dropdown.style.display = 'none';
                 btn.textContent = '▼';
@@ -793,7 +828,6 @@
     // Respond to SW asking for params (if SW was terminated and restarted)
     navigator.serviceWorker?.addEventListener('message', (event) => {
         if (event.data.type === 'need-params' && event.ports[0]) {
-            console.log('got need-params');
             let allParams = [params].flat()
             for (let p of allParams) {
                 if (p.sha256 === event.data.id) {
@@ -889,7 +923,7 @@
                 await registerServiceWorker();
                 await waitForSwIntercepting();
                 if (params.length === 1) {
-                    showMediaPlayer(params[0].filename, params[0].sha256, params[0].size, 'media-container');
+                    showMediaPlayer(params[0].filename, params[0].sha256, params[0].size, false, 'media-container');
                 }
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

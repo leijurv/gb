@@ -233,6 +233,12 @@
         }
     }
 
+    function isBinaryData(arraybuf) {
+        let sampleSize = Math.min(4000, arraybuf.byteLength);
+        const bytes = new Uint8Array(arraybuf, 0, sampleSize);
+        return bytes.indexOf(0) != -1;
+    }
+
     const $ = id => document.getElementById(id);
 
     function parseHash() {
@@ -346,7 +352,7 @@
         return size;
     }
 
-    function showMediaPlayer(filename, sha256, elementId) {
+    function showMediaPlayer(filename, sha256, size, elementId) {
         const ext = filename.split('.').pop().toLowerCase();
         const isVideo = ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext);
         const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'].includes(ext);
@@ -392,6 +398,43 @@
             $(elementId).appendChild(iframe);
             iframe.src = mediaUrl;  // src AFTER appendChild
             $(elementId).style.display = 'block';
+        } else {
+            (async () => {
+                if (size < 50000) {
+                    try {
+                        const response = await fetch(mediaUrl);
+                        const arrayBuffer = await response.arrayBuffer();
+
+                        if (!isBinaryData(arrayBuffer)) {
+                            const container = document.createElement('div');
+                            container.style.width = '80vw';
+                            container.style.maxHeight = 'calc(100vh - 300px)';
+                            container.style.overflow = 'auto';
+                            container.style.border = '1px solid #ccc';
+                            container.style.padding = '12px';
+                            container.style.backgroundColor = 'transparent';
+                            container.style.fontFamily = 'monospace';
+                            container.style.whiteSpace = 'pre-wrap';
+                            container.style.wordBreak = 'break-word';
+                            container.style.textAlign = 'left';
+                            container.textContent = new TextDecoder('utf-8').decode(arrayBuffer);;
+
+                            $(elementId).appendChild(container);
+                            $(elementId).style.display = 'block';
+                        } else {
+                            const error = document.createElement('div');
+                            error.style.padding = '12px';
+                            error.style.color = '#d32f2f';
+                            error.textContent = 'This file is not text';
+
+                            $(elementId).appendChild(error);
+                            $(elementId).style.display = 'block';
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch and display file:', error);
+                    }
+                }
+            })();
         }
     }
 
@@ -444,13 +487,13 @@
 
         $('zip-container').style.display = 'table';
 
-        window.toggleDropdown = function(filename, sha256, index) {
+        window.toggleDropdown = function(filename, sha256, size, index) {
             const dropdown = document.getElementById(`dropdown-${index}`);
             const btn = document.getElementById(`dropdown-btn-${index}`);
             if (dropdown.style.display === 'none') {
                 dropdown.style.display = 'block';
                 btn.textContent = '▲';
-                showMediaPlayer(filename, sha256, `media-container-${index}`);
+                showMediaPlayer(filename, sha256, size, `media-container-${index}`);
             } else {
                 dropdown.style.display = 'none';
                 btn.textContent = '▼';
@@ -470,11 +513,11 @@
         $('zip-container').innerHTML = params.map((p, i) =>
             `<li style="list-style: none; margin-bottom: 5px;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="dropdown-btn-${i}" onclick="toggleDropdown('${escape(p.filename)}', '${p.sha256}', ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
+                    <button id="dropdown-btn-${i}" onclick="toggleDropdown('${escape(p.filename)}', '${p.sha256}', ${p.size}, ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
                     <a href="/${escape(shortUrlKey)}-${i}/${escape(zipFileName)}" style="color: #00d4ff;">${escape(p.filename)}</a>
                     <span>(${formatBytes(p.size)})</span>
                 </div>
-                <div id="dropdown-${i}" style="display: none; margin-left: 30px; margin-top: 5px; padding: 10px; background-color: #f0f0f0; border: 1px solid #ccc;">
+                <div id="dropdown-${i}" style="display: none; margin-top: 5px; padding: 10px;">
                     <div id="media-container-${i}"></div>
                 </div>
             </li>`
@@ -846,7 +889,7 @@
                 await registerServiceWorker();
                 await waitForSwIntercepting();
                 if (params.length === 1) {
-                    showMediaPlayer(params[0].filename, params[0].sha256, 'media-container');
+                    showMediaPlayer(params[0].filename, params[0].sha256, params[0].size, 'media-container');
                 }
             } catch (e) {
                 console.error('Failed to initialize service worker:', e);

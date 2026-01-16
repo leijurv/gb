@@ -441,7 +441,7 @@
                     const reader = response.body.getReader();
                     const buffer = await readStreamWithLimitButItMustBeTextOrIReturnNull(reader, 10_000_000);
                     // Cancel the reader to stop downloading more
-                    if (buffer !== null && false) {
+                    if (buffer !== null) {
                         const container = document.createElement('div');
                         container.style.width = '80vw';
                         container.style.maxHeight = 'calc(100vh - 300px)';

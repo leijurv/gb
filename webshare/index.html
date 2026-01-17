@@ -89,17 +89,17 @@
         #zip-container li {
             list-style: none;
         }
-        #media-container {
+        .media-container {
             margin: 20px auto;
             display: none;
         }
-        #media-container video {
+        .media-container video {
             max-width: 80vw;
             max-height: calc(100vh - 300px);
             border-radius: 6px;
             background: #000;
         }
-        #media-container audio {
+        .media-container audio {
             width: 100%;
             max-width: 500px;
         }
@@ -191,7 +191,7 @@
             <div class="progress-text" id="progress-text">0%</div>
         </div>
         <div id="zip-container"></div>
-        <div id="media-container"></div>
+        <div id="media-container" class="media-container"></div>
     </div>
 
     <script type="module">
@@ -572,7 +572,7 @@
                     <span>(${formatBytes(p.size)})</span>
                 </div>
                 <div id="dropdown-${i}" style="display: none; margin-top: 5px; padding: 10px;">
-                    <div id="media-container-${i}"></div>
+                    <div id="media-container-${i}" class="media-container"></div>
                 </div>
             </li>`
         ).join('');

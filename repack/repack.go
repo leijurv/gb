@@ -391,7 +391,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 		}
 	}
 
-	// Update any shares that reference hashes in the new blobs
+	// Update any share_entries that reference hashes in the new blobs
 	// Collect updated shares so we can regenerate their JSON after commit
 	type updatedShare struct {
 		password  string
@@ -401,7 +401,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 
 	for _, blob := range newBlobs {
 		for _, entry := range blob.entries {
-			rows, err := tx.Query(`UPDATE shares SET blob_id = ? WHERE hash = ? RETURNING password, storage_id`, blob.blobID, entry.hash)
+			rows, err := tx.Query(`UPDATE share_entries SET blob_id = ? WHERE hash = ? RETURNING password, storage_id`, blob.blobID, entry.hash)
 			if err != nil {
 				panic(err)
 			}
@@ -411,7 +411,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 				if err := rows.Scan(&password, &storageID); err != nil {
 					panic(err)
 				}
-				log.Printf("Updated share %s to point to new blob %s", password, hex.EncodeToString(blob.blobID[:8]))
+				log.Printf("Updated share entry %s to point to new blob %s", password, hex.EncodeToString(blob.blobID[:8]))
 				updatedShares = append(updatedShares, updatedShare{password: password, storageID: storageID})
 			}
 			rows.Close()

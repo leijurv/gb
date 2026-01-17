@@ -273,28 +273,43 @@ func schemaVersionThree() error {
 
 	CREATE TABLE shares (
 
-		hash       BLOB    NOT NULL, /* which hash was shared */
-		filename   TEXT    NOT NULL, /* what name was it given? usually the same as the original filename (not including folder name) */
-		blob_id    BLOB    NOT NULL, /* in which specific blob did we promise this hash could be found? */
+		password   TEXT    NOT NULL PRIMARY KEY, /* the password (not including the URL or the ".json") */
+		name       TEXT    NOT NULL, /* the name of the share as a whole (e.g. "photos.zip") */
 		storage_id BLOB    NOT NULL, /* which storage was the share JSON uploaded to? */
 		shared_at  INTEGER NOT NULL, /* when was it shared (unix seconds) */
 		expires_at INTEGER,          /* when does it expire (unix seconds) */
 		revoked_at INTEGER,          /* when did we revoke this share (unix seconds) */
-		password   TEXT    NOT NULL, /* the password (not including the URL or the ".json") */
 
-		UNIQUE(password, filename),
-		CHECK(LENGTH(filename) > 0),
+		UNIQUE(password, storage_id), /* needed for share_entries foreign key */
+		CHECK(LENGTH(password) > 0),
+		CHECK(LENGTH(name) > 0),
 		CHECK(shared_at > 0),
 		CHECK(expires_at IS NULL OR expires_at > shared_at),
 		CHECK(revoked_at IS NULL OR revoked_at > shared_at),
-		CHECK(LENGTH(password) > 0),
 
-		FOREIGN KEY(blob_id, hash)       REFERENCES blob_entries(blob_id, hash)       ON UPDATE RESTRICT ON DELETE RESTRICT,
-		FOREIGN KEY(blob_id, storage_id) REFERENCES blob_storage(blob_id, storage_id) ON UPDATE RESTRICT ON DELETE RESTRICT
+		FOREIGN KEY(storage_id) REFERENCES storage(storage_id) ON UPDATE CASCADE ON DELETE RESTRICT
 	);
 	CREATE INDEX shares_by_shared_at ON shares(shared_at);
-	CREATE INDEX shares_by_hash ON shares(hash);
-	CREATE INDEX shares_by_blob_id ON shares(blob_id);
+
+	CREATE TABLE share_entries (
+
+		password   TEXT    NOT NULL, /* the password (not including the URL or the ".json") */
+		hash       BLOB    NOT NULL, /* which hash was shared */
+		filename   TEXT    NOT NULL, /* what name was it given? usually the same as the original filename (not including folder name) */
+		blob_id    BLOB    NOT NULL, /* in which specific blob did we promise this hash could be found? */
+		storage_id BLOB    NOT NULL, /* which storage was the share JSON uploaded to? */
+		ordinal    INTEGER NOT NULL, /* order of entry in the share (0-indexed), determines order in zip */
+
+		UNIQUE(password, filename),
+		UNIQUE(password, ordinal),
+		CHECK(LENGTH(filename) > 0),
+		CHECK(ordinal >= 0),
+
+		FOREIGN KEY(password, storage_id) REFERENCES shares(password, storage_id)      ON UPDATE CASCADE  ON DELETE CASCADE,
+		FOREIGN KEY(blob_id, hash)        REFERENCES blob_entries(blob_id, hash)       ON UPDATE RESTRICT ON DELETE RESTRICT,
+		FOREIGN KEY(blob_id, storage_id)  REFERENCES blob_storage(blob_id, storage_id) ON UPDATE CASCADE  ON DELETE RESTRICT
+	);
+	CREATE INDEX share_entries_by_hash ON share_entries(hash);
 	`)
 	if err != nil {
 		return err
@@ -336,7 +351,7 @@ func determineDatabaseLayer() DatabaseLayer {
 
 	// determine layer by tables
 	expectedTablesLayer2 := "blob_entries,blob_storage,blobs,db_key,files,sizes,storage,"
-	expectedTablesLayer3 := "blob_entries,blob_storage,blobs,db_key,files,shares,sizes,storage,"
+	expectedTablesLayer3 := "blob_entries,blob_storage,blobs,db_key,files,share_entries,shares,sizes,storage,"
 	isLayer3Tables := tables == expectedTablesLayer3
 	if tables != expectedTablesLayer2 && !isLayer3Tables {
 		panic("gb.db doesn't have the tables that I expect. expected '" + expectedTablesLayer2 + "' or '" + expectedTablesLayer3 + "' but got '" + tables + "'")
@@ -345,7 +360,7 @@ func determineDatabaseLayer() DatabaseLayer {
 	// check indexes match the layer determined by tables
 	indexes := query("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
 	expectedIndexesLayer2 := "blob_entries_by_blob_id,blob_entries_by_hash,blob_storage_by_blob_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
-	expectedIndexesLayer3 := "blob_entries_by_blob_id_and_hash,blob_entries_by_hash,blob_storage_by_blob_id_and_storage_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,shares_by_blob_id,shares_by_hash,shares_by_shared_at,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_shares_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
+	expectedIndexesLayer3 := "blob_entries_by_blob_id_and_hash,blob_entries_by_hash,blob_storage_by_blob_id_and_storage_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,share_entries_by_hash,shares_by_shared_at,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_share_entries_1,sqlite_autoindex_share_entries_2,sqlite_autoindex_shares_1,sqlite_autoindex_shares_2,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
 	if isLayer3Tables {
 		if indexes != expectedIndexesLayer3 {
 			panic("gb.db has layer 3 tables but indexes don't match. expected '" + expectedIndexesLayer3 + "' but got '" + indexes + "'")

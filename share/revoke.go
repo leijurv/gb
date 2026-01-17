@@ -10,23 +10,26 @@ import (
 )
 
 func ListShares() {
+	// Query all shares
 	rows, err := db.DB.Query(`
-		SELECT password, filename, shared_at, expires_at, revoked_at
+		SELECT password, name, shared_at, expires_at, revoked_at,
+			(SELECT COUNT(*) FROM share_entries WHERE share_entries.password = shares.password) as file_count
 		FROM shares
-		ORDER BY shared_at DESC, password, filename
+		ORDER BY shared_at DESC
 	`)
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
 
-	count := 0
+	shareCount := 0
 	for rows.Next() {
-		var password, filename string
+		var password, name string
 		var sharedAt int64
 		var expiresAt, revokedAt *int64
+		var fileCount int
 
-		err = rows.Scan(&password, &filename, &sharedAt, &expiresAt, &revokedAt)
+		err = rows.Scan(&password, &name, &sharedAt, &expiresAt, &revokedAt, &fileCount)
 		if err != nil {
 			panic(err)
 		}
@@ -41,98 +44,117 @@ func ListShares() {
 		}
 
 		sharedTime := time.Unix(sharedAt, 0).Format(time.RFC3339)
-		fmt.Printf("%s  %s  %s  %s\n", password, sharedTime, status, filename)
-		count++
+		shareURL := BuildShareURL(password, name)
+
+		fmt.Printf("%s  %s  %s  (%d files)\n", shareURL, sharedTime, status, fileCount)
+
+		// Query and print filenames for this share
+		fileRows, err := db.DB.Query(`
+			SELECT filename FROM share_entries WHERE password = ? ORDER BY ordinal
+		`, password)
+		if err != nil {
+			panic(err)
+		}
+		for fileRows.Next() {
+			var filename string
+			err = fileRows.Scan(&filename)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("    %s\n", filename)
+		}
+		if err = fileRows.Err(); err != nil {
+			panic(err)
+		}
+		fileRows.Close()
+
+		shareCount++
 	}
 	if err = rows.Err(); err != nil {
 		panic(err)
 	}
 
-	if count == 0 {
+	if shareCount == 0 {
 		log.Println("No shares found")
 		return
 	}
 
 	fmt.Println()
-	log.Printf("Found %d share entries\n", count)
+	log.Printf("Found %d shares\n", shareCount)
 	log.Println("To revoke a share, run: gb revoke <password>")
 }
 
 func RevokeShare(password string) {
-	// Query shares for this password
-	rows, err := db.DB.Query(`
-		SELECT filename, storage_id, shared_at, expires_at, revoked_at
+	// Query share metadata
+	var name string
+	var storageID []byte
+	var sharedAt int64
+	var expiresAt, revokedAt *int64
+	err := db.DB.QueryRow(`
+		SELECT name, storage_id, shared_at, expires_at, revoked_at
 		FROM shares
 		WHERE password = ?
-		ORDER BY filename
+	`, password).Scan(&name, &storageID, &sharedAt, &expiresAt, &revokedAt)
+	if err == db.ErrNoRows {
+		log.Printf("Share with password '%s' not found\n", password)
+		return
+	}
+	if err != nil {
+		panic(err)
+	}
+
+	// Check if already revoked
+	if revokedAt != nil {
+		log.Printf("Share '%s' is already revoked\n", password)
+		return
+	}
+
+	// Query share entries (filenames)
+	rows, err := db.DB.Query(`
+		SELECT filename FROM share_entries WHERE password = ? ORDER BY ordinal
 	`, password)
 	if err != nil {
 		panic(err)
 	}
 	defer rows.Close()
 
-	type shareEntry struct {
-		filename  string
-		storageID []byte
-		sharedAt  int64
-		expiresAt *int64
-		revokedAt *int64
-	}
-	var entries []shareEntry
-
+	var filenames []string
 	for rows.Next() {
-		var e shareEntry
-		err = rows.Scan(&e.filename, &e.storageID, &e.sharedAt, &e.expiresAt, &e.revokedAt)
+		var filename string
+		err = rows.Scan(&filename)
 		if err != nil {
 			panic(err)
 		}
-		entries = append(entries, e)
+		filenames = append(filenames, filename)
 	}
 	if err = rows.Err(); err != nil {
 		panic(err)
-	}
-
-	if len(entries) == 0 {
-		log.Printf("Share with password '%s' not found\n", password)
-		return
-	}
-
-	// Check if already revoked
-	allRevoked := true
-	for _, e := range entries {
-		if e.revokedAt == nil {
-			allRevoked = false
-			break
-		}
-	}
-	if allRevoked {
-		log.Printf("Share '%s' is already revoked\n", password)
-		return
 	}
 
 	// Display share information
 	fmt.Println()
 	log.Println("Share Information:")
 	log.Printf("  Password: %s", password)
-	log.Printf("  Created: %s", time.Unix(entries[0].sharedAt, 0).Format(time.RFC3339))
+	log.Printf("  Name: %s", name)
+	log.Printf("  Created: %s", time.Unix(sharedAt, 0).Format(time.RFC3339))
 
-	if entries[0].expiresAt != nil {
-		expiresAt := time.Unix(*entries[0].expiresAt, 0)
-		if time.Now().After(expiresAt) {
-			log.Printf("  Expires: %s (EXPIRED)", expiresAt.Format(time.RFC3339))
+	if expiresAt != nil {
+		expiresTime := time.Unix(*expiresAt, 0)
+		if time.Now().After(expiresTime) {
+			log.Printf("  Expires: %s (EXPIRED)", expiresTime.Format(time.RFC3339))
 		} else {
-			log.Printf("  Expires: %s", expiresAt.Format(time.RFC3339))
+			log.Printf("  Expires: %s", expiresTime.Format(time.RFC3339))
 		}
 	} else {
 		log.Printf("  Expires: never")
 	}
 
-	if len(entries) == 1 {
-		log.Printf("  File: %s", entries[0].filename)
-	} else {
-		log.Printf("  Files (%d):", len(entries))
-		for _, e := range entries {
-			log.Printf("    %s", e.filename)
+	if len(filenames) == 1 {
+		log.Printf("  File: %s", filenames[0])
+	} else if len(filenames) > 1 {
+		log.Printf("  Files (%d):", len(filenames))
+		for _, f := range filenames {
+			log.Printf("    %s", f)
 		}
 	}
 
@@ -146,7 +168,7 @@ func RevokeShare(password string) {
 	}
 
 	// Upload revoked JSON to the storage (do this first in case of failure)
-	stor := storage.GetByID(entries[0].storageID)
+	stor := storage.GetByID(storageID)
 	uploadPath := "share/" + password + ".json"
 	jsonBytes := []byte(`[{"revoked":true}]`)
 	upload := stor.BeginDatabaseUpload(uploadPath)
@@ -157,7 +179,7 @@ func RevokeShare(password string) {
 	upload.End()
 	log.Printf("Uploaded revoked JSON to %s", stor)
 
-	// Set revoked_at for all entries with this password
+	// Set revoked_at in shares table
 	now := time.Now().Unix()
 	_, err = db.DB.Exec(`
 		UPDATE shares SET revoked_at = ? WHERE password = ?

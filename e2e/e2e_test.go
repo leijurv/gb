@@ -518,16 +518,16 @@ func TestRepackSharedFile(t *testing.T) {
 	// Repack closes the database for backup, so reopen it for testing
 	db.SetupDatabase()
 
-	// Verify the share was updated to point to the new blob
+	// Verify the share_entry was updated to point to the new blob
 	var newBlobID []byte
-	err = db.DB.QueryRow(`SELECT blob_id FROM shares WHERE password = ?`, password).Scan(&newBlobID)
+	err = db.DB.QueryRow(`SELECT blob_id FROM share_entries WHERE password = ?`, password).Scan(&newBlobID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(newBlobID, blobID) {
-		t.Error("share blob_id was not updated after repack")
+		t.Error("share_entry blob_id was not updated after repack")
 	}
-	t.Logf("Share blob_id updated from %s to %s", hex.EncodeToString(blobID), hex.EncodeToString(newBlobID))
+	t.Logf("Share entry blob_id updated from %s to %s", hex.EncodeToString(blobID), hex.EncodeToString(newBlobID))
 
 	// Verify the new blob_id exists in blob_entries
 	var count int

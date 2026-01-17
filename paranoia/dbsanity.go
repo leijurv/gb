@@ -220,10 +220,7 @@ var queriesThatShouldHaveNoRows = []string{
 	`,
 
 	// older blobs with 1 encryption key should not be shared
-	"SELECT blob_id FROM blob_entries WHERE blob_id IN (SELECT blob_id FROM shares) GROUP BY blob_id HAVING COUNT(DISTINCT encryption_key) = 1 AND COUNT(*) > 1",
-
-	// same password shouldn't be used in multiple storages, and should all have the same shared_at
-	"SELECT password FROM shares GROUP BY password HAVING COUNT(DISTINCT storage_id) > 1 OR COUNT(DISTINCT shared_at) > 1",
+	"SELECT blob_id FROM blob_entries WHERE blob_id IN (SELECT blob_id FROM share_entries) GROUP BY blob_id HAVING COUNT(DISTINCT encryption_key) = 1 AND COUNT(*) > 1",
 
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2
 	// but it's super slow since it can't efficiently use indexes then

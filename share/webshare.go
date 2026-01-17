@@ -321,22 +321,8 @@ func generatePresignedURL(stor storage_base.Storage, params map[string]string, e
 
 // insertShare creates share database entries and uploads the share JSON.
 // Returns the generated password.
-func insertShare(entries []entry, stor storage_base.Storage, expiry time.Duration, passwordLength int) string {
-	// Generate a unique password
-	var password string
-	for {
-		password = generatePassword(passwordLength)
-		var count int
-		err := db.DB.QueryRow(`SELECT COUNT(*) FROM shares WHERE password = ?`, password).Scan(&count)
-		if err != nil {
-			panic(err)
-		}
-		if count == 0 {
-			break
-		}
-		// Extremely unlikely with 10+ char passwords, but handle it anyway
-		log.Printf("Generated password already exists, retrying...")
-	}
+func insertShare(entries []entry, name string, stor storage_base.Storage, expiry time.Duration, passwordLength int) string {
+	password := generatePassword(passwordLength)
 	now := time.Now().Unix()
 
 	var expiresAt *int64
@@ -345,18 +331,28 @@ func insertShare(entries []entry, stor storage_base.Storage, expiry time.Duratio
 		expiresAt = &exp
 	}
 
-	// Insert rows into shares table
+	// Insert into shares and share_entries tables
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
 
-	for _, e := range entries {
+	// Insert parent share record
+	_, err = tx.Exec(`
+		INSERT INTO shares (password, name, storage_id, shared_at, expires_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, password, name, stor.GetID(), now, expiresAt)
+	if err != nil {
+		panic(err)
+	}
+
+	// Insert share entries with ordinal based on position in slice
+	for i, e := range entries {
 		_, err = tx.Exec(`
-			INSERT INTO shares (hash, filename, blob_id, storage_id, shared_at, expires_at, password)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, e.hash, e.path, e.blobID, stor.GetID(), now, expiresAt, password)
+			INSERT INTO share_entries (password, hash, filename, blob_id, storage_id, ordinal)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, password, e.hash, e.path, e.blobID, stor.GetID(), i)
 		if err != nil {
 			panic(err)
 		}
@@ -372,21 +368,30 @@ func insertShare(entries []entry, stor storage_base.Storage, expiry time.Duratio
 	return password
 }
 
-func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, entries []entry, name string, expiry time.Duration) (string, string) {
-	password := insertShare(entries, stor, expiry, cfg.ShareUrlPasswordLength)
-	log.Printf("Uploaded share JSON to %s", stor)
-
-	baseURL := cfg.SharePasswordURL
+// BuildShareURL constructs the full share URL from a password and name.
+func BuildShareURL(password, name string) string {
+	baseURL := config.Config().SharePasswordURL
 	for strings.HasSuffix(baseURL, "/") {
 		baseURL = baseURL[:len(baseURL)-1]
 	}
 	urlStr := fmt.Sprintf("%s/%s", baseURL, password)
 	if name != "" {
 		urlFriendlyName := strings.Replace(name, " ", "_", -1)
-		urlFriendlyName = url.PathEscape(urlFriendlyName) // might not actually be necessary
+		urlFriendlyName = url.PathEscape(urlFriendlyName)
 		urlStr = fmt.Sprintf("%s/%s", urlStr, urlFriendlyName)
 	}
-	return urlStr, password
+	return urlStr
+}
+
+func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, entries []entry, name string, expiry time.Duration) (string, string) {
+	shareName := name
+	if shareName == "" {
+		shareName = entries[0].path // fallback to first entry's filename
+	}
+	password := insertShare(entries, shareName, stor, expiry, cfg.ShareUrlPasswordLength)
+	log.Printf("Uploaded share JSON to %s", stor)
+
+	return BuildShareURL(password, shareName), password
 }
 
 // UploadShareJSON generates and uploads the share JSON for a given password to storage.
@@ -404,14 +409,28 @@ func UploadShareJSON(password string, stor storage_base.Storage) {
 }
 
 // GenerateShareJSON generates the JSON array for a password-mode share by querying
-// the shares table. This utility can be used for initial share creation as well as
+// the share_entries table. This utility can be used for initial share creation as well as
 // regenerating the JSON after modifications (like revoking individual files).
 func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
+	// First check if the share is revoked
+	var revokedAt *int64
+	var expiresAt *int64
+	err := db.DB.QueryRow(`
+		SELECT expires_at, revoked_at FROM shares WHERE password = ? AND storage_id = ?
+	`, password, stor.GetID()).Scan(&expiresAt, &revokedAt)
+	if err != nil {
+		panic(err)
+	}
+
+	if revokedAt != nil {
+		return []byte(`[{"revoked":true}]`)
+	}
+
 	rows, err := db.DB.Query(`
-		SELECT hash, blob_id, filename, expires_at
-		FROM shares
-		WHERE password = ? AND storage_id = ? AND revoked_at IS NULL
-		ORDER BY filename
+		SELECT hash, blob_id, filename
+		FROM share_entries
+		WHERE password = ? AND storage_id = ?
+		ORDER BY ordinal
 	`, password, stor.GetID())
 	if err != nil {
 		panic(err)
@@ -423,9 +442,8 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 		var hash []byte
 		var blobID []byte
 		var filename string
-		var expiresAt *int64
 
-		err = rows.Scan(&hash, &blobID, &filename, &expiresAt)
+		err = rows.Scan(&hash, &blobID, &filename)
 		if err != nil {
 			panic(err)
 		}
@@ -437,9 +455,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 		panic(err)
 	}
 
-	// If no active entries, the share is fully revoked - return the revoked sentinel
-	// rather than an empty array. This ensures repack doesn't overwrite [{"revoked":true}]
-	// with [] when regenerating JSON for shares that had their blob_id updated.
+	// If no entries exist, still return the revoked sentinel for safety
 	if len(filesParams) == 0 {
 		return []byte(`[{"revoked":true}]`)
 	}
@@ -461,12 +477,11 @@ type ExpectedShareFile struct {
 // ExpectedShareJSONs returns all expected share JSON files for a given storage.
 // This is used by paranoia to verify share files are correctly stored.
 func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
-	// Get all distinct passwords for this storage and whether they're fully revoked
+	// Get all shares for this storage
 	rows, err := db.DB.Query(`
-		SELECT password, MAX(CASE WHEN revoked_at IS NULL THEN 1 ELSE 0 END) as has_active
+		SELECT password, revoked_at
 		FROM shares
 		WHERE storage_id = ?
-		GROUP BY password
 	`, stor.GetID())
 	if err != nil {
 		panic(err)
@@ -476,19 +491,19 @@ func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
 	var result []ExpectedShareFile
 	for rows.Next() {
 		var password string
-		var hasActive int
+		var revokedAt *int64
 
-		err = rows.Scan(&password, &hasActive)
+		err = rows.Scan(&password, &revokedAt)
 		if err != nil {
 			panic(err)
 		}
 
 		var jsonBytes []byte
-		if hasActive == 1 {
+		if revokedAt == nil {
 			// Active share - generate full JSON
 			jsonBytes = GenerateShareJSON(password, stor)
 		} else {
-			// Fully revoked share
+			// Revoked share
 			jsonBytes = []byte(`[{"revoked":true}]`)
 		}
 

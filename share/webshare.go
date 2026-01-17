@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -73,61 +74,23 @@ func verifySingleHashInput(inputs []string) {
 	}
 }
 
-// commonPath returns the common path prefix shared by all paths in the array.
-// Returns empty string if the array is empty or no common path exists.
+// commonPath returns the common directory prefix shared by all paths.
 func commonPath0(paths []string) string {
 	if len(paths) == 0 {
 		return ""
 	}
-
 	if len(paths) == 1 {
 		return filepath.Dir(paths[0])
 	}
-
-	// Split all paths into components
-	splitPaths := make([][]string, len(paths))
-	for i, path := range paths {
-		// Clean the path first to normalize it
-		cleanPath := filepath.Clean(path)
-		// Split by separator
-		splitPaths[i] = strings.Split(cleanPath, string(filepath.Separator))
+	sort.Strings(paths)
+	a := strings.Split(filepath.Clean(paths[0]), string(filepath.Separator))
+	b := strings.Split(filepath.Clean(paths[len(paths)-1]), string(filepath.Separator))
+	n := min(len(a), len(b)) - 1 // -1: want directory, not file
+	var i int
+	for i < n && a[i] == b[i] {
+		i++
 	}
-
-	// Find the minimum length to avoid index out of bounds
-	minLen := len(splitPaths[0])
-	for _, sp := range splitPaths[1:] {
-		if len(sp) < minLen {
-			minLen = len(sp)
-		}
-	}
-
-	// Find common components, but stop before the last component
-	// (since we want the directory, not the file)
-	var common []string
-	for i := 0; i < minLen-1; i++ { // Changed: minLen-1 instead of minLen
-		component := splitPaths[0][i]
-		allMatch := true
-
-		for j := 1; j < len(splitPaths); j++ {
-			if splitPaths[j][i] != component {
-				allMatch = false
-				break
-			}
-		}
-
-		if allMatch {
-			common = append(common, component)
-		} else {
-			break
-		}
-	}
-
-	if len(common) == 0 {
-		return ""
-	}
-
-	// Join the common components back together
-	return strings.Join(common, string(filepath.Separator))
+	return strings.Join(a[:i], string(filepath.Separator))
 }
 
 func commonPath(entries []entry) string {

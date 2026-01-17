@@ -763,18 +763,14 @@ self.addEventListener('fetch', (event) => {
             let cachedParams = cachedJsonByPassword.get(password);
             if (cachedParams && !isUrlExpired(cachedParams.url)) {
                 paramsArray = cachedParams;
-                console.log('cachedParams', cachedParams);
             } else {
-                console.log('requesting ', password);
                 let pageParams = await requestParamsFromPage_Directory(password);
                 if (!pageParams) {
                     return new Response('Error: unknown zip file id', { status: 404 });
                 }
-                console.log('pageParams', pageParams);
                 paramsArray = pageParams;
             }
             if (hash) {
-                console.log(paramsArray);
                 paramsArray = paramsArray.filter(p => p.sha256 === hash);
             }
         } else {
@@ -785,7 +781,6 @@ self.addEventListener('fetch', (event) => {
             paramsArray = [parseParameters(params)];
         }
         if (paramsArray.length === 0) {
-            console.log('uh oh stinky paramsArray.length should not be 0');
             throw new Error('uh oh stinky paramsArray.length should not be 0');
         }
 
@@ -818,7 +813,6 @@ self.addEventListener('fetch', (event) => {
             if (cachedParams) {
                 array = cachedParams;
             } else {
-                console.log('requesting ', password);
                 let pageParams = await requestParamsFromPage_Directory(password);
                 if (!pageParams) {
                     return new Response('Error: unknown zip file id', { status: 404 });

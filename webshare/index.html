@@ -437,7 +437,6 @@
         } else {
             (async () => {
                 try {
-                    console.log('fetching ', mediaUrl);
                     const response = await fetch(mediaUrl);
                     const reader = response.body.getReader();
                     const [buffer, truncated] = await readStreamWithLimitButItMustBeTextOrIReturnNull(reader, 10_000_000);
@@ -533,7 +532,6 @@
         $('filename').textContent = zipFileName;
         $('meta').innerHTML = `${(estimateZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} "files"}`;
         $('more-info').remove();
-        console.log(params);
         downloadUrl = `/gb/webshare/gb-download?password=${shortUrlKey}&download-filename=${parseZipFileName()}`;
 
         $('zip-container').style.display = 'table';

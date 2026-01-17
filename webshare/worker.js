@@ -117,6 +117,11 @@ export default {
 
             let json = await response.json();
 
+            // Check if share has been revoked
+            if (json.some(obj => obj.revoked)) {
+              return new Response(JSON.stringify({ error: "revoked" }), { status: 403, headers: { "Content-Type": "application/json" } });
+            }
+
             if (fileIndex !== null) {
               if (fileIndex < 0 || fileIndex >= json.length) {
                 return new Response("File index out of range", { status: 404 });

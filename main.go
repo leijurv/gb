@@ -574,18 +574,12 @@ func main() {
 			Name:    "revoke",
 			Aliases: []string{"unshare"},
 			Usage:   "revoke a password-mode share URL (run without arguments to list shares)",
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:  "label",
-					Usage: "storage label",
-				},
-			},
 			Action: func(c *cli.Context) error {
 				password := c.Args().First()
 				if password == "" {
-					share.ListShares(c.String("label"))
+					share.ListShares()
 				} else {
-					share.RevokeShare(c.String("label"), password)
+					share.RevokeShare(password)
 				}
 				return nil
 			},

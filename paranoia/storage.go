@@ -4,8 +4,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/leijurv/gb/db"
+	"github.com/leijurv/gb/share"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
@@ -45,6 +47,10 @@ func StorageParanoia(deleteUnknownFiles bool) bool {
 	for k, v := range actual {
 		_, ok := expected[k] // already checked keys that exist in both maps, so this is just keys that aren't present in expected
 		if !ok {
+			// Skip share files - they're verified separately by verifyShareJSONs
+			if strings.HasPrefix(k.path, "share/") {
+				continue
+			}
 			log.Println("UNKNOWN / UNEXPECTED FILE!!")
 			log.Println("Storage:", storage.GetByID(k.storageID[:]))
 			log.Println("Info:", v)
@@ -76,13 +82,83 @@ func StorageParanoia(deleteUnknownFiles bool) bool {
 	if anyErrors {
 		panic("Storage paranoia found errors (see above)")
 	}
+
+	// Verify share JSONs
+	if !verifyShareJSONs() {
+		anyErrors = true
+	}
 	if len(unknownFiles) > 0 {
 		log.Println("Storage paranoia found unknown files (see above)")
 		return false
 	}
 
+	if anyErrors {
+		panic("Storage paranoia found errors (see above)")
+	}
+
 	log.Println("Done")
 	return true
+}
+
+func verifyShareJSONs() bool {
+	log.Println("Verifying share JSONs...")
+	allOk := true
+
+	for _, stor := range storage.GetAll() {
+		expected := share.ExpectedShareJSONs(stor)
+
+		// Build map of expected files by password
+		expectedByPassword := make(map[string]share.ExpectedShareFile)
+		for _, e := range expected {
+			// Extract password from path "share/<password>.json"
+			password := strings.TrimPrefix(e.Path, "share/")
+			password = strings.TrimSuffix(password, ".json")
+			expectedByPassword[password] = e
+		}
+
+		// Get actual share files from storage
+		actualFiles := stor.ListPrefix("share/")
+		actualByPassword := make(map[string]storage_base.ListedFile)
+		for _, f := range actualFiles {
+			// Name is the filename without prefix, e.g., "abc123.json"
+			password := strings.TrimSuffix(f.Name, ".json")
+			actualByPassword[password] = f
+		}
+
+		// Check expected files exist and have correct metadata
+		for password, exp := range expectedByPassword {
+			actual, ok := actualByPassword[password]
+			if !ok {
+				log.Printf("MISSING SHARE JSON: %s in %s", exp.Path, stor)
+				allOk = false
+				continue
+			}
+
+			// Get checksum from storage
+			checksum, size := stor.Metadata(actual.Path)
+			if size != exp.Size {
+				log.Printf("SHARE JSON SIZE MISMATCH: %s in %s (expected %d, got %d)", exp.Path, stor, exp.Size, size)
+				allOk = false
+			}
+			if checksum != "" && checksum != exp.Checksum {
+				log.Printf("SHARE JSON CHECKSUM MISMATCH: %s in %s (expected %s, got %s)", exp.Path, stor, exp.Checksum, checksum)
+				allOk = false
+			}
+		}
+
+		// Check for unexpected share files
+		for password, actual := range actualByPassword {
+			if _, ok := expectedByPassword[password]; !ok {
+				log.Printf("UNEXPECTED SHARE JSON: %s in %s", actual.Path, stor)
+				allOk = false
+			}
+		}
+	}
+
+	if allOk {
+		log.Println("Share JSONs verified OK")
+	}
+	return allOk
 }
 
 func fetchAllActual() map[storageAndPath]storage_base.UploadedBlob {

@@ -80,8 +80,8 @@ CREATE TABLE blob_entries (
 	FOREIGN KEY(hash)    REFERENCES sizes(hash)    ON UPDATE RESTRICT ON DELETE RESTRICT,
 	FOREIGN KEY(blob_id) REFERENCES blobs(blob_id) ON UPDATE CASCADE  ON DELETE CASCADE
 );
-CREATE INDEX blob_entries_by_blob_id ON blob_entries(blob_id);
-CREATE INDEX blob_entries_by_hash    ON blob_entries(hash);
+CREATE UNIQUE INDEX blob_entries_by_blob_id_and_hash ON blob_entries(blob_id, hash);
+CREATE INDEX blob_entries_by_hash ON blob_entries(hash);
 
 
 CREATE TABLE storage (
@@ -116,7 +116,7 @@ CREATE TABLE blob_storage (
 	FOREIGN KEY(blob_id)    REFERENCES blobs(blob_id)      ON UPDATE CASCADE ON DELETE RESTRICT,
 	FOREIGN KEY(storage_id) REFERENCES storage(storage_id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
-CREATE INDEX blob_storage_by_blob_id ON blob_storage(blob_id);
+CREATE UNIQUE INDEX blob_storage_by_blob_id_and_storage_id ON blob_storage(blob_id, storage_id);
 
 
 CREATE TABLE db_key (
@@ -127,3 +127,28 @@ CREATE TABLE db_key (
 	CHECK(id == 0), /* only one row allowed xD */
 	CHECK(LENGTH(key) == 16)
 );
+
+CREATE TABLE shares (
+
+	hash       BLOB    NOT NULL, /* which hash was shared */
+	filename   TEXT    NOT NULL, /* what name was it given? usually the same as the original filename (not including folder name) */
+	blob_id    BLOB    NOT NULL, /* in which specific blob did we promise this hash could be found? */
+	storage_id BLOB    NOT NULL, /* which storage was the share JSON uploaded to? */
+	shared_at  INTEGER NOT NULL, /* when was it shared (unix seconds) */
+	expires_at INTEGER,          /* when does it expire (unix seconds) */
+	revoked_at INTEGER,          /* when did we revoke this share (unix seconds) */
+	password   TEXT    NOT NULL, /* the password (not including the URL or the ".json") */
+
+	UNIQUE(password, filename),
+	CHECK(LENGTH(filename) > 0),
+	CHECK(shared_at > 0),
+	CHECK(expires_at IS NULL OR expires_at > shared_at),
+	CHECK(revoked_at IS NULL OR revoked_at > shared_at),
+	CHECK(LENGTH(password) > 0),
+
+	FOREIGN KEY(blob_id, hash)       REFERENCES blob_entries(blob_id, hash)       ON UPDATE RESTRICT ON DELETE RESTRICT,
+	FOREIGN KEY(blob_id, storage_id) REFERENCES blob_storage(blob_id, storage_id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+CREATE INDEX shares_by_shared_at ON shares(shared_at);
+CREATE INDEX shares_by_hash ON shares(hash);
+CREATE INDEX shares_by_blob_id ON shares(blob_id);

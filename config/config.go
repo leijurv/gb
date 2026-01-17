@@ -124,7 +124,7 @@ var config = ConfigData{
 	ShareUsePasswordURL:    false,
 	ShareParameterizedURL:  "",
 	SharePasswordURL:       "",
-	ShareUrlPasswordLength: 12,
+	ShareUrlPasswordLength: 10,
 	DisableLeptonGo:        false,
 	SkipHashFailures:       false,
 	UseGitignore:           false,

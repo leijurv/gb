@@ -800,7 +800,8 @@ self.addEventListener('fetch', (event) => {
             if (canSeek && rangeHeader) {
                 const range = parseRangeHeader(rangeHeader, p.size);
                 if (range) {
-                    return await uncompressedRangedGet(range, p, notifyId);
+                    const response = await uncompressedRangedGet(range, p, notifyId);
+                    return addCoiHeaders(response);
                 }
             }
 

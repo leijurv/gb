@@ -246,9 +246,10 @@ async function getPresignedUrl(p) {
         throw new Error(`Failed to fetch fresh URL: ${response.status}`);
     }
     const data = await response.json();
-    cachedJsonByPassword.set(p.shortUrlKey, data);
+    const params = data.map(x => parseParameters(x, p.shortUrlKey));
+    cachedJsonByPassword.set(p.shortUrlKey, params);
     // Update cached URL for future requests
-    for (let d of data) {
+    for (let d of params) {
         if (d.sha256 == p.sha256) {
             p.url = d.url;
             return p.url;
@@ -659,8 +660,8 @@ async function fullFileGet(params, canSeek, isMediaPlayback, clientEvents, notif
     const keyBytes = hexToBytes(params.key);
 
     const s3Url = await getPresignedUrl(params);
-    if (isUrlExpired(s3Url)) {
-        throw new Error('getPresignedUrl returned an expired url')
+    if (!s3Url) {
+        return new Response('Share link expired', { status: 410 });
     }
 
     let s3Response;
@@ -808,7 +809,8 @@ self.addEventListener('fetch', (event) => {
             }
 
             // Full file request (or compressed file, or invalid range)
-            return await fullFileGet(p, canSeek, isMediaPlayback, true, password);
+            const response = await fullFileGet(p, canSeek, isMediaPlayback, true, password);
+            return addCoiHeaders(response);
         } else if (password) {
             let downloadFilename = url.searchParams.get('download-filename');
             let array;

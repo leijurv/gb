@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { transform } from 'esbuild';
 
 const swHash = createHash('sha256').update(readFileSync('share-sw.js')).digest('hex').slice(0, 8);
+const SERVED_JS_FILES = ['share-sw.js'];
 
 // Set BUNDLE_ZSTD=true to embed zstd in the service worker (larger bundle, no external fetch)
 // Default: fetch zstd from GitHub Pages at runtime
@@ -26,11 +27,13 @@ export default defineConfig({
     {
       name: 'rename-files',
       generateBundle(options, bundle) {
-        // Rename share-sw.js to share-sw.js.txt
-        const chunk = bundle['share-sw.js'];
-        chunk.fileName = 'share-sw.js.txt';
-        bundle['share-sw.js.txt'] = chunk;
-        delete bundle['share-sw.js'];
+        for (let filename of SERVED_JS_FILES) {
+          const chunk = bundle[filename];
+          const dotTxt = `${filename}.txt`
+          chunk.fileName = dotTxt;
+          bundle[dotTxt] = chunk;
+          delete bundle[filename];
+        }
       }
     },
     {
@@ -42,7 +45,7 @@ export default defineConfig({
         }
         return null;
       }
-    },
+    },,
     viteStaticCopy({
       targets: [
         {
@@ -62,13 +65,13 @@ export default defineConfig({
     rollupOptions: {
       input: {
         'share-sw': './share-sw.js',
-        'worker': './worker.js'
+        'worker': './worker.js',
       },
       output: {
         entryFileNames: '[name].js',  // Outputs as worker.js and share-sw.js
         chunkFileNames: '[name].js',
       },
-      external: ['./index.html', './share-sw.js.txt', './zstd.js.txt', './zstd.wasm.bin']
+      external: ['./index.html', './share-sw.js.txt' ]
     },
     outDir: 'dist',
     emptyOutDir: true,

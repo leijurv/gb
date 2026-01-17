@@ -1,12 +1,25 @@
-async function generatePresignedUrl(env, filePath, expiresIn = 30) {
+async function beginSignature(env) {
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const scope = `${dateStamp}/${env.S3_REGION}/s3/aws4_request`;
+
   let endpoint = env.S3_ENDPOINT;
   if (!endpoint.includes(env.S3_REGION)) {
     endpoint = `s3.${env.S3_REGION}.${endpoint}`;
   }
 
+  let key = `AWS4${env.S3_SECRET_KEY}`;
+  for (const part of [dateStamp, env.S3_REGION, 's3', 'aws4_request']) {
+    key = await hmac(key, part);
+  }
+
+  return { key, scope, amzDate, endpoint };
+}
+
+async function generatePresignedUrl(env, filePath, signingKey, expiresIn = 30) {
+  const { key, scope, amzDate, endpoint } = signingKey;
+
   const url = new URL(`https://${env.S3_BUCKET}.${endpoint}/${filePath}`);
-  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
-  const scope = `${amzDate.slice(0, 8)}/${env.S3_REGION}/s3/aws4_request`;
 
   url.searchParams.set('X-Amz-Algorithm', 'AWS4-HMAC-SHA256');
   url.searchParams.set('X-Amz-Credential', `${env.S3_ACCESS_KEY}/${scope}`);
@@ -17,10 +30,6 @@ async function generatePresignedUrl(env, filePath, expiresIn = 30) {
   const canonicalRequest = `GET\n/${filePath}\n${url.searchParams}\nhost:${url.host}\n\nhost\nUNSIGNED-PAYLOAD`;
   const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${await sha256(canonicalRequest)}`;
 
-  let key = `AWS4${env.S3_SECRET_KEY}`;
-  for (const part of [amzDate.slice(0, 8), env.S3_REGION, 's3', 'aws4_request']) {
-    key = await hmac(key, part);
-  }
   url.searchParams.set('X-Amz-Signature', toHex(await hmac(key, stringToSign)));
 
   return url.toString();
@@ -75,8 +84,16 @@ export default {
 
           const url = new URL(request.url);
           if (url.pathname.startsWith('/share-data/')) {
-            const key = url.pathname.slice("/share-data/".length);
-            const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${key}`);
+            let key = url.pathname.slice("/share-data/".length);
+            // Check for -N suffix pattern (e.g., "password-5.json" -> extract index 5)
+            let fileIndex = null;
+            const indexMatch = key.match(/^(.+)-(\d+)(\.json)$/);
+            if (indexMatch) {
+              key = indexMatch[1] + indexMatch[3]; // Reconstruct as "password.json"
+              fileIndex = parseInt(indexMatch[2]);
+            }
+            const signingKey = await beginSignature(env);
+            const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${key}`, signingKey);
             const response = await fetch(presignedJsonUrl);
             if (!response.ok) {
               if (response.status === 404) {
@@ -84,19 +101,36 @@ export default {
               }
               return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
             }
-            let json = await response.json();
-            // Check if the share has expired
             const now = Math.floor(Date.now() / 1000);
-            let presignedExpiry = 30; // default
-            if (json.expires_at) {
-              const expiresAt = parseInt(json.expires_at);
-              if (now >= expiresAt) {
-                return new Response(JSON.stringify({ error: "expired", expires_at: expiresAt }), { status: 410, headers: { "Content-Type": "application/json" } });
+            async function setUrl(json) {
+              let presignedExpiry = 30; // default
+              if (json.expires_at) {
+                const expiresAt = parseInt(json.expires_at);
+                if (now >= expiresAt) {
+                  return new Response(JSON.stringify({ error: "expired", expires_at: expiresAt }), { status: 410, headers: { "Content-Type": "application/json" } });
+                }
+                // Clamp presigned URL expiry to not exceed the share expiry
+                presignedExpiry = Math.min(presignedExpiry, expiresAt - now);
               }
-              // Clamp presigned URL expiry to not exceed the share expiry
-              presignedExpiry = Math.min(presignedExpiry, expiresAt - now);
+              json.url = await generatePresignedUrl(env, json.path, signingKey, presignedExpiry);
             }
-            json.url = await generatePresignedUrl(env, json.path, presignedExpiry);
+
+            let json = await response.json();
+
+            // Check if share has been revoked
+            if (json.some(obj => obj.revoked)) {
+              return new Response(JSON.stringify({ error: "revoked" }), { status: 403, headers: { "Content-Type": "application/json" } });
+            }
+
+            if (fileIndex !== null) {
+              if (fileIndex < 0 || fileIndex >= json.length) {
+                return new Response("File index out of range", { status: 404 });
+              }
+              json = [json[fileIndex]];
+            }
+
+            await Promise.all(json.map(inner => setUrl(inner)));
+
             return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
           }
 

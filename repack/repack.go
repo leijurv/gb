@@ -17,6 +17,7 @@ import (
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/paranoia"
+	"github.com/leijurv/gb/share"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
@@ -140,6 +141,12 @@ func Repack(label string, mode RepackMode) {
 		rows.Close()
 	}
 
+	RepackBlobIDs(blobIDs, stor, false)
+}
+
+// RepackBlobIDs repacks the specified blob IDs using the given storage for downloading.
+// If allowSingleEntryBlobs is true, blobs with only one entry will also be repacked (useful for testing).
+func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntryBlobs bool) {
 	if len(blobIDs) == 0 {
 		log.Println("No blob IDs provided")
 		return
@@ -201,7 +208,7 @@ func Repack(label string, mode RepackMode) {
 			rows.Close()
 		}
 
-		if len(hashes) == 1 { // optimization: if the blob only has one entry, which likely indicates it's a large file, we'd like to skip downloading it entirely if possible
+		if len(hashes) == 1 && !allowSingleEntryBlobs { // optimization: if the blob only has one entry, which likely indicates it's a large file, we'd like to skip downloading it entirely if possible
 			hashArr := utils.SliceToArr(hashes[0])
 			if _, exists := hashDedupe[hashArr]; exists {
 				// This hash was already claimed by another blob, so this blob is a duplicate
@@ -384,6 +391,33 @@ func Repack(label string, mode RepackMode) {
 		}
 	}
 
+	// Update any shares that reference hashes in the new blobs
+	// Collect updated shares so we can regenerate their JSON after commit
+	type updatedShare struct {
+		password  string
+		storageID []byte
+	}
+	var updatedShares []updatedShare
+
+	for _, blob := range newBlobs {
+		for _, entry := range blob.entries {
+			rows, err := tx.Query(`UPDATE shares SET blob_id = ? WHERE hash = ? RETURNING password, storage_id`, blob.blobID, entry.hash)
+			if err != nil {
+				panic(err)
+			}
+			for rows.Next() {
+				var password string
+				var storageID []byte
+				if err := rows.Scan(&password, &storageID); err != nil {
+					panic(err)
+				}
+				log.Printf("Updated share %s to point to new blob %s", password, hex.EncodeToString(blob.blobID[:8]))
+				updatedShares = append(updatedShares, updatedShare{password: password, storageID: storageID})
+			}
+			rows.Close()
+		}
+	}
+
 	// Delete old blob data (must delete in correct order due to foreign keys)
 	// This includes both repacked blobs and duplicate large blobs
 	allBlobsToDelete := append(blobsToProcess, blobsToDelete...)
@@ -415,6 +449,16 @@ func Repack(label string, mode RepackMode) {
 	err = tx.Commit()
 	if err != nil {
 		panic(err)
+	}
+
+	// Regenerate and upload share JSONs for updated shares
+	if len(updatedShares) > 0 {
+		log.Printf("Regenerating %d share JSON files...", len(updatedShares))
+		for _, us := range updatedShares {
+			stor := storage.GetByID(us.storageID)
+			share.UploadShareJSON(us.password, stor)
+			log.Printf("Updated share JSON for %s", us.password)
+		}
 	}
 
 	log.Println("Repack complete!")

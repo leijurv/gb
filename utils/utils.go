@@ -239,11 +239,15 @@ var commaRegex = regexp.MustCompile("(\\d+)(\\d{3})")
 
 func FormatCommas(num int64) string {
 	str := strconv.FormatInt(num, 10)
-	for n := ""; n != str; {
-		n = str
-		str = commaRegex.ReplaceAllString(str, "$1,$2")
+	return FormatCommasStr(str)
+}
+
+func FormatCommasStr(num string) string {
+	for n := ""; n != num; {
+		n = num
+		num = commaRegex.ReplaceAllString(num, "$1,$2")
 	}
-	return str
+	return num
 }
 
 func IsDatabaseFile(path string) bool {

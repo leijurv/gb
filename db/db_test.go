@@ -51,6 +51,16 @@ func TestInitialSetup(t *testing.T) {
 		if !areForeignKeysEnforced(t) {
 			t.Errorf("schema two should stay with foreign keys enforced")
 		}
+		err = schemaVersionThree()
+		if err != nil {
+			t.Error(err)
+		}
+		if determineDatabaseLayer() != DATABASE_LAYER_3 {
+			t.Errorf("schema version three should work")
+		}
+		if !areForeignKeysEnforced(t) {
+			t.Errorf("schema three should stay with foreign keys enforced")
+		}
 	})
 }
 
@@ -83,6 +93,27 @@ func TestLayerTwoDoesntWorkTwice(t *testing.T) {
 		err = schemaVersionTwo()
 		if err == nil || err.Error() != "no such column: encryption_key" {
 			t.Errorf("shouldn't work twice")
+		}
+	})
+}
+
+func TestLayerThreeDoesntWorkTwice(t *testing.T) {
+	WithTestingDatabase(t, false, func() {
+		err := schemaVersionOne()
+		if err != nil {
+			t.Error(err)
+		}
+		err = schemaVersionTwo()
+		if err != nil {
+			t.Error(err)
+		}
+		err = schemaVersionThree()
+		if err != nil {
+			t.Error(err)
+		}
+		err = schemaVersionThree()
+		if err == nil || err.Error() != "no such index: blob_entries_by_blob_id" {
+			t.Errorf("shouldn't work twice, got: %v", err)
 		}
 	})
 }

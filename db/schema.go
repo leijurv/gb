@@ -6,6 +6,7 @@ const (
 	DATABASE_LAYER_EMPTY = iota
 	DATABASE_LAYER_1     // original schema, as of 2019
 	DATABASE_LAYER_2     // hash_pre_enc removed, hash_post_enc renamed to final_hash, encryption_key renamed to padding_key, encryption_key added to blob_entries
+	DATABASE_LAYER_3     // blob_entries_by_blob_id index replaced with unique blob_entries_by_blob_id_and_hash, unique index on blob_storage(blob_id, storage_id), shares table added
 )
 
 func initialSetup() {
@@ -23,6 +24,12 @@ func initialSetup() {
 		}
 		fallthrough
 	case DATABASE_LAYER_2:
+		err := schemaVersionThree()
+		if err != nil {
+			panic(err)
+		}
+		fallthrough
+	case DATABASE_LAYER_3:
 		// up to date
 	}
 }
@@ -252,6 +259,53 @@ func schemaVersionTwo() error {
 	return nil
 }
 
+func schemaVersionThree() error {
+	tx, err := DB.Begin()
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
+	DROP INDEX blob_entries_by_blob_id;
+	DROP INDEX blob_storage_by_blob_id;
+	CREATE UNIQUE INDEX blob_entries_by_blob_id_and_hash ON blob_entries(blob_id, hash);
+	CREATE UNIQUE INDEX blob_storage_by_blob_id_and_storage_id ON blob_storage(blob_id, storage_id);
+
+	CREATE TABLE shares (
+
+		hash       BLOB    NOT NULL, /* which hash was shared */
+		filename   TEXT    NOT NULL, /* what name was it given? usually the same as the original filename (not including folder name) */
+		blob_id    BLOB    NOT NULL, /* in which specific blob did we promise this hash could be found? */
+		storage_id BLOB    NOT NULL, /* which storage was the share JSON uploaded to? */
+		shared_at  INTEGER NOT NULL, /* when was it shared (unix seconds) */
+		expires_at INTEGER,          /* when does it expire (unix seconds) */
+		revoked_at INTEGER,          /* when did we revoke this share (unix seconds) */
+		password   TEXT    NOT NULL, /* the password (not including the URL or the ".json") */
+
+		UNIQUE(password, filename),
+		CHECK(LENGTH(filename) > 0),
+		CHECK(shared_at > 0),
+		CHECK(expires_at IS NULL OR expires_at > shared_at),
+		CHECK(revoked_at IS NULL OR revoked_at > shared_at),
+		CHECK(LENGTH(password) > 0),
+
+		FOREIGN KEY(blob_id, hash)       REFERENCES blob_entries(blob_id, hash)       ON UPDATE RESTRICT ON DELETE RESTRICT,
+		FOREIGN KEY(blob_id, storage_id) REFERENCES blob_storage(blob_id, storage_id) ON UPDATE RESTRICT ON DELETE RESTRICT
+	);
+	CREATE INDEX shares_by_shared_at ON shares(shared_at);
+	CREATE INDEX shares_by_hash ON shares(hash);
+	CREATE INDEX shares_by_blob_id ON shares(blob_id);
+	`)
+	if err != nil {
+		return err
+	}
+	err = tx.Commit()
+	if err != nil {
+		panic(err)
+	}
+	return nil
+}
+
 func query(query string) string {
 	rows, err := DB.Query(query)
 	if err != nil {
@@ -280,17 +334,29 @@ func determineDatabaseLayer() DatabaseLayer {
 		return DATABASE_LAYER_EMPTY
 	}
 
-	// sanity
-	expectedTables := "blob_entries,blob_storage,blobs,db_key,files,sizes,storage,"
-	if tables != expectedTables {
-		panic("gb.db doesn't have the tables that I expect. expected '" + expectedTables + "' but got '" + tables + "'")
-	}
-	indexes := query("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
-	expectedIndexes := "blob_entries_by_blob_id,blob_entries_by_hash,blob_storage_by_blob_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
-	if indexes != expectedIndexes {
-		panic("gb.db doesn't have the indexes that I expect. expected '" + expectedIndexes + "' but got '" + indexes + "'")
+	// determine layer by tables
+	expectedTablesLayer2 := "blob_entries,blob_storage,blobs,db_key,files,sizes,storage,"
+	expectedTablesLayer3 := "blob_entries,blob_storage,blobs,db_key,files,shares,sizes,storage,"
+	isLayer3Tables := tables == expectedTablesLayer3
+	if tables != expectedTablesLayer2 && !isLayer3Tables {
+		panic("gb.db doesn't have the tables that I expect. expected '" + expectedTablesLayer2 + "' or '" + expectedTablesLayer3 + "' but got '" + tables + "'")
 	}
 
+	// check indexes match the layer determined by tables
+	indexes := query("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
+	expectedIndexesLayer2 := "blob_entries_by_blob_id,blob_entries_by_hash,blob_storage_by_blob_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
+	expectedIndexesLayer3 := "blob_entries_by_blob_id_and_hash,blob_entries_by_hash,blob_storage_by_blob_id_and_storage_id,files_by_hash,files_by_path,files_by_path_and_end,files_by_path_curr,shares_by_blob_id,shares_by_hash,shares_by_shared_at,sizes_by_size,sqlite_autoindex_blob_storage_1,sqlite_autoindex_blobs_1,sqlite_autoindex_blobs_2,sqlite_autoindex_files_1,sqlite_autoindex_shares_1,sqlite_autoindex_sizes_1,sqlite_autoindex_storage_1,sqlite_autoindex_storage_2,sqlite_autoindex_storage_3,"
+	if isLayer3Tables {
+		if indexes != expectedIndexesLayer3 {
+			panic("gb.db has layer 3 tables but indexes don't match. expected '" + expectedIndexesLayer3 + "' but got '" + indexes + "'")
+		}
+	} else {
+		if indexes != expectedIndexesLayer2 {
+			panic("gb.db has layer 2 tables but indexes don't match. expected '" + expectedIndexesLayer2 + "' but got '" + indexes + "'")
+		}
+	}
+
+	// distinguish layer 1 from layer 2 by blob columns
 	blob_cols := query("SELECT name FROM PRAGMA_TABLE_INFO('blobs')")
 	if blob_cols == "blob_id,encryption_key,size,hash_pre_enc,hash_post_enc," {
 		return DATABASE_LAYER_1
@@ -298,6 +364,9 @@ func determineDatabaseLayer() DatabaseLayer {
 	expectedBlobCols := "blob_id,padding_key,size,final_hash,"
 	if blob_cols != expectedBlobCols {
 		panic("the 'blobs' table doesn't have the columns that I expect. expected '" + expectedBlobCols + "' but got '" + blob_cols + "'")
+	}
+	if isLayer3Tables {
+		return DATABASE_LAYER_3
 	}
 	return DATABASE_LAYER_2
 }

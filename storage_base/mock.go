@@ -2,7 +2,7 @@ package storage_base
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -168,7 +168,7 @@ func (u *mockUpload) End() UploadedBlob {
 	data := u.buf.Bytes()
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
-	hash := sha256.Sum256(data)
+	hash := md5.Sum(data)
 	checksum := hex.EncodeToString(hash[:])
 	u.storage.storeBlob(u.path, dataCopy, checksum)
 	u.completed = true

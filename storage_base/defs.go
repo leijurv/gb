@@ -33,8 +33,8 @@ type Storage interface {
 
 // a file listed from storage
 type ListedFile struct {
-	Path     string    // full path (for S3) or file ID (for GDrive)
-	Name     string    // filename without the prefix (e.g., "abc123.json" from "share/abc123.json")
+	Path     string // full path (for S3) or file ID (for GDrive)
+	Name     string // filename without the prefix (e.g., "abc123.json" from "share/abc123.json")
 	Size     int64
 	Modified time.Time
 }

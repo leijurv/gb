@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/download"
 	"github.com/leijurv/gb/paranoia"
+	"github.com/leijurv/gb/repack"
+	"github.com/leijurv/gb/share"
 	"github.com/leijurv/gb/storage"
 	"github.com/leijurv/gb/storage_base"
 	bip39 "github.com/tyler-smith/go-bip39"
@@ -467,4 +470,90 @@ func TestRestoreDB(t *testing.T) {
 	if !bytes.Equal(originalDB, decryptedDB) {
 		t.Errorf("database mismatch: original %d bytes, decrypted %d bytes", len(originalDB), len(decryptedDB))
 	}
+}
+
+func TestRepackSharedFile(t *testing.T) {
+	env := setupTestEnv(t, "repack-share")
+	defer env.cleanup()
+
+	// Create a file and back it up (size must be < MinBlobSize=1000 in test config)
+	content := makeBinaryData(500)
+	env.writeFile("shared.bin", content)
+	env.backup()
+
+	// Get the blob_id for this file (for verification after repack)
+	var blobID []byte
+	err := db.DB.QueryRow(`
+		SELECT blob_entries.blob_id
+		FROM blob_entries
+		INNER JOIN sizes ON sizes.hash = blob_entries.hash
+		WHERE sizes.size = ?
+	`, len(content)).Scan(&blobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Backed up file has blob_id %s", hex.EncodeToString(blobID))
+
+	// Create a share for this file using the same function as main.go
+	filePath := filepath.Join(env.srcDir, "shared.bin")
+	password := share.PasswordUrlShareNonInteractive([]string{filePath}, "", 0, env.mockStor)
+	t.Logf("Created share with password: %s", password)
+
+	// Verify paranoia passes before repack
+	paranoia.DBParanoia()
+	if !paranoia.StorageParanoia(false) {
+		t.Fatal("storage paranoia failed before repack")
+	}
+
+	// Get the old blob's path so we can delete it after repack
+	var oldBlobPath string
+	err = db.DB.QueryRow(`SELECT path FROM blob_storage WHERE blob_id = ?`, blobID).Scan(&oldBlobPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now repack this blob (with allowSingleEntryBlobs=true for testing)
+	repack.RepackBlobIDs([][]byte{blobID}, env.mockStor, true)
+
+	// Repack closes the database for backup, so reopen it for testing
+	db.SetupDatabase()
+
+	// Verify the share was updated to point to the new blob
+	var newBlobID []byte
+	err = db.DB.QueryRow(`SELECT blob_id FROM shares WHERE password = ?`, password).Scan(&newBlobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(newBlobID, blobID) {
+		t.Error("share blob_id was not updated after repack")
+	}
+	t.Logf("Share blob_id updated from %s to %s", hex.EncodeToString(blobID), hex.EncodeToString(newBlobID))
+
+	// Verify the new blob_id exists in blob_entries
+	var count int
+	err = db.DB.QueryRow(`SELECT COUNT(*) FROM blob_entries WHERE blob_id = ?`, newBlobID).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count == 0 {
+		t.Error("new blob_id from share doesn't exist in blob_entries")
+	}
+
+	// Delete old blob and db backup files from storage so paranoia passes
+	env.mockStor.DeleteBlob(oldBlobPath)
+	// Delete db backup files (they start with "db-v2backup-")
+	for _, f := range env.mockStor.ListPrefix("db-v2backup-") {
+		env.mockStor.DeleteBlob(f.Path)
+	}
+
+	// Run paranoia to verify everything is consistent
+	paranoia.DBParanoia()
+	if !paranoia.StorageParanoia(false) {
+		t.Fatal("storage paranoia failed after repack")
+	}
+
+	// Verify the file can still be restored
+	env.removeFile("shared.bin")
+	env.restore()
+	env.verifyRestored("shared.bin", sha256.Sum256(content))
 }

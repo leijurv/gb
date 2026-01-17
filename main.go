@@ -530,8 +530,14 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				if c.Bool("password-mode") != config.Config().ShareUsePasswordURL {
-					share.PasswordUrlShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
+				var usePassword bool
+				if c.IsSet("password-mode") {
+					usePassword = c.Bool("password-mode")
+				} else {
+					usePassword = config.Config().ShareUsePasswordURL
+				}
+				if usePassword {
+					share.PasswordUrlShare(c.Args(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				} else {
 					share.ParameterizedShare(c.Args().First(), c.String("name"), c.String("label"), c.Duration("expiry"))
 				}
@@ -568,18 +574,12 @@ func main() {
 			Name:    "revoke",
 			Aliases: []string{"unshare"},
 			Usage:   "revoke a password-mode share URL (run without arguments to list shares)",
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:  "label",
-					Usage: "storage label",
-				},
-			},
 			Action: func(c *cli.Context) error {
 				password := c.Args().First()
 				if password == "" {
-					share.ListShares(c.String("label"))
+					share.ListShares()
 				} else {
-					share.RevokeShare(c.String("label"), password)
+					share.RevokeShare(password)
 				}
 				return nil
 			},

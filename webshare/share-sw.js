@@ -124,12 +124,12 @@ async function loadDependencies() {
 const depsLoaded = loadDependencies();
 
 const cachedJsonByPassword = new Map();
-async function requestParamsFromPage_Directory(password) {
-    return requestParamsFromPage(password, 'need-params', data => cachedJsonByPassword.set(password, data));
+async function requestParamsFromPage(password) {
+    return requestParamsFromPage0(password, 'need-params', data => cachedJsonByPassword.set(password, data));
 }
 
 // Ask page for params - broadcast to all clients, first response wins
-async function requestParamsFromPage(id, type, callback) {
+async function requestParamsFromPage0(id, type, callback) {
     const clients = await self.clients.matchAll({ type: 'window' });
     if (clients.length === 0) return null;
 
@@ -226,7 +226,6 @@ async function getPresignedUrl(p) {
     }
 
     if (!p.shortUrlKey) {
-        // TODO: notifyClients?
         return null; // the url is expired and we can't update it
     }
 
@@ -620,13 +619,14 @@ async function proxyLeptonFile(pathname) {
     return new Response(isText ? body : body.slice(0), { status: 200, headers });
 }
 
-async function uncompressedRangedGet(range, params) {
+async function uncompressedRangedGet(range, params, notifyId) {
     await depsLoaded;
     const keyBytes = hexToBytes(params.key);
 
     // Get presigned URL (fetches fresh one if expired)
     const s3Url = await getPresignedUrl(params);
     if (!s3Url) {
+        notifyClients({ type: 'error', message: 'This share link has expired', id: notifyId });
         return new Response('Share link expired', { status: 410 });
     }
 
@@ -661,6 +661,7 @@ async function fullFileGet(params, canSeek, isMediaPlayback, clientEvents, notif
 
     const s3Url = await getPresignedUrl(params);
     if (!s3Url) {
+        notifyClients({ type: 'error', message: 'This share link has expired', id: notifyId });
         return new Response('Share link expired', { status: 410 });
     }
 
@@ -764,7 +765,7 @@ self.addEventListener('fetch', (event) => {
             if (cachedParams && !isUrlExpired(cachedParams.url)) {
                 paramsArray = cachedParams;
             } else {
-                let pageParams = await requestParamsFromPage_Directory(password);
+                let pageParams = await requestParamsFromPage(password);
                 if (!pageParams) {
                     return new Response('Error: unknown zip file id', { status: 404 });
                 }
@@ -792,19 +793,19 @@ self.addEventListener('fetch', (event) => {
             // Check cache first, then ask page if SW was restarted
             // TODO: if the cache has an expired url get one from the client
             const p = paramsArray[0];
+            const notifyId = password ? password : p.sha256;
 
             const canSeek = (p.compression === '' || p.compression === 'none');
-
             // Handle Range request for uncompressed files
             if (canSeek && rangeHeader) {
                 const range = parseRangeHeader(rangeHeader, p.size);
                 if (range) {
-                    return await uncompressedRangedGet(range, p);
+                    return await uncompressedRangedGet(range, p, notifyId);
                 }
             }
 
             // Full file request (or compressed file, or invalid range)
-            const response = await fullFileGet(p, canSeek, isMediaPlayback, true, password);
+            const response = await fullFileGet(p, canSeek, isMediaPlayback, true, notifyId);
             return addCoiHeaders(response);
         } else if (password) {
             let downloadFilename = url.searchParams.get('download-filename');
@@ -813,7 +814,7 @@ self.addEventListener('fetch', (event) => {
             if (cachedParams) {
                 array = cachedParams;
             } else {
-                let pageParams = await requestParamsFromPage_Directory(password);
+                let pageParams = await requestParamsFromPage(password);
                 if (!pageParams) {
                     return new Response('Error: unknown zip file id', { status: 404 });
                 }

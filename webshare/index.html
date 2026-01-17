@@ -438,6 +438,10 @@
             (async () => {
                 try {
                     const response = await fetch(mediaUrl);
+                    if (!response.ok) {
+                        console.log('preview fetch failed');
+                        return;
+                    }
                     const reader = response.body.getReader();
                     const [buffer, truncated] = await readStreamWithLimitButItMustBeTextOrIReturnNull(reader, 10_000_000);
                     // Cancel the reader to stop downloading more

@@ -123,13 +123,9 @@ async function loadDependencies() {
 
 const depsLoaded = loadDependencies();
 
-const downloadParamsMap = new Map();
-async function requestParamsFromPage_File(id) {
-    return requestParamsFromPage(id, 'need-params', data => downloadParamsMap.set(data.sha256, data));
-}
-
+const cachedJsonByPassword = new Map();
 async function requestParamsFromPage_Directory(password) {
-    return requestParamsFromPage(password, 'need-params-directory', data => {});
+    return requestParamsFromPage(password, 'need-params', data => cachedJsonByPassword.set(password, data));
 }
 
 // Ask page for params - broadcast to all clients, first response wins
@@ -195,32 +191,43 @@ async function queryAndParseParameters(shortUrlKey) {
     }
     const json = await response.json();
     return json.map(p => {
-        return {
-            compression: p.cmp,
-            key: p.key.toLowerCase(),
-            length: parseInt(p.length),
-            offset: parseInt(p.offset),
-            size: parseInt(p.size),
-            name: p.name,
-            filename: p.name,
-            path: p.path,
-            sha256: p.sha256,
-            url: p.url,
-            shortUrlKey: shortUrlKey
-        };
+        return parseParameters(p);
     });
 }
 
+function parseParameters(p, shortUrlKey) {
+    let out = {
+        compression: p.cmp,
+        key: p.key.toLowerCase(),
+        length: parseInt(p.length),
+        offset: parseInt(p.offset),
+        size: parseInt(p.size),
+        name: p.name,
+        filename: p.name,
+        path: p.path,
+        sha256: p.sha256,
+        url: p.url
+    };
+    if (shortUrlKey) {
+        out.shortUrlKey = shortUrlKey;
+    }
+    return out;
+}
+
+
+
+
 // Get presigned URL, fetching fresh one only if current is expired
 // Returns null if share has expired (and notifies clients)
-async function getPresignedUrl(p, id) {
-    if (!p.shortUrlKey) {
-        return p.url;
-    }
-
+async function getPresignedUrl(p) {
     // Check if cached URL is still valid (with a few second buffer)
     if (!isUrlExpired(p.url)) {
         return p.url;
+    }
+
+    if (!p.shortUrlKey) {
+        // TODO: notifyClients?
+        return null; // the url is expired and we can't update it
     }
 
     // Fetch fresh URL
@@ -239,6 +246,7 @@ async function getPresignedUrl(p, id) {
         throw new Error(`Failed to fetch fresh URL: ${response.status}`);
     }
     const data = await response.json();
+    cachedJsonByPassword.set(p.shortUrlKey, data);
     // Update cached URL for future requests
     for (let d of data) {
         if (d.sha256 == p.sha256) {
@@ -611,12 +619,12 @@ async function proxyLeptonFile(pathname) {
     return new Response(isText ? body : body.slice(0), { status: 200, headers });
 }
 
-async function uncompressedRangedGet(range, params, id) {
+async function uncompressedRangedGet(range, params) {
     await depsLoaded;
     const keyBytes = hexToBytes(params.key);
 
     // Get presigned URL (fetches fresh one if expired)
-    const s3Url = await getPresignedUrl(params, id);
+    const s3Url = await getPresignedUrl(params);
     if (!s3Url) {
         return new Response('Share link expired', { status: 410 });
     }
@@ -646,12 +654,13 @@ async function uncompressedRangedGet(range, params, id) {
     return new Response(stream, { status: 206, headers });
 }
 
-async function fullFileGet(params, s3Url, canSeek, isMediaPlayback, clientEvents, notifyId) {
+async function fullFileGet(params, canSeek, isMediaPlayback, clientEvents, notifyId) {
     await depsLoaded;
     const keyBytes = hexToBytes(params.key);
 
+    const s3Url = await getPresignedUrl(params);
     if (isUrlExpired(s3Url)) {
-        throw new Error('s3Url should be ensured to not be expired before calling fullFileGet')
+        throw new Error('getPresignedUrl returned an expired url')
     }
 
     let s3Response;
@@ -699,20 +708,8 @@ async function fullFileGet(params, s3Url, canSeek, isMediaPlayback, clientEvents
 // lazily creates responses so we can update the urls as they are needed
 async function* fileResponses(paramArray, id) {
     try {
-        const urlByHash = new Map();
         for (let p of paramArray) {
-            urlByHash.set(p.sha256, p.url);
-        }
-        for (let p of paramArray) {
-            let url = urlByHash.get(p.sha256);
-            if (isUrlExpired(url)) {
-                const updated = await queryAndParseParameters(p.shortUrlKey);
-                for (let updatedParam of updated) {
-                    urlByHash.set(updatedParam.sha256, updatedParam.url);
-                }
-                url = urlByHash.get(p.sha256);
-            }
-            yield fullFileGet(p, url, false, false, false, id);
+            yield fullFileGet(p, false, false, false, id);
         }
     } catch(e) {
         // downloadZip seems to be swallowing errors so print here them if any happen
@@ -756,24 +753,49 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    const parameterizedUrlParams = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
+    const password = url.searchParams.get('password');
     const hash = url.searchParams.get('hash');
-    const zipId = url.searchParams.get('zip-id');
-    if (hash) {
-        const id = hash;
-        const isMediaPlayback = url.searchParams.get('media') === 'true';
-        const rangeHeader = event.request.headers.get('Range');
+    event.respondWith((async () => {
+        let paramsArray;
+        if (password) {
+            let cachedParams = cachedJsonByPassword.get(password);
+            if (cachedParams && !isUrlExpired(cachedParams.url)) {
+                paramsArray = cachedParams;
+                console.log('cachedParams', cachedParams);
+            } else {
+                console.log('requesting ', password);
+                let pageParams = await requestParamsFromPage_Directory(password);
+                if (!pageParams) {
+                    return new Response('Error: unknown zip file id', { status: 404 });
+                }
+                console.log('pageParams', pageParams);
+                paramsArray = pageParams;
+            }
+            if (hash) {
+                console.log(paramsArray);
+                paramsArray = paramsArray.filter(p => p.sha256 === hash);
+            }
+        } else {
+            let params = {};
+            for (key of parameterizedUrlParams) {
+                params[key] = url.searchParams.get(key);
+            }
+            paramsArray = [parseParameters(params)];
+        }
+        if (paramsArray.length === 0) {
+            console.log('uh oh stinky paramsArray.length should not be 0');
+            throw new Error('uh oh stinky paramsArray.length should not be 0');
+        }
 
-        event.respondWith((async () => {
+
+        if (paramsArray.length === 1) {
+            const isMediaPlayback = url.searchParams.get('media') === 'true';
+            const rangeHeader = event.request.headers.get('Range');
+
             // Check cache first, then ask page if SW was restarted
             // TODO: if the cache has an expired url get one from the client
-            let p = downloadParamsMap.get(id);
-            if (!p) {
-                p = await requestParamsFromPage_File(id);
-            }
-            if (!p) {
-                swLog('[SW] Error: unknown hash', id);
-                return new Response('Error: unknown hash', { status: 404 });
-            }
+            const p = paramsArray[0];
 
             const canSeek = (p.compression === '' || p.compression === 'none');
 
@@ -781,42 +803,43 @@ self.addEventListener('fetch', (event) => {
             if (canSeek && rangeHeader) {
                 const range = parseRangeHeader(rangeHeader, p.size);
                 if (range) {
-                    return await uncompressedRangedGet(range, p, id);
+                    return await uncompressedRangedGet(range, p);
                 }
             }
 
-            const s3Url = await getPresignedUrl(p, id);
-            if (!s3Url) {
-                return new Response('Share link expired', { status: 410 });
-            }
             // Full file request (or compressed file, or invalid range)
-            return await fullFileGet(p, s3Url, canSeek, isMediaPlayback, true, id);
-        })());
-    } else if (zipId) {
-        event.respondWith((async () => {
+            return await fullFileGet(p, canSeek, isMediaPlayback, true, password);
+        } else if (password) {
             let downloadFilename = url.searchParams.get('download-filename');
-            let array = await requestParamsFromPage_Directory(zipId);
-            if (!array) {
-                return new Response('Error: unknown zip file id', { status: 404 });
+            let array;
+            let cachedParams = cachedJsonByPassword.get(password);
+            if (cachedParams) {
+                array = cachedParams;
+            } else {
+                console.log('requesting ', password);
+                let pageParams = await requestParamsFromPage_Directory(password);
+                if (!pageParams) {
+                    return new Response('Error: unknown zip file id', { status: 404 });
+                }
+                array = pageParams;
             }
-            array = array.files;
 
-            let responses = fileResponses(array, zipId);
+            let responses = fileResponses(array, password);
             let zipResponse = downloadZip(responses, {metadata: fileMetadata(array)});
             const headers = new Headers(zipResponse.headers);
             headers.set('Content-Disposition', `attachment; filename="${downloadFilename}"`);
             const length = parseInt(headers.get("Content-Length"))
-            const body = zipResponse.body.pipeThrough(createProgressTransform(zipId, length));
+            const body = zipResponse.body.pipeThrough(createProgressTransform(password, length));
             return new Response(body, {
                 status: zipResponse.status,
                 statusText: zipResponse.statusText,
                 headers: headers
             });
-        })());
-    } else {
-        console.log('didnt provide zip-id or hash');
-        return new Response('Error: didnt provide zip-id or hash parameter', { status: 400 });
-    }
+        } else {
+            console.log('didnt provide zip-id or hash');
+            return new Response('Error: didnt provide zip-id or hash parameter', { status: 400 });
+        }
+    })());
 });
 
 self.addEventListener('install', () => self.skipWaiting());

@@ -171,7 +171,7 @@ func RevokeShare(password string) {
 	storage.GetAll() // Ensure storage cache is populated
 	stor := storage.GetByID(storageID)
 	uploadPath := "share/" + password + ".json"
-	jsonBytes := []byte(`[{"revoked":true}]`)
+	jsonBytes := []byte(`{"revoked": true}`)
 	upload := stor.BeginDatabaseUpload(uploadPath)
 	_, err = upload.Writer().Write(jsonBytes)
 	if err != nil {

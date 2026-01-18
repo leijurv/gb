@@ -167,20 +167,7 @@ func RevokeShare(password string) {
 		return
 	}
 
-	// Upload revoked JSON to the storage (do this first in case of failure)
-	storage.GetAll() // Ensure storage cache is populated
-	stor := storage.GetByID(storageID)
-	uploadPath := "share/" + password + ".json"
-	jsonBytes := []byte(`{"revoked": true}`)
-	upload := stor.BeginDatabaseUpload(uploadPath)
-	_, err = upload.Writer().Write(jsonBytes)
-	if err != nil {
-		panic(err)
-	}
-	upload.End()
-	log.Printf("Uploaded revoked JSON to %s", stor)
-
-	// Set revoked_at in shares table
+	// Set revoked_at in shares table first, then upload
 	now := time.Now().Unix()
 	_, err = db.DB.Exec(`
 		UPDATE shares SET revoked_at = ? WHERE password = ?
@@ -188,6 +175,12 @@ func RevokeShare(password string) {
 	if err != nil {
 		panic(err)
 	}
+
+	// Upload revoked JSON to storage (GenerateShareJSON will see revoked_at and return revoked JSON)
+	storage.GetAll() // Ensure storage cache is populated
+	stor := storage.GetByID(storageID)
+	UploadShareJSON(password, stor)
+	log.Printf("Uploaded revoked JSON to %s", stor)
 
 	log.Println("Share revoked successfully")
 }

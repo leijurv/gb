@@ -25,6 +25,10 @@ import (
 
 const DefaultWebShareBaseURL = "https://leijurv.github.io/gb/webshare/"
 
+// RevokedShareJSON is the canonical JSON content for revoked shares.
+// Used by both revoke.go and ExpectedShareJSONs to ensure consistency.
+const RevokedShareJSON = `{"revoked":true}`
+
 // generatePassword creates a random alphanumeric password of the given length
 func generatePassword(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -394,14 +398,17 @@ func generatePasswordURL(stor storage_base.Storage, cfg config.ConfigData, entri
 	return BuildShareURL(password, shareName), password
 }
 
-// UploadShareJSON generates and uploads the share JSON for a given password to storage.
+// UploadShareJSON generates and uploads the encrypted share JSON for a given password to storage.
 // This is the single place where share JSON upload logic lives - used by initial share
 // creation, repack, and any other code that needs to regenerate share JSONs.
+// The filename is derived from HMAC(masterKey, password) and content is AES-GCM encrypted.
 func UploadShareJSON(password string, stor storage_base.Storage) {
-	uploadPath := "share/" + password + ".json"
+	filename := DeriveShareFilename(password)
+	uploadPath := "share/" + filename
 	jsonBytes := GenerateShareJSON(password, stor)
+	encrypted := EncryptShareJSON(jsonBytes, password)
 	upload := stor.BeginDatabaseUpload(uploadPath)
-	_, err := upload.Writer().Write(jsonBytes)
+	_, err := upload.Writer().Write(encrypted)
 	if err != nil {
 		panic(err)
 	}
@@ -423,7 +430,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 	}
 
 	if revokedAt != nil {
-		return []byte(`{"revoked":true}`)
+		return []byte(RevokedShareJSON)
 	}
 
 	rows, err := db.DB.Query(`
@@ -457,7 +464,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 
 	// If no entries exist, still return the revoked sentinel for safety
 	if len(filesParams) == 0 {
-		return []byte(`{"revoked":true}`)
+		return []byte(RevokedShareJSON)
 	}
 
 	jsonBytes, err := json.Marshal(filesParams)
@@ -479,7 +486,7 @@ type ExpectedShareFile struct {
 func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
 	// Get all shares for this storage
 	rows, err := db.DB.Query(`
-		SELECT password, revoked_at
+		SELECT password
 		FROM shares
 		WHERE storage_id = ?
 	`, stor.GetID())
@@ -491,26 +498,21 @@ func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
 	var result []ExpectedShareFile
 	for rows.Next() {
 		var password string
-		var revokedAt *int64
-
-		err = rows.Scan(&password, &revokedAt)
+		err = rows.Scan(&password)
 		if err != nil {
 			panic(err)
 		}
 
-		var jsonBytes []byte
-		if revokedAt == nil {
-			// Active share - generate full JSON
-			jsonBytes = GenerateShareJSON(password, stor)
-		} else {
-			// Revoked share
-			jsonBytes = []byte(`{"revoked":true}`)
-		}
+		jsonBytes := GenerateShareJSON(password, stor)
 
-		sum := md5.Sum(jsonBytes)
+		// Encrypt the JSON and compute checksum of encrypted content
+		encrypted := EncryptShareJSON(jsonBytes, password)
+		filename := DeriveShareFilename(password)
+
+		sum := md5.Sum(encrypted)
 		result = append(result, ExpectedShareFile{
-			Path:     "share/" + password + ".json",
-			Size:     int64(len(jsonBytes)),
+			Path:     "share/" + filename,
+			Size:     int64(len(encrypted)),
 			Checksum: hex.EncodeToString(sum[:]),
 		})
 	}

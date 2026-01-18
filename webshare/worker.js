@@ -53,6 +53,41 @@ async function hmac(key, msg) {
   return crypto.subtle.sign('HMAC', key, encode(msg));
 }
 
+function fromHex(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+// Derive the S3 filename from password using HMAC(masterKey, "filename:" + password)
+async function deriveShareFilename(masterKey, password) {
+  const sig = await hmac(fromHex(masterKey), "filename:" + password);
+  // Use first 16 bytes (32 hex chars) to match Go implementation
+  return toHex(sig).slice(0, 32);
+}
+
+// Derive the AES content key from password using HMAC(masterKey, "content:" + password)
+async function deriveShareContentKey(masterKey, password) {
+  const sig = await hmac(fromHex(masterKey), "content:" + password);
+  // Return first 16 bytes for AES-128
+  const keyBytes = new Uint8Array(sig).slice(0, 16);
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+  return key;
+}
+
+// Decrypt share JSON using AES-GCM with synthetic IV
+// Expects: nonce (12 bytes) || ciphertext || tag (16 bytes)
+async function decryptShareJSON(ciphertext, key, password) {
+  // Extract nonce from first 12 bytes
+  const data = new Uint8Array(ciphertext);
+  const nonce = data.slice(0, 12);
+  const encrypted = data.slice(12);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, encrypted);
+  return new TextDecoder().decode(plaintext);
+}
+
 import share from "./index.html"
 import service from "./share-sw.js.txt"
 
@@ -66,6 +101,7 @@ export default {
           if (!env.S3_ACCESS_KEY) missing.push('S3_ACCESS_KEY');
           if (!env.S3_SECRET_KEY) missing.push('S3_SECRET_KEY');
           if (env.S3_GB_PATH === undefined) missing.push('S3_GB_PATH');
+          if (!env.SHARE_MASTER_KEY) missing.push('SHARE_MASTER_KEY');
           // S3_GB_PATH is allowed to be empty string
           if (missing.length > 0) {
               return new Response(
@@ -77,23 +113,31 @@ export default {
                   'S3_BUCKET: my-backup\n' +
                   'S3_ACCESS_KEY: AKIAIOSFODNN7EXAMPLE\n' +
                   'S3_SECRET_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n' +
-                  'S3_GB_PATH: ',
+                  'S3_GB_PATH: \n' +
+                  'SHARE_MASTER_KEY: (run gb webshare-secrets to get this)',
                   { status: 500 }
               );
           }
 
           const url = new URL(request.url);
           if (url.pathname.startsWith('/share-data/')) {
-            let key = url.pathname.slice("/share-data/".length);
+            const signingKey = beginSignature(env);
+            let password = url.pathname.slice("/share-data/".length);
             // Check for -N suffix pattern (e.g., "password-5.json" -> extract index 5)
             let fileIndex = null;
-            const indexMatch = key.match(/^(.+)-(\d+)(\.json)$/);
+            const indexMatch = password.match(/^(.+)-(\d+)(\.json)$/);
             if (indexMatch) {
-              key = indexMatch[1] + indexMatch[3]; // Reconstruct as "password.json"
+              password = indexMatch[1] + indexMatch[3]; // Reconstruct as "password.json"
               fileIndex = parseInt(indexMatch[2]);
             }
-            const signingKey = await beginSignature(env);
-            const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${key}`, signingKey);
+            // Remove .json suffix to get the actual password
+            password = password.replace(/\.json$/, '');
+            const shareKey = deriveShareContentKey(env.SHARE_MASTER_KEY, password);
+
+            // Derive the S3 filename from the password
+            const s3Filename = await deriveShareFilename(env.SHARE_MASTER_KEY, password);
+
+            const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${s3Filename}`, await signingKey);
             const response = await fetch(presignedJsonUrl);
             if (!response.ok) {
               if (response.status === 404) {
@@ -101,6 +145,16 @@ export default {
               }
               return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
             }
+
+            // Decrypt the share JSON
+            const encryptedData = await response.arrayBuffer();
+            let jsonText;
+            try {
+              jsonText = await decryptShareJSON(encryptedData, await shareKey, password);
+            } catch (e) {
+              return new Response("Decryption failed", { status: 500 });
+            }
+
             const now = Math.floor(Date.now() / 1000);
             async function setUrl(json) {
               let presignedExpiry = 30; // default
@@ -112,10 +166,10 @@ export default {
                 // Clamp presigned URL expiry to not exceed the share expiry
                 presignedExpiry = Math.min(presignedExpiry, expiresAt - now);
               }
-              json.url = await generatePresignedUrl(env, json.path, signingKey, presignedExpiry);
+              json.url = await generatePresignedUrl(env, json.path, await signingKey, presignedExpiry);
             }
 
-            let json = await response.json();
+            let json = JSON.parse(jsonText);
             // revoked probably
             if (!Array.isArray(json)) {
               return new Response(JSON.stringify(json), { status: 403, headers: { "Content-Type": "application/json" } });

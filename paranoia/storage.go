@@ -107,27 +107,25 @@ func verifyShareJSONs() bool {
 	for _, stor := range storage.GetAll() {
 		expected := share.ExpectedShareJSONs(stor)
 
-		// Build map of expected files by password
-		expectedByPassword := make(map[string]share.ExpectedShareFile)
+		// Build map of expected files by derived filename (filename is HMAC of password)
+		expectedByFilename := make(map[string]share.ExpectedShareFile)
 		for _, e := range expected {
-			// Extract password from path "share/<password>.json"
-			password := strings.TrimPrefix(e.Path, "share/")
-			password = strings.TrimSuffix(password, ".json")
-			expectedByPassword[password] = e
+			// Extract derived filename from path "share/<derived_filename>"
+			filename := strings.TrimPrefix(e.Path, "share/")
+			expectedByFilename[filename] = e
 		}
 
 		// Get actual share files from storage
 		actualFiles := stor.ListPrefix("share/")
-		actualByPassword := make(map[string]storage_base.ListedFile)
+		actualByFilename := make(map[string]storage_base.ListedFile)
 		for _, f := range actualFiles {
-			// Name is the filename without prefix, e.g., "abc123.json"
-			password := strings.TrimSuffix(f.Name, ".json")
-			actualByPassword[password] = f
+			// Name is the filename without prefix, e.g., "abc123def456"
+			actualByFilename[f.Name] = f
 		}
 
 		// Check expected files exist and have correct metadata
-		for password, exp := range expectedByPassword {
-			actual, ok := actualByPassword[password]
+		for filename, exp := range expectedByFilename {
+			actual, ok := actualByFilename[filename]
 			if !ok {
 				log.Printf("MISSING SHARE JSON: %s in %s", exp.Path, stor)
 				allOk = false
@@ -147,8 +145,8 @@ func verifyShareJSONs() bool {
 		}
 
 		// Check for unexpected share files
-		for password, actual := range actualByPassword {
-			if _, ok := expectedByPassword[password]; !ok {
+		for filename, actual := range actualByFilename {
+			if _, ok := expectedByFilename[filename]; !ok {
 				log.Printf("UNEXPECTED SHARE JSON: %s in %s", actual.Path, stor)
 				allOk = false
 			}

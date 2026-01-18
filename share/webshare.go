@@ -153,8 +153,9 @@ func lookupBlobParams(hash []byte, blobID []byte, filename string, expiresAt *in
 
 // sanityCheckEntry verifies the hash exists in exactly one blob_id in this storage,
 // checks that the encryption key is not shared with other entries (old blob compatibility
-// check), and populates e.blobID.
-func sanityCheckEntry(e *entry, stor storage_base.Storage) {
+// check), and populates e.blobID. Returns true if the entry has shared encryption keys
+// and needs repacking.
+func sanityCheckEntry(e *entry, stor storage_base.Storage) bool {
 	// Verify hash exists in exactly one blob in this storage
 	var distinctBlobCount int
 	err := db.DB.QueryRow(`
@@ -185,10 +186,7 @@ func sanityCheckEntry(e *entry, stor storage_base.Storage) {
 		panic(err)
 	}
 
-	if sharedKeyCount > 1 {
-		log.Printf("Unfortunately this file (%s) was backed up with an older version of gb that shared encryption keys across distinct files that were backed up at one time (into a single blob). To fix this for just this blob, you can run `echo %s | gb repack`. To fix this for all blobs, you can run `gb upgrade-encryption`. Then rerun this command to securely share just this file.\n", e.path, hex.EncodeToString(e.blobID))
-		os.Exit(1)
-	}
+	return sharedKeyCount > 1
 }
 
 // webShareInternal is the core share implementation. Returns the password for password-mode shares.
@@ -267,8 +265,27 @@ func webShareInternal(inputs []string, overrideName string, label string, expiry
 	}
 
 	// Sanity check all entries and populate blobID
+	var blobsNeedingRepack []string
+	seenBlobs := make(map[string]bool)
 	for i := range resolvedInputs {
-		sanityCheckEntry(&resolvedInputs[i], stor)
+		needsRepack := sanityCheckEntry(&resolvedInputs[i], stor)
+		if needsRepack {
+			blobIDHex := hex.EncodeToString(resolvedInputs[i].blobID)
+			if !seenBlobs[blobIDHex] {
+				seenBlobs[blobIDHex] = true
+				blobsNeedingRepack = append(blobsNeedingRepack, blobIDHex)
+			}
+		}
+	}
+	if len(blobsNeedingRepack) > 0 {
+		log.Println("Unfortunately some files were backed up with an older version of gb that shared encryption keys across distinct files that were backed up at one time (into a single blob).")
+		log.Println("To fix this, you can run the following command to repack the affected blobs:")
+		log.Println()
+		log.Printf("printf '%s\\n' | gb repack", strings.Join(blobsNeedingRepack, "\\n"))
+		log.Println()
+		log.Println("Alternatively, to fix this for all blobs, you can run `gb upgrade-encryption`.")
+		log.Println("Then rerun this command to securely share these files.")
+		os.Exit(1)
 	}
 
 	var shareURL string

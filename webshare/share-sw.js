@@ -206,7 +206,8 @@ function parseParameters(p, shortUrlKey) {
         filename: p.name,
         path: p.path,
         sha256: p.sha256,
-        url: p.url
+        url: p.url,
+        index: p.index
     };
     if (shortUrlKey) {
         out.shortUrlKey = shortUrlKey;
@@ -217,20 +218,21 @@ function parseParameters(p, shortUrlKey) {
 
 
 
-// Get presigned URL, fetching fresh one only if current is expired
+// Get presigned URL, fetching fresh one only if current is expired or missing
 // Returns null if share has expired (and notifies clients)
 async function getPresignedUrl(p) {
-    // Check if cached URL is still valid (with a few second buffer)
-    if (!isUrlExpired(p.url)) {
+    // Check if URL exists and is still valid (with a few second buffer)
+    if (p.url && !isUrlExpired(p.url)) {
         return p.url;
     }
 
     if (!p.shortUrlKey) {
-        return null; // the url is expired and we can't update it
+        return null; // the url is expired/missing and we can't fetch a new one
     }
 
-    // Fetch fresh URL
-    const response = await fetch(`/share-data/${p.shortUrlKey}.json`);
+    // Fetch fresh URL - use index suffix for individual files in a folder
+    const urlKey = p.index !== undefined ? `${p.shortUrlKey}-${p.index}` : p.shortUrlKey;
+    const response = await fetch(`/share-data/${urlKey}.json`);
     if (!response.ok) {
         if (response.status === 410) {
             // Share has expired
@@ -245,11 +247,9 @@ async function getPresignedUrl(p) {
         throw new Error(`Failed to fetch fresh URL: ${response.status}`);
     }
     const data = await response.json();
-    const params = data.map(x => parseParameters(x, p.shortUrlKey));
-    cachedJsonByPassword.set(p.shortUrlKey, params);
-    // Update cached URL for future requests
-    for (let d of params) {
-        if (d.sha256 == p.sha256) {
+    // Find matching file by sha256 and update URL
+    for (let d of data) {
+        if (d.sha256 === p.sha256) {
             p.url = d.url;
             return p.url;
         }

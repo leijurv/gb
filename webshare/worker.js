@@ -175,14 +175,22 @@ export default {
               return new Response(JSON.stringify(json), { status: 403, headers: { "Content-Type": "application/json" } });
             }
 
+            // Add index to each item so client can request individual files later
+            json.forEach((item, i) => { item.index = i; });
+
             if (fileIndex !== null) {
               if (fileIndex < 0 || fileIndex >= json.length) {
                 return new Response("File index out of range", { status: 404 });
               }
               json = [json[fileIndex]];
+              // Sign URL only for individual file requests
+              await Promise.all(json.map(inner => setUrl(inner)));
+            } else if (json.length === 1) {
+              // Single file share - sign the URL
+              await Promise.all(json.map(inner => setUrl(inner)));
             }
-
-            await Promise.all(json.map(inner => setUrl(inner)));
+            // For folder listings (multiple files, no specific index), don't sign URLs
+            // Client will request individual file URLs when needed
 
             return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
           }

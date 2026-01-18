@@ -168,6 +168,7 @@ func RevokeShare(password string) {
 	}
 
 	// Upload revoked JSON to the storage (do this first in case of failure)
+	storage.GetAll() // Ensure storage cache is populated
 	stor := storage.GetByID(storageID)
 	uploadPath := "share/" + password + ".json"
 	jsonBytes := []byte(`[{"revoked":true}]`)

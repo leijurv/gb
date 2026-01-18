@@ -373,10 +373,17 @@
                     if (e.message === 'Share link expired') throw e;
                 }
             }
+            if (response.status === 403) {
+                const json = await response.json();
+                if (json.revoked) {
+                    $('content').innerHTML = `<div class="error-box">This share has been revoked</div>`;
+                    throw new Error('This share has been revoked')
+                }
+            }
             $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
             throw new Error(`Request failed with status ${response.status}`);
         }
-        return await response.json()
+        return await response.json();
     }
 
     function parseZipFileName() {
@@ -547,7 +554,7 @@
     if (params.length > 1) {
         const zipFileName = parseZipFileName();
         $('filename').textContent = zipFileName;
-        $('meta').innerHTML = `${(estimateZipSize(params) / 1024 / 1024).toFixed(2)} MB<br>${params.length} "files"}`;
+        $('meta').innerText = `${(estimateZipSize(params) / 1024 / 1024).toFixed(2)} MB \n ${params.length} files`;
         $('more-info').remove();
         downloadUrl = `/gb/webshare/gb-download?password=${shortUrlKey}&download-filename=${parseZipFileName()}`;
 

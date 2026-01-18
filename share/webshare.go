@@ -423,7 +423,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 	}
 
 	if revokedAt != nil {
-		return []byte(`[{"revoked":true}]`)
+		return []byte(`{"revoked":true}`)
 	}
 
 	rows, err := db.DB.Query(`
@@ -457,7 +457,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 
 	// If no entries exist, still return the revoked sentinel for safety
 	if len(filesParams) == 0 {
-		return []byte(`[{"revoked":true}]`)
+		return []byte(`{"revoked":true}`)
 	}
 
 	jsonBytes, err := json.Marshal(filesParams)
@@ -504,7 +504,7 @@ func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
 			jsonBytes = GenerateShareJSON(password, stor)
 		} else {
 			// Revoked share
-			jsonBytes = []byte(`[{"revoked":true}]`)
+			jsonBytes = []byte(`{"revoked":true}`)
 		}
 
 		sum := md5.Sum(jsonBytes)

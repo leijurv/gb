@@ -365,6 +365,7 @@
         return new Promise((resolve, reject) => {
             port1.onmessage = (event) => {
                 if (event.data.error) {
+                    console.log(event.data.error);
                     reject(new Error(event.data.error));
                 } else {
                     resolve(event.data);
@@ -603,7 +604,10 @@
 
         $('zip-container').style.display = 'table';
 
-        window.toggleDropdown = function(filename, sha256, password, index) {
+        window.toggleDropdown = function(index) {
+            const filename = params[index].filename;
+            const sha256 = params[index].sha256;
+            const password = params[index].shortUrlKey;
             const dropdown = document.getElementById(`dropdown-${index}`);
             const btn = document.getElementById(`dropdown-btn-${index}`);
             if (dropdown.style.display === 'none') {
@@ -627,11 +631,15 @@
                 .replace(/'/g, '&#039;');
         }
 
+        function escapeQuotes(str) {
+            return str.replace(/["']/g, '\\$&');
+        }
+
         $('zip-container').innerHTML = params.map((p, i) =>
             `<li style="list-style: none; margin-bottom: 5px;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="dropdown-btn-${i}" onclick="toggleDropdown('${escape(p.filename)}', '${p.sha256}', '${escape(p.shortUrlKey)}', ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
-                    <a href="/${escape(shortUrlKey)}-${i}/${escape(zipFileName)}" style="color: #00d4ff;">${escape(p.filename)}</a>
+                    <button id="dropdown-btn-${i}" onclick="toggleDropdown(${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
+                    <a href="/${escapeQuotes(shortUrlKey)}-${i}/${escapeQuotes(zipFileName)}" style="color: #00d4ff;">${escape(p.filename)}</a>
                     <span>(${formatBytes(p.size)})</span>
                 </div>
                 <div id="dropdown-${i}" style="display: none; margin-top: 5px; padding: 10px;">

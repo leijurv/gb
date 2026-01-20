@@ -983,6 +983,7 @@ self.addEventListener('message', async (event) => {
                 byteOffsets: cached.byteOffsets
             });
         } catch (e) {
+            console.log(e);
             event.ports[0].postMessage({ error: e.message });
         }
     }

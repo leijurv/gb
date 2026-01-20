@@ -3,10 +3,10 @@ package paranoia
 import (
 	"database/sql"
 	"encoding/hex"
+	"io/fs"
 	"log"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
@@ -275,14 +275,14 @@ func DBParanoiaOn(q Querier) {
 		log.Println(prettyQuery, "took", time.Since(start))
 	}
 	sqliteVerifyForeignKeysOn(q)
-	pathUtf8On(q)
+	pathValidityOn(q)
 	sqliteVerifyPragmaCheckOn(q, "integrity_check")
 	blobsCoherenceOn(q)
 	log.Println("Done running database paranoia")
 }
 
-func pathUtf8On(q Querier) {
-	log.Println("Running files path utf8 and control character check")
+func pathValidityOn(q Querier) {
+	log.Println("Running files path validity check")
 	rows, err := q.Query("SELECT path FROM files")
 	if err != nil {
 		panic(err)
@@ -295,13 +295,8 @@ func pathUtf8On(q Querier) {
 		if err != nil {
 			panic(err)
 		}
-		if !utf8.ValidString(path) {
+		if path[0] != '/' || !fs.ValidPath(path[1:]) {
 			panic("invalid utf8 in the files database at path " + path)
-		}
-		for _, r := range path {
-			if r < 0x20 || r == 0x7F {
-				panic("control character in path " + path)
-			}
 		}
 		cnt++
 	}
@@ -309,7 +304,7 @@ func pathUtf8On(q Querier) {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Done running files path utf8 and control character check on %d rows\n", cnt)
+	log.Printf("Done running files path validity check on %d rows\n", cnt)
 }
 
 func sqliteVerifyPragmaCheckOn(q Querier, pragma string) {

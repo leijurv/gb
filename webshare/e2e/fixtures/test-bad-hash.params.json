@@ -1,7 +1,7 @@
 {
   "name": "test-bad-hash.txt",
   "url": "http://localhost:3456/fixtures/test-bad-hash.bin",
-  "key": "3d0a0cbd081a56d0be0484cef50fc037",
+  "key": "0123456789abcdef0123456789abcdef",
   "offset": 0,
   "length": 157,
   "size": 185,

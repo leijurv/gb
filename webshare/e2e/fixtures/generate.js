@@ -1,15 +1,124 @@
 // Generate test fixtures for e2e tests
-// Creates encrypted, zstd-compressed test files
+// Creates encrypted, optionally compressed test files
 
 import { execSync } from 'child_process';
-import { createCipheriv, randomBytes, createHash } from 'crypto';
-import { writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { createCipheriv, createHash } from 'crypto';
+import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Test content
+// --- Helper functions ---
+
+function sha256Base64Url(buffer) {
+  const hash = createHash('sha256').update(buffer).digest();
+  return hash.toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+// Fixed test key (not random to avoid git churn on regeneration)
+const TEST_KEY = Buffer.from('0123456789abcdef0123456789abcdef', 'hex');
+
+function encrypt(buffer) {
+  const counter = Buffer.alloc(16, 0);
+  const cipher = createCipheriv('aes-128-ctr', TEST_KEY, counter);
+  const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
+  return { encrypted, keyHex: TEST_KEY.toString('hex') };
+}
+
+function compressZstd(buffer, name) {
+  const tempIn = join(__dirname, `${name}.tmp`);
+  const tempOut = join(__dirname, `${name}.tmp.zst`);
+  writeFileSync(tempIn, buffer);
+  execSync(`zstd -f -q "${tempIn}" -o "${tempOut}"`);
+  const compressed = readFileSync(tempOut);
+  unlinkSync(tempIn);
+  unlinkSync(tempOut);
+  return compressed;
+}
+
+function compressLepton(jpegPath, name) {
+  const leptonPath = join(__dirname, `${name}.lep`);
+  execSync(`lepton "${jpegPath}" "${leptonPath}"`, { stdio: 'pipe' });
+  const compressed = readFileSync(leptonPath);
+  unlinkSync(leptonPath);
+  return compressed;
+}
+
+function writeFixture(name, filename, originalSize, sha256, compressedBuffer, compression) {
+  const { encrypted, keyHex } = encrypt(compressedBuffer);
+  const blobPath = join(__dirname, `${name}.bin`);
+  writeFileSync(blobPath, encrypted);
+
+  const params = {
+    name: filename,
+    url: `http://localhost:3456/fixtures/${name}.bin`,
+    key: keyHex,
+    offset: 0,
+    length: encrypted.length,
+    size: originalSize,
+    sha256,
+    cmp: compression,
+  };
+
+  writeFileSync(join(__dirname, `${name}.params.json`), JSON.stringify(params, null, 2));
+  return params;
+}
+
+function logFixture(name, originalSize, compressedSize, sha256) {
+  console.log(`  Original: ${originalSize} bytes, Compressed: ${compressedSize} bytes`);
+  console.log(`  SHA256: ${sha256}\n`);
+}
+
+// --- Fixture generators ---
+
+function generateTextFixture(name, content, compression) {
+  console.log(`Generating: ${name}`);
+  const original = Buffer.from(content, 'utf-8');
+  const sha256 = sha256Base64Url(original);
+  const compressed = compression === 'zstd' ? compressZstd(original, name) : original;
+  const params = writeFixture(name, `${name}.txt`, original.length, sha256, compressed, compression);
+  logFixture(name, original.length, compressed.length, sha256);
+  return params;
+}
+
+function generateBadHashFixture(name, content, compression) {
+  const params = generateTextFixture(name, content, compression);
+  params.sha256 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  writeFileSync(join(__dirname, `${name}.params.json`), JSON.stringify(params, null, 2));
+  console.log(`  Modified SHA256 to invalid\n`);
+  return params;
+}
+
+function generateLeptonFixture(name) {
+  console.log(`Generating: ${name}`);
+  const jpegPath = join(__dirname, `${name}.jpg`);
+
+  // Create a 123x456 gradient test image
+  execSync(`python3 -c "
+from PIL import Image
+img = Image.new('RGB', (123, 456))
+for x in range(123):
+    for y in range(456):
+        img.putpixel((x, y), (x * 2, y // 2, (x + y) % 256))
+img.save('${jpegPath}', 'JPEG', quality=85)
+"`);
+
+  const original = readFileSync(jpegPath);
+  const sha256 = sha256Base64Url(original);
+  const compressed = compressLepton(jpegPath, name);
+  unlinkSync(jpegPath);
+
+  const params = writeFixture(name, `${name}.jpg`, original.length, sha256, compressed, 'lepton');
+  logFixture(name, original.length, compressed.length, sha256);
+  return params;
+}
+
+// --- Main ---
+
 const TEST_TEXT = `Hello from the webshare e2e test!
 This is a simple text file that has been:
 1. Compressed with zstd
@@ -18,106 +127,11 @@ This is a simple text file that has been:
 If you can read this in the browser, the test passed!
 `;
 
-function generateFixture(name, content, compression) {
-  console.log(`Generating fixture: ${name}`);
-
-  const contentBuffer = Buffer.from(content, 'utf-8');
-
-  // Calculate SHA256 of original content (base64url encoded, no padding)
-  const sha256 = createHash('sha256').update(contentBuffer).digest();
-  const sha256Base64Url = sha256.toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-
-  let compressedBuffer;
-  if (compression === 'zstd') {
-    // Compress with zstd using CLI
-    const tempIn = join(__dirname, `${name}.tmp`);
-    const tempOut = join(__dirname, `${name}.tmp.zst`);
-    writeFileSync(tempIn, contentBuffer);
-    execSync(`zstd -f -q "${tempIn}" -o "${tempOut}"`);
-    compressedBuffer = readFileSync(tempOut);
-    execSync(`rm "${tempIn}" "${tempOut}"`);
-  } else {
-    compressedBuffer = contentBuffer;
-  }
-
-  // Generate random AES-128 key
-  const key = randomBytes(16);
-  const keyHex = key.toString('hex');
-
-  // For this test, we put the data at offset 0 in the "blob"
-  // In real usage, offset allows multiple files in one S3 object
-  const offset = 0;
-
-  // Create AES-CTR cipher with counter starting at block 0
-  // Counter is 16 bytes, starts at 0 for offset 0
-  const counter = Buffer.alloc(16, 0);
-  const cipher = createCipheriv('aes-128-ctr', key, counter);
-
-  // Encrypt the compressed data
-  const encrypted = Buffer.concat([
-    cipher.update(compressedBuffer),
-    cipher.final()
-  ]);
-
-  // Write encrypted blob
-  const blobPath = join(__dirname, `${name}.bin`);
-  writeFileSync(blobPath, encrypted);
-
-  // Generate URL hash parameters
-  const params = {
-    name: `${name}.txt`,
-    url: `http://localhost:3456/fixtures/${name}.bin`,
-    key: keyHex,
-    offset: offset,
-    length: encrypted.length,
-    size: contentBuffer.length,
-    sha256: sha256Base64Url,
-    cmp: compression,
-  };
-
-  // Write params as JSON for test to read
-  const paramsPath = join(__dirname, `${name}.params.json`);
-  writeFileSync(paramsPath, JSON.stringify(params, null, 2));
-
-  // Generate the URL hash string
-  const hashString = new URLSearchParams(params).toString();
-
-  console.log(`  Content size: ${contentBuffer.length} bytes`);
-  console.log(`  Compressed size: ${compressedBuffer.length} bytes`);
-  console.log(`  Encrypted blob: ${blobPath}`);
-  console.log(`  SHA256: ${sha256Base64Url}`);
-  console.log(`  URL hash: #${hashString}`);
-  console.log('');
-
-  return params;
-}
-
-// Generate a fixture with intentionally wrong SHA256
-function generateBadHashFixture(name, content, compression) {
-  const params = generateFixture(name, content, compression);
-
-  // Corrupt the SHA256 hash
-  const badHash = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-  params.sha256 = badHash;
-
-  // Overwrite params file with bad hash
-  const paramsPath = join(__dirname, `${name}.params.json`);
-  writeFileSync(paramsPath, JSON.stringify(params, null, 2));
-
-  console.log(`  Modified SHA256 to invalid: ${badHash}`);
-  console.log('');
-
-  return params;
-}
-
-// Generate fixtures
 console.log('Generating e2e test fixtures...\n');
 
-generateFixture('test-zstd', TEST_TEXT, 'zstd');
-generateFixture('test-plain', TEST_TEXT, '');
+generateTextFixture('test-zstd', TEST_TEXT, 'zstd');
+generateTextFixture('test-plain', TEST_TEXT, '');
 generateBadHashFixture('test-bad-hash', TEST_TEXT, 'zstd');
+generateLeptonFixture('test-lepton');
 
 console.log('Done!');

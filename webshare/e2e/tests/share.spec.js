@@ -90,6 +90,43 @@ test.describe('Hash mode file share', () => {
     await expect(downloadBtn).toBeEnabled({ timeout: 20000 });
   });
 
+  test('renders lepton-compressed JPEG as an image', async ({ page, browserName }) => {
+    test.skip(browserName === 'webkit', 'Lepton requires SharedArrayBuffer which is not available in WebKit');
+
+    const params = loadFixtureParams('test-lepton');
+    const hash = buildUrlHash(params);
+    const url = `/gb/webshare/${hash}`;
+
+    page.on('console', msg => console.log(`[browser] ${msg.type()}: ${msg.text()}`));
+
+    await page.goto(url);
+
+    // Wait for filename to be displayed
+    await expect(page.locator('#filename')).toHaveText('test-lepton.jpg', { timeout: 10000 });
+
+    // Wait for the image to appear in the media container
+    const mediaContainer = page.locator('#media-container');
+    await expect(mediaContainer).toBeVisible({ timeout: 15000 });
+
+    // The image should be rendered as an <img> element
+    const img = mediaContainer.locator('img');
+    await expect(img).toBeVisible({ timeout: 30000 });
+
+    // Verify the image has actually loaded (naturalWidth > 0)
+    await expect(async () => {
+      const naturalWidth = await img.evaluate(el => el.naturalWidth);
+      expect(naturalWidth).toBeGreaterThan(0);
+    }).toPass({ timeout: 30000 });
+
+    // Verify the image dimensions match our test image (123x456)
+    const dimensions = await img.evaluate(el => ({
+      naturalWidth: el.naturalWidth,
+      naturalHeight: el.naturalHeight
+    }));
+    expect(dimensions.naturalWidth).toBe(123);
+    expect(dimensions.naturalHeight).toBe(456);
+  });
+
   test('shows error and does not display content when SHA256 hash is wrong', async ({ page }) => {
     const params = loadFixtureParams('test-bad-hash');
     const hash = buildUrlHash(params);

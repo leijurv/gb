@@ -1,7 +1,7 @@
 {
   "name": "test-zstd.txt",
   "url": "http://localhost:3456/fixtures/test-zstd.bin",
-  "key": "f73a025e282122a541c872c21f1663fe",
+  "key": "0123456789abcdef0123456789abcdef",
   "offset": 0,
   "length": 157,
   "size": 185,

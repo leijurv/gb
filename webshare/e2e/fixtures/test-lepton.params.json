@@ -1,0 +1,10 @@
+{
+  "name": "test-lepton.jpg",
+  "url": "http://localhost:3456/fixtures/test-lepton.bin",
+  "key": "0123456789abcdef0123456789abcdef",
+  "offset": 0,
+  "length": 1347,
+  "size": 4897,
+  "sha256": "z8Q5JutOWvKsjCMkfaVe6vt7Gst5xH7DGFFkB9tlxos",
+  "cmp": "lepton"
+}

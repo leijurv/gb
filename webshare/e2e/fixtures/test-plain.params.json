@@ -1,7 +1,7 @@
 {
   "name": "test-plain.txt",
   "url": "http://localhost:3456/fixtures/test-plain.bin",
-  "key": "09b89f62f824127de28bafcb1e2092b6",
+  "key": "0123456789abcdef0123456789abcdef",
   "offset": 0,
   "length": 185,
   "size": 185,

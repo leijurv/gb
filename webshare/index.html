@@ -354,9 +354,6 @@
         return leptonWorkerReady;
     }
 
-    // Start loading lepton worker immediately (don't wait for it to be needed)
-    initLeptonWorker();
-
     // Store share metadata for SW communication
     let shareMetadata = null;
 
@@ -1006,6 +1003,8 @@
             try {
                 await registerServiceWorker();
                 await waitForSwIntercepting();
+                // Start loading lepton worker now that SW can proxy the files
+                initLeptonWorker();
                 if (params.length === 1) {
                     const mediaUrl = window.location.hash ?
                       `/gb/webshare/gb-download?${window.location.hash.slice(1)}`

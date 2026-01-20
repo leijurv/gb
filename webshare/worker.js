@@ -125,6 +125,15 @@ async function decryptRange(ciphertextBytes, keyBytes, nonce, plaintextStart) {
   return new Uint8Array(decrypted).slice(offsetInBlock, offsetInBlock + ciphertextBytes.length);
 }
 
+const BLOB_PATH_RE = /^[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{64}$/;
+
+function isAllowedBlobPath(path, prefix) {
+  if (typeof path !== 'string') return false;
+  if (!path.startsWith(prefix)) return false;
+  const suffix = path.slice(prefix.length);
+  return BLOB_PATH_RE.test(suffix);
+}
+
 import share from "./index.html"
 import service from "./share-sw.js.txt"
 
@@ -242,6 +251,10 @@ export default {
               // Check for revocation
               if (json.revoked) {
                 return new Response(JSON.stringify(json), { status: 403, headers: { "Content-Type": "application/json" } });
+              }
+
+              if (!isAllowedBlobPath(json.path, env.S3_GB_PATH)) {
+                return new Response(JSON.stringify({ error: "invalid_path" }), { status: 403, headers: { "Content-Type": "application/json" } });
               }
 
               // Sign the URL

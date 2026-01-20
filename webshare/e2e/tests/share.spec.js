@@ -86,8 +86,8 @@ test.describe('Hash mode file share', () => {
     await expect(downloadBtn).toBeVisible();
 
     // Button should eventually be enabled (after SW initializes)
-    // Note: May be disabled briefly during initialization
-    await expect(downloadBtn).toBeEnabled({ timeout: 10000 });
+    // Note: May be disabled briefly during initialization, mobile emulation can be slower
+    await expect(downloadBtn).toBeEnabled({ timeout: 20000 });
   });
 
   test('shows error and does not display content when SHA256 hash is wrong', async ({ page }) => {

@@ -357,33 +357,64 @@
     // Start loading lepton worker immediately (don't wait for it to be needed)
     initLeptonWorker();
 
+    // Store share metadata for SW communication
+    let shareMetadata = null;
+
+    // Ask SW to fetch and decrypt share data
+    async function fetchShareFromSW(password) {
+        await registerServiceWorker();
+        const reg = await navigator.serviceWorker.ready;
+        const { port1, port2 } = new MessageChannel();
+        return new Promise((resolve, reject) => {
+            port1.onmessage = (event) => {
+                if (event.data.error) {
+                    reject(new Error(event.data.error));
+                } else {
+                    resolve(event.data);
+                }
+            };
+            reg.active.postMessage({ type: 'fetch-share', password }, [port2]);
+        });
+    }
+
+    // Returns { entries, fileIndex } where fileIndex is set if URL had -N suffix
     async function parseAndRequestShortURL() {
         const key = parseShortUrl();
-        const response = await fetch(`/share-data/${key}.json`)
-        if (!response.ok) {
-            if (response.status === 410) {
-                // Expired - parse the error response to get the expiry time
-                try {
-                    const errorData = await response.json();
-                    if (errorData.error === "expired" && errorData.expires_at) {
-                        showExpiredError(errorData.expires_at);
-                        throw new Error('Share link expired');
-                    }
-                } catch (e) {
-                    if (e.message === 'Share link expired') throw e;
-                }
+        // Check for -N suffix (individual file from folder)
+        const { baseKey, fileIndex } = parseFileIndex(key);
+
+        // Ask SW to fetch and decrypt the share data
+        let data;
+        try {
+            data = await fetchShareFromSW(baseKey);
+        } catch (e) {
+            // Handle specific error messages from SW
+            if (e.message.includes('expired')) {
+                showExpiredError(Math.floor(Date.now() / 1000));
+                throw new Error('Share link expired');
             }
-            if (response.status === 403) {
-                const json = await response.json();
-                if (json.revoked) {
-                    $('content').innerHTML = `<div class="error-box">This share has been revoked</div>`;
-                    throw new Error('This share has been revoked')
-                }
+            if (e.message.includes('revoked')) {
+                $('content').innerHTML = `<div class="error-box">This share has been revoked</div>`;
+                throw new Error('This share has been revoked');
             }
-            $('content').innerHTML = `<div class="error-box">Request failed with status ${response.status}</div>`;
-            throw new Error(`Request failed with status ${response.status}`);
+            if (e.message.includes('not found')) {
+                $('content').innerHTML = `<div class="error-box">Share not found</div>`;
+                throw new Error('Share not found');
+            }
+            $('content').innerHTML = `<div class="error-box">Error: ${e.message}</div>`;
+            throw e;
         }
-        return await response.json();
+
+        const { entries, nonce, byteOffsets } = data;
+
+        // Store metadata for SW communication (keyed by baseKey for -N suffix support)
+        shareMetadata = {
+            nonce,
+            byteOffsets,
+            baseKey
+        };
+
+        return { entries, fileIndex, baseKey };
     }
 
     function parseZipFileName() {
@@ -516,41 +547,55 @@
 
     const required = ['name', 'url', 'key', 'offset', 'length', 'size', 'sha256', 'cmp'];
     let params;
+    let allParams = null; // All entries for SW communication (even when displaying single file)
     let shortUrlKey = null; // If set, service worker will fetch fresh URLs on each request
+    let fileIndexFromFolder = null; // If URL had -N suffix, this is the file index
+    let folderBaseKey = null; // The base key without -N suffix
     if (window.location.hash) {
-        params = parseHash();
-        const missing = required.filter(k => !(k in params));
+        // Hash mode: raw params need transformation
+        let rawParams = parseHash();
+        const missing = required.filter(k => !(k in rawParams));
         if (missing.length > 0) {
             $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
             throw new Error('Missing params');
         }
-        params = [params];
+        // Transform raw params to normalized format
+        params = [{
+            compression: rawParams.cmp,
+            key: rawParams.key.toLowerCase(),
+            length: parseInt(rawParams.length),
+            offset: parseInt(rawParams.offset),
+            size: parseInt(rawParams.size),
+            name: rawParams.name,
+            filename: rawParams.name,
+            path: rawParams.path,
+            sha256: rawParams.sha256,
+            url: rawParams.url
+        }];
     } else {
-        shortUrlKey = parseShortUrl();
-        params = await parseAndRequestShortURL();
+        // Short URL mode: SW already returns normalized params
+        const result = await parseAndRequestShortURL();
+        params = result.entries;
+        fileIndexFromFolder = result.fileIndex;
+        folderBaseKey = result.baseKey;
+        // Use baseKey for SW communication (works for both /password and /password-N URLs)
+        shortUrlKey = folderBaseKey;
+    }
+
+    // If URL had -N suffix, filter to just that entry for display
+    // But keep all entries for SW communication
+    if (fileIndexFromFolder !== null) {
+        if (fileIndexFromFolder < 0 || fileIndexFromFolder >= params.length) {
+            $('content').innerHTML = `<div class="error-box">File index ${fileIndexFromFolder} out of range (0-${params.length - 1})</div>`;
+            throw new Error('File index out of range');
+        }
+        allParams = params; // Keep all for SW (already transformed)
+        params = [params[fileIndexFromFolder]]; // Filter for display
     }
 
     // variables assigned by single file and zip mode
     let isExpired = false;
     let downloadUrl;
-    // Track if this is an individual file from a folder (via -N suffix in URL)
-    const { baseKey: folderBaseKey, fileIndex: fileIndexFromFolder } = shortUrlKey ? parseFileIndex(shortUrlKey) : { baseKey: null, fileIndex: null };
-    params = params.map(p => {
-        return {
-            compression: p.cmp,
-            key: p.key.toLowerCase(),
-            length: parseInt(p.length),
-            offset: parseInt(p.offset),
-            size: parseInt(p.size),
-            name: p.name,
-            filename: p.name,
-            path: p.path,
-            sha256: p.sha256,
-            url: p.url,
-            index: p.index,
-            shortUrlKey: shortUrlKey
-        };
-    });
 
     if (params.length > 1) {
         const zipFileName = parseZipFileName();
@@ -874,7 +919,13 @@
     // Respond to SW asking for params (if SW was terminated and restarted)
     navigator.serviceWorker?.addEventListener('message', (event) => {
         if (event.data.type === 'need-params' && event.data.id === shortUrlKey) {
-            event.ports[0].postMessage(params)
+            // Send ALL params for range-based URL requests (not filtered params)
+            // This ensures SW can handle requests for any file in the folder
+            event.ports[0].postMessage({
+                params: allParams || params,
+                nonce: shareMetadata?.nonce,
+                byteOffsets: shareMetadata?.byteOffsets
+            });
         }
     });
 

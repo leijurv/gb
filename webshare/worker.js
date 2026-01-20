@@ -69,23 +69,60 @@ async function deriveShareFilename(masterKey, password) {
 }
 
 // Derive the AES content key from password using HMAC(masterKey, "content:" + password)
+// Returns raw key bytes (Uint8Array) for flexibility - caller imports as needed
 async function deriveShareContentKey(masterKey, password) {
   const sig = await hmac(fromHex(masterKey), "content:" + password);
   // Return first 16 bytes for AES-128
-  const keyBytes = new Uint8Array(sig).slice(0, 16);
-  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
-  return key;
+  return new Uint8Array(sig).slice(0, 16);
 }
 
 // Decrypt share JSON using AES-GCM with synthetic IV
 // Expects: nonce (12 bytes) || ciphertext || tag (16 bytes)
-async function decryptShareJSON(ciphertext, key, password) {
+// keyBytes should be raw Uint8Array
+async function decryptShareJSON(ciphertext, keyBytes) {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
   // Extract nonce from first 12 bytes
   const data = new Uint8Array(ciphertext);
   const nonce = data.slice(0, 12);
   const encrypted = data.slice(12);
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, encrypted);
   return new TextDecoder().decode(plaintext);
+}
+
+// Decrypt a byte range using AES-CTR (the CTR component of GCM)
+// plaintextStart is the offset in the plaintext (not ciphertext)
+// nonce is the 12-byte GCM nonce
+// ciphertextBytes is the raw ciphertext bytes (not including nonce prefix)
+async function decryptRange(ciphertextBytes, keyBytes, nonce, plaintextStart) {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CTR' }, false, ['decrypt']);
+
+  // GCM uses CTR mode internally. The counter block is: nonce (12 bytes) || counter (4 bytes, big-endian)
+  // Counter starts at 2 for the actual data (0 is unused, 1 is for the auth tag computation)
+  // So plaintext byte N is encrypted with counter = 2 + floor(N / 16)
+  const blockNum = Math.floor(plaintextStart / 16);
+  const counter = new Uint8Array(16);
+  counter.set(nonce, 0);
+  // Set counter value (big-endian 32-bit at bytes 12-15), starting at 2
+  const counterVal = 2 + blockNum;
+  counter[12] = (counterVal >>> 24) & 0xff;
+  counter[13] = (counterVal >>> 16) & 0xff;
+  counter[14] = (counterVal >>> 8) & 0xff;
+  counter[15] = counterVal & 0xff;
+
+  // Pad input to align with block boundary
+  const offsetInBlock = plaintextStart % 16;
+  const paddedLen = Math.ceil((offsetInBlock + ciphertextBytes.length) / 16) * 16;
+  const toDecrypt = new Uint8Array(paddedLen);
+  toDecrypt.set(ciphertextBytes, offsetInBlock);
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-CTR', counter, length: 128 },
+    key,
+    toDecrypt
+  );
+
+  // Extract only the bytes corresponding to the original input
+  return new Uint8Array(decrypted).slice(offsetInBlock, offsetInBlock + ciphertextBytes.length);
 }
 
 import share from "./index.html"
@@ -123,76 +160,113 @@ export default {
           if (url.pathname.startsWith('/share-data/')) {
             const signingKey = beginSignature(env);
             let password = url.pathname.slice("/share-data/".length);
-            // Check for -N suffix pattern (e.g., "password-5.json" -> extract index 5)
-            let fileIndex = null;
-            const indexMatch = password.match(/^(.+)-(\d+)(\.json)$/);
-            if (indexMatch) {
-              password = indexMatch[1] + indexMatch[3]; // Reconstruct as "password.json"
-              fileIndex = parseInt(indexMatch[2]);
-            }
             // Remove .json suffix to get the actual password
             password = password.replace(/\.json$/, '');
-            const shareKey = deriveShareContentKey(env.SHARE_MASTER_KEY, password);
+            const shareKeyBytes = await deriveShareContentKey(env.SHARE_MASTER_KEY, password);
 
             // Derive the S3 filename from the password
             const s3Filename = await deriveShareFilename(env.SHARE_MASTER_KEY, password);
+            const s3Path = `${env.S3_GB_PATH}share/${s3Filename}`;
 
-            const presignedJsonUrl = await generatePresignedUrl(env, `${env.S3_GB_PATH}share/${s3Filename}`, await signingKey);
-            const response = await fetch(presignedJsonUrl);
-            if (!response.ok) {
-              if (response.status === 404) {
-                return new Response("404", { status: 404 })
+            // Check for range mode: ?range=X-Y&nonce=HEX
+            const rangeParam = url.searchParams.get('range');
+            const nonceParam = url.searchParams.get('nonce');
+
+            if (rangeParam && nonceParam) {
+              // Range mode: fetch specific byte range, decrypt with CTR, sign URL
+              const rangeMatch = rangeParam.match(/^(\d+)-(\d+)$/);
+              if (!rangeMatch) {
+                return new Response("Invalid range format, expected X-Y", { status: 400 });
               }
-              return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
-            }
+              const plaintextStart = parseInt(rangeMatch[1]);
+              const plaintextEnd = parseInt(rangeMatch[2]);
+              if (plaintextStart > plaintextEnd) {
+                return new Response("Invalid range: start > end", { status: 400 });
+              }
 
-            // Decrypt the share JSON
-            const encryptedData = await response.arrayBuffer();
-            let jsonText;
-            try {
-              jsonText = await decryptShareJSON(encryptedData, await shareKey, password);
-            } catch (e) {
-              return new Response("Decryption failed", { status: 500 });
-            }
+              const nonce = fromHex(nonceParam);
+              if (nonce.length !== 12) {
+                return new Response("Invalid nonce length", { status: 400 });
+              }
 
-            const now = Math.floor(Date.now() / 1000);
-            async function setUrl(json) {
-              let presignedExpiry = 30; // default
+              // Fetch the byte range from S3
+              // Ciphertext layout: nonce (12 bytes) || encrypted data || tag (16 bytes)
+              // Plaintext byte X maps to ciphertext byte 12 + X
+              const ciphertextStart = 12 + plaintextStart;
+              const ciphertextEnd = 12 + plaintextEnd;
+
+              const presignedJsonUrl = await generatePresignedUrl(env, s3Path, await signingKey);
+              const response = await fetch(presignedJsonUrl, {
+                headers: { 'Range': `bytes=${ciphertextStart}-${ciphertextEnd}` }
+              });
+              if (!response.ok && response.status !== 206) {
+                if (response.status === 404) {
+                  return new Response("404", { status: 404 });
+                }
+                return new Response(`Error reading from S3: ${response.status} ${response.statusText}`, { status: 500 });
+              }
+
+              const ciphertextBytes = new Uint8Array(await response.arrayBuffer());
+
+              // Decrypt using AES-CTR
+              let plaintext;
+              try {
+                plaintext = await decryptRange(ciphertextBytes, shareKeyBytes, nonce, plaintextStart);
+              } catch (e) {
+                return new Response("Decryption failed: " + e.message, { status: 500 });
+              }
+
+              const plaintextStr = new TextDecoder().decode(plaintext);
+
+              // Boundary check: must start and end with newline
+              // JSONL format has \n before and after every entry
+              if (!plaintextStr.startsWith('\n') || !plaintextStr.endsWith('\n')) {
+                return new Response("Range must start and end with newline", { status: 400 });
+              }
+
+              // Extract the JSON line (trim surrounding newlines)
+              const jsonLine = plaintextStr.slice(1, -1);
+
+              // Verify it's valid JSON and a single line (no embedded newlines)
+              if (jsonLine.includes('\n')) {
+                return new Response("Range contains multiple lines", { status: 400 });
+              }
+
+              let json;
+              try {
+                json = JSON.parse(jsonLine);
+              } catch (e) {
+                return new Response("Invalid JSON in range", { status: 400 });
+              }
+
+              // Check for revocation
+              if (json.revoked) {
+                return new Response(JSON.stringify(json), { status: 403, headers: { "Content-Type": "application/json" } });
+              }
+
+              // Sign the URL
+              const now = Math.floor(Date.now() / 1000);
+              let presignedExpiry = 30;
               if (json.expires_at) {
                 const expiresAt = parseInt(json.expires_at);
                 if (now >= expiresAt) {
                   return new Response(JSON.stringify({ error: "expired", expires_at: expiresAt }), { status: 410, headers: { "Content-Type": "application/json" } });
                 }
-                // Clamp presigned URL expiry to not exceed the share expiry
                 presignedExpiry = Math.min(presignedExpiry, expiresAt - now);
               }
               json.url = await generatePresignedUrl(env, json.path, await signingKey, presignedExpiry);
+
+              return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
             }
 
-            let json = JSON.parse(jsonText);
-            // revoked probably
-            if (!Array.isArray(json)) {
-              return new Response(JSON.stringify(json), { status: 403, headers: { "Content-Type": "application/json" } });
-            }
+            // Listing mode: return metadata for browser to fetch and decrypt
+            // Browser will extract nonce from the first 12 bytes of the encrypted file
+            const presignedJsonUrl = await generatePresignedUrl(env, s3Path, await signingKey, 60);
 
-            // Add index to each item so client can request individual files later
-            json.forEach((item, i) => { item.index = i; });
-
-            if (fileIndex !== null) {
-              if (fileIndex < 0 || fileIndex >= json.length) {
-                return new Response("File index out of range", { status: 404 });
-              }
-              json = [json[fileIndex]];
-              // Sign URL only for individual file requests
-              await Promise.all(json.map(inner => setUrl(inner)));
-            } else if (json.length === 1) {
-              // Single file share - sign the URL
-              await Promise.all(json.map(inner => setUrl(inner)));
-            }
-            // For folder listings (multiple files, no specific index), don't sign URLs
-            // Client will request individual file URLs when needed
-
-            return new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } });
+            return new Response(JSON.stringify({
+              url: presignedJsonUrl,
+              key: toHex(shareKeyBytes)
+            }), { headers: { "Content-Type": "application/json" } });
           }
 
           const path = url.pathname.slice(1); // remove leading "/"

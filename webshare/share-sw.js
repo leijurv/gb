@@ -123,9 +123,14 @@ async function loadDependencies() {
 
 const depsLoaded = loadDependencies();
 
-const cachedJsonByPassword = new Map();
+// Cache stores: { params: [...], nonce: hex, byteOffsets: [...] }
+const cachedShareByPassword = new Map();
 async function requestParamsFromPage(password) {
-    return requestParamsFromPage0(password, 'need-params', data => cachedJsonByPassword.set(password, data));
+    const data = await requestParamsFromPage0(password, 'need-params', d => {});
+    if (!data) return null;
+    // data from page includes { params, nonce, byteOffsets }
+    cachedShareByPassword.set(password, data);
+    return data.params;
 }
 
 // Ask page for params - broadcast to all clients, first response wins
@@ -180,19 +185,109 @@ function isUrlExpired(url) {
     return expiresAt && expiresAt < (Date.now() + 5000);
 }
 
+// Decrypt JSONL using AES-GCM (same as worker, but in browser)
+// Returns { plaintext: Uint8Array, nonce: hex } - keeping as bytes for accurate offset tracking
+async function decryptShareJSONL(ciphertext, keyHex) {
+    const keyBytes = hexToBytes(keyHex);
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+    const data = new Uint8Array(ciphertext);
+    const nonce = data.slice(0, 12);
+    const encrypted = data.slice(12);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, encrypted);
+    return {
+        plaintext: new Uint8Array(plaintext),
+        nonce: Array.from(nonce).map(b => b.toString(16).padStart(2, '0')).join('')
+    };
+}
+
+// Parse JSONL from bytes and track byte offsets for each line
+// Works with raw bytes to ensure offsets are correct for UTF-8 multi-byte characters
+function parseJSONL(bytes) {
+    const NEWLINE = 0x0A; // '\n'
+    const decoder = new TextDecoder();
+    const results = [];
+    const byteOffsets = [];
+
+    let lineStart = 0;
+    for (let i = 0; i <= bytes.length; i++) {
+        if (i === bytes.length || bytes[i] === NEWLINE) {
+            if (i > lineStart) {
+                const lineBytes = bytes.slice(lineStart, i);
+                const lineStr = decoder.decode(lineBytes);
+                if (lineStr.trim() !== '') {
+                    byteOffsets.push({ start: lineStart, end: i });
+                    results.push(JSON.parse(lineStr));
+                }
+            }
+            lineStart = i + 1;
+        }
+    }
+
+    return { entries: results, byteOffsets };
+}
+
 async function queryAndParseParameters(shortUrlKey) {
-    const response = await fetch(`/share-data/${shortUrlKey}.json`);
-    if (!response.ok) {
-        if (response.status === 410) {
-            // Share has expired
+    // First, get metadata from worker (presigned URL, key, nonce)
+    const metaResponse = await fetch(`/share-data/${shortUrlKey}.json`);
+    if (!metaResponse.ok) {
+        if (metaResponse.status === 410) {
             throw new Error(`Share has expired`);
         }
-        throw new Error(`Failed to fetch fresh URL: ${response.status}`);
+        if (metaResponse.status === 404) {
+            throw new Error(`Share not found`);
+        }
+        throw new Error(`Failed to fetch share metadata: ${metaResponse.status}`);
     }
-    const json = await response.json();
-    return json.map(p => {
-        return parseParameters(p);
+    const meta = await metaResponse.json();
+
+    // Check if this is a revoked/error response (no url field)
+    if (meta.revoked) {
+        throw new Error(`Share has been revoked`);
+    }
+    if (meta.error) {
+        throw new Error(`Share error: ${meta.error}`);
+    }
+
+    // Fetch the encrypted JSONL from S3
+    const s3Response = await fetch(meta.url);
+    if (!s3Response.ok) {
+        throw new Error(`Failed to fetch encrypted data: ${s3Response.status}`);
+    }
+    const encryptedData = await s3Response.arrayBuffer();
+
+    // Decrypt client-side - also extracts nonce for later range requests
+    let plaintext, nonce;
+    try {
+        const result = await decryptShareJSONL(encryptedData, meta.key);
+        plaintext = result.plaintext;
+        nonce = result.nonce;
+    } catch (e) {
+        throw new Error(`Decryption failed: ${e.message}`);
+    }
+
+    // Check for revocation (small file with just {"revoked":true})
+    const textForRevokeCheck = new TextDecoder().decode(plaintext);
+    if (textForRevokeCheck.trim() === '{"revoked":true}') {
+        throw new Error(`Share has been revoked`);
+    }
+
+    // Parse JSONL and get byte offsets (works with raw bytes for accurate UTF-8 handling)
+    const { entries, byteOffsets } = parseJSONL(plaintext);
+
+    // Store in cache with metadata for range requests
+    const params = entries.map((p, i) => {
+        const parsed = parseParameters(p, shortUrlKey);
+        parsed.index = i;
+        return parsed;
     });
+
+    cachedShareByPassword.set(shortUrlKey, {
+        params,
+        nonce,
+        byteOffsets
+    });
+
+    return params;
 }
 
 function parseParameters(p, shortUrlKey) {
@@ -230,16 +325,43 @@ async function getPresignedUrl(p) {
         return null; // the url is expired/missing and we can't fetch a new one
     }
 
-    // Fetch fresh URL - use index suffix for individual files in a folder
-    const urlKey = p.index !== undefined ? `${p.shortUrlKey}-${p.index}` : p.shortUrlKey;
-    const response = await fetch(`/share-data/${urlKey}.json`);
+    // Get cached share data for byte offsets and nonce
+    const cached = cachedShareByPassword.get(p.shortUrlKey);
+    if (!cached || p.index === undefined) {
+        // Fallback: can't use range endpoint without cached metadata
+        // This shouldn't happen in normal flow since we always query first
+        throw new Error('Cannot refresh URL: missing cached share data');
+    }
+
+    const { nonce, byteOffsets } = cached;
+    const offsets = byteOffsets[p.index];
+    if (!offsets) {
+        throw new Error(`No byte offsets for index ${p.index}`);
+    }
+
+    // Construct range request - include surrounding newlines for boundary verification
+    // JSONL format has \n before and after every entry, so we always include both
+    const rangeStart = offsets.start - 1;
+    const rangeEnd = offsets.end;
+
+    const response = await fetch(`/share-data/${p.shortUrlKey}.json?range=${rangeStart}-${rangeEnd}&nonce=${nonce}`);
     if (!response.ok) {
         if (response.status === 410) {
             // Share has expired
             try {
                 const errorData = await response.json();
                 if (errorData.error === 'expired' && errorData.expires_at) {
-                    notifyClients({ type: 'expired', expires_at: errorData.expires_at, id });
+                    notifyClients({ type: 'expired', expires_at: errorData.expires_at });
+                    return null;
+                }
+            } catch (e) {}
+        }
+        if (response.status === 403) {
+            // Likely revoked
+            try {
+                const errorData = await response.json();
+                if (errorData.revoked) {
+                    notifyClients({ type: 'error', message: 'Share has been revoked' });
                     return null;
                 }
             } catch (e) {}
@@ -247,14 +369,14 @@ async function getPresignedUrl(p) {
         throw new Error(`Failed to fetch fresh URL: ${response.status}`);
     }
     const data = await response.json();
-    // Find matching file by sha256 and update URL
-    for (let d of data) {
-        if (d.sha256 === p.sha256) {
-            p.url = d.url;
-            return p.url;
-        }
+
+    // Verify the response matches our expected entry
+    if (data.sha256 !== p.sha256) {
+        throw new Error(`URL response sha256 mismatch: expected ${p.sha256}, got ${data.sha256}`);
     }
-    throw new Error('response json doesnt have our sha256');
+
+    p.url = data.url;
+    return p.url;
 }
 
 async function notifyClients(message) {
@@ -761,9 +883,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
         let paramsArray;
         if (password) {
-            let cachedParams = cachedJsonByPassword.get(password);
-            if (cachedParams && !isUrlExpired(cachedParams.url)) {
-                paramsArray = cachedParams;
+            let cached = cachedShareByPassword.get(password);
+            if (cached) {
+                paramsArray = cached.params;
             } else {
                 let pageParams = await requestParamsFromPage(password);
                 if (!pageParams) {
@@ -811,9 +933,9 @@ self.addEventListener('fetch', (event) => {
         } else if (password) {
             let downloadFilename = url.searchParams.get('download-filename');
             let array;
-            let cachedParams = cachedJsonByPassword.get(password);
-            if (cachedParams) {
-                array = cachedParams;
+            let cached = cachedShareByPassword.get(password);
+            if (cached) {
+                array = cached.params;
             } else {
                 let pageParams = await requestParamsFromPage(password);
                 if (!pageParams) {
@@ -842,3 +964,21 @@ self.addEventListener('fetch', (event) => {
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
+// Handle messages from page
+self.addEventListener('message', async (event) => {
+    if (event.data.type === 'fetch-share') {
+        const { password } = event.data;
+        try {
+            const params = await queryAndParseParameters(password);
+            const cached = cachedShareByPassword.get(password);
+            event.ports[0].postMessage({
+                entries: params,
+                nonce: cached.nonce,
+                byteOffsets: cached.byteOffsets
+            });
+        } catch (e) {
+            event.ports[0].postMessage({ error: e.message });
+        }
+    }
+});

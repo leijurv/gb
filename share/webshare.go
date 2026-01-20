@@ -2,6 +2,7 @@ package share
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/base64"
@@ -432,9 +433,11 @@ func UploadShareJSON(password string, stor storage_base.Storage) {
 	upload.End()
 }
 
-// GenerateShareJSON generates the JSON array for a password-mode share by querying
-// the share_entries table. This utility can be used for initial share creation as well as
-// regenerating the JSON after modifications (like revoking individual files).
+// GenerateShareJSON generates the JSONL (one JSON object per line) for a password-mode share
+// by querying the share_entries table. This utility can be used for initial share creation
+// as well as regenerating the JSON after modifications (like revoking individual files).
+// Format: each line is a complete JSON object, separated by newlines.
+// This allows the worker to fetch and decrypt individual lines via HTTP Range requests.
 func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 	// First check if the share is revoked
 	var revokedAt *int64
@@ -461,7 +464,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 	}
 	defer rows.Close()
 
-	filesParams := []map[string]string{}
+	var lines [][]byte
 	for rows.Next() {
 		var hash []byte
 		var blobID []byte
@@ -473,22 +476,24 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 		}
 
 		params := lookupBlobParams(hash, blobID, filename, expiresAt, stor)
-		filesParams = append(filesParams, params)
+		lineBytes, err := json.Marshal(params)
+		if err != nil {
+			panic(err)
+		}
+		lines = append(lines, lineBytes)
 	}
 	if err = rows.Err(); err != nil {
 		panic(err)
 	}
 
 	// If no entries exist, still return the revoked sentinel for safety
-	if len(filesParams) == 0 {
+	if len(lines) == 0 {
 		return []byte(RevokedShareJSON)
 	}
 
-	jsonBytes, err := json.Marshal(filesParams)
-	if err != nil {
-		panic(err)
-	}
-	return jsonBytes
+	// Join lines with newlines, with leading and trailing newlines
+	// This ensures every entry has \n before and after, simplifying range boundary checks
+	return append(append([]byte("\n"), bytes.Join(lines, []byte("\n"))...), '\n')
 }
 
 // ExpectedShareFile represents an expected share JSON file in storage

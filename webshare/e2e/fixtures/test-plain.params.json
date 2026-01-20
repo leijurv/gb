@@ -1,0 +1,10 @@
+{
+  "name": "test-plain.txt",
+  "url": "http://localhost:3456/fixtures/test-plain.bin",
+  "key": "09b89f62f824127de28bafcb1e2092b6",
+  "offset": 0,
+  "length": 185,
+  "size": 185,
+  "sha256": "7JULaMVuqb0VA9yzg2Wcum8Gqg9IkSJNG9URRFuiey8",
+  "cmp": ""
+}

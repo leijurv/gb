@@ -1,0 +1,10 @@
+{
+  "name": "test-bad-hash.txt",
+  "url": "http://localhost:3456/fixtures/test-bad-hash.bin",
+  "key": "3d0a0cbd081a56d0be0484cef50fc037",
+  "offset": 0,
+  "length": 157,
+  "size": 185,
+  "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "cmp": "zstd"
+}

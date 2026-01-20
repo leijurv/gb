@@ -894,7 +894,12 @@ self.addEventListener('fetch', (event) => {
                 paramsArray = pageParams;
             }
             if (hash) {
-                paramsArray = paramsArray.filter(p => p.sha256 === hash);
+                const found = paramsArray.find(p => p.sha256 === hash);
+                if (found) {
+                    paramsArray = [found];
+                } else {
+                    return new Response(`no entry found matching hash ${hash}`, { status: 404 });
+                }
             }
         } else {
             let params = {};

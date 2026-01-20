@@ -285,6 +285,22 @@
 
     const $ = id => document.getElementById(id);
 
+    function showErrorBox(...parts) {
+        // parts can be strings or {br: true} for line breaks
+        const content = $('content');
+        content.innerHTML = '';
+        const errorBox = document.createElement('div');
+        errorBox.className = 'error-box';
+        for (const part of parts) {
+            if (part && part.br) {
+                errorBox.appendChild(document.createElement('br'));
+            } else {
+                errorBox.appendChild(document.createTextNode(part));
+            }
+        }
+        content.appendChild(errorBox);
+    }
+
     function parseHash() {
         // Go's url.Values.Encode() converts spaces to "+", and URLSearchParams
         // handles this correctly (application/x-www-form-urlencoded decoding)
@@ -295,7 +311,7 @@
         // Split the pathname by "/" and filter out empty strings
         let key = url.pathname.substring(1);
         if (key.length === 0) {
-            $('content').innerHTML = `<div class="error-box">Missing path or parameters</div>`;
+            showErrorBox('Missing path or parameters');
             throw new Error('Missing path or parameters');
         }
         const hashIndex = key.indexOf('/');
@@ -317,7 +333,7 @@
 
     function showExpiredError(expiresAtUnix) {
         const expiredTime = formatExpiredTime(expiresAtUnix);
-        $('content').innerHTML = `<div class="error-box">This share link has expired.<br><br>Expired at: ${expiredTime}<br><br>Ask the sender for a new link.</div>`;
+        showErrorBox('This share link has expired.', {br:true}, {br:true}, 'Expired at: ', expiredTime, {br:true}, {br:true}, 'Ask the sender for a new link.');
     }
 
     // Lepton worker for multi-threaded JPEG decompression (SW can't spawn workers)
@@ -391,14 +407,14 @@
                 throw new Error('Share link expired');
             }
             if (e.message.includes('revoked')) {
-                $('content').innerHTML = `<div class="error-box">This share has been revoked</div>`;
+                showErrorBox('This share has been revoked');
                 throw new Error('This share has been revoked');
             }
             if (e.message.includes('not found')) {
-                $('content').innerHTML = `<div class="error-box">Share not found</div>`;
+                showErrorBox('Share not found');
                 throw new Error('Share not found');
             }
-            $('content').innerHTML = `<div class="error-box">Error: ${e.message}</div>`;
+            showErrorBox('Error: ', e.message);
             throw e;
         }
 
@@ -553,7 +569,7 @@
         let rawParams = parseHash();
         const missing = required.filter(k => !(k in rawParams));
         if (missing.length > 0) {
-            $('content').innerHTML = `<div class="error-box">Missing parameters: ${missing.join(', ')}<br><br>This page expects a URL like:<br>share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...</div>`;
+            showErrorBox('Missing parameters: ', missing.join(', '), {br:true}, {br:true}, 'This page expects a URL like:', {br:true}, 'share.html#name=...&url=...&key=...&offset=...&length=...&size=...&sha256=...&cmp=...');
             throw new Error('Missing params');
         }
         // Transform raw params to normalized format
@@ -583,7 +599,7 @@
     // But keep all entries for SW communication
     if (fileIndexFromFolder !== null) {
         if (fileIndexFromFolder < 0 || fileIndexFromFolder >= params.length) {
-            $('content').innerHTML = `<div class="error-box">File index ${fileIndexFromFolder} out of range (0-${params.length - 1})</div>`;
+            showErrorBox(`File index ${fileIndexFromFolder} out of range (0-${params.length - 1})`);
             throw new Error('File index out of range');
         }
         allParams = params; // Keep all for SW (already transformed)
@@ -607,42 +623,61 @@
 
         $('zip-container').style.display = 'table';
 
-        window.toggleDropdown = function(filename, sha256, password, index) {
-            const dropdown = document.getElementById(`dropdown-${index}`);
-            const btn = document.getElementById(`dropdown-btn-${index}`);
+        function toggleDropdown(btn, dropdown, mediaContainer, filename, sha256, password) {
             if (dropdown.style.display === 'none') {
                 dropdown.style.display = 'block';
                 btn.textContent = '▲';
-                const mediaUrl = `/gb/webshare/gb-download?password=${password}&hash=${sha256}&media=true`;
-                showMediaPlayer(filename, mediaUrl, true, `media-container-${index}`);
+                const mediaUrl = `/gb/webshare/gb-download?password=${encodeURIComponent(password)}&hash=${sha256}&media=true`;
+                showMediaPlayer(filename, mediaUrl, true, mediaContainer);
             } else {
                 dropdown.style.display = 'none';
                 btn.textContent = '▼';
-                $(`media-container-${index}`).innerHTML = '';
+                $(mediaContainer).innerHTML = '';
             }
         }
 
-        function escape(text) {
-            return text
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
-        }
+        const zipContainer = $('zip-container');
+        params.forEach((p, i) => {
+            const li = document.createElement('li');
+            li.style.cssText = 'list-style: none; margin-bottom: 5px;';
 
-        $('zip-container').innerHTML = params.map((p, i) =>
-            `<li style="list-style: none; margin-bottom: 5px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="dropdown-btn-${i}" onclick="toggleDropdown('${escape(p.filename)}', '${p.sha256}', '${escape(p.shortUrlKey)}', ${i})" style="cursor: pointer; padding: 2px 8px;">▼</button>
-                    <a href="/${escape(shortUrlKey)}-${i}/${escape(zipFileName)}" style="color: #00d4ff;">${escape(p.filename)}</a>
-                    <span>(${formatBytes(p.size)})</span>
-                </div>
-                <div id="dropdown-${i}" style="display: none; margin-top: 5px; padding: 10px;">
-                    <div id="media-container-${i}" class="media-container"></div>
-                </div>
-            </li>`
-        ).join('');
+            const rowDiv = document.createElement('div');
+            rowDiv.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+
+            const btn = document.createElement('button');
+            btn.id = `dropdown-btn-${i}`;
+            btn.style.cssText = 'cursor: pointer; padding: 2px 8px;';
+            btn.textContent = '▼';
+
+            const link = document.createElement('a');
+            link.href = `/${encodeURIComponent(shortUrlKey)}-${i}/${encodeURIComponent(zipFileName)}`;
+            link.style.color = '#00d4ff';
+            link.textContent = p.filename;
+
+            const sizeSpan = document.createElement('span');
+            sizeSpan.textContent = `(${formatBytes(p.size)})`;
+
+            rowDiv.appendChild(btn);
+            rowDiv.appendChild(link);
+            rowDiv.appendChild(sizeSpan);
+
+            const dropdown = document.createElement('div');
+            dropdown.id = `dropdown-${i}`;
+            dropdown.style.cssText = 'display: none; margin-top: 5px; padding: 10px;';
+
+            const mediaContainer = document.createElement('div');
+            mediaContainer.id = `media-container-${i}`;
+            mediaContainer.className = 'media-container';
+            dropdown.appendChild(mediaContainer);
+
+            btn.addEventListener('click', () => {
+                toggleDropdown(btn, dropdown, mediaContainer.id, p.filename, p.sha256, p.shortUrlKey);
+            });
+
+            li.appendChild(rowDiv);
+            li.appendChild(dropdown);
+            zipContainer.appendChild(li);
+        });
 
     } else {
         $('media-container').style.display = 'table';
@@ -656,11 +691,11 @@
         const compression = params[0].compression;
 
         if (!/^[0-9a-f]{32}$/.test(keyHex)) {
-            $('content').innerHTML = `<div class="error-box">Invalid encryption key: must be 32 hex characters</div>`;
+            showErrorBox('Invalid encryption key: must be 32 hex characters');
             throw new Error('Invalid key');
         }
         if (compression !== "zstd" && compression !== "lepton" && compression !== "") {
-        $('content').innerHTML = `<div class="error-box">Invalid compression: only zstd and lepton are supported</div>`;
+            showErrorBox('Invalid compression: only zstd and lepton are supported');
             throw new Error('Invalid compression');
         }
 
@@ -693,8 +728,18 @@
 
         // Show folder reference if this is an individual file from a folder
         if (fileIndexFromFolder !== null) {
-            const folderUrl = `/${folderBaseKey}/${parseZipFileName()}`;
-            $('meta').innerHTML += `<br><span style="color: #fff;">This is file ${fileIndexFromFolder + 1} from a <a href="${folderUrl}" style="color: #00d4ff;">shared folder</a></span>`;
+            const folderUrl = `/${encodeURIComponent(folderBaseKey)}/${encodeURIComponent(parseZipFileName())}`;
+            const br = document.createElement('br');
+            const span = document.createElement('span');
+            span.style.color = '#fff';
+            span.appendChild(document.createTextNode(`This is file ${fileIndexFromFolder + 1} from a `));
+            const folderLink = document.createElement('a');
+            folderLink.href = folderUrl;
+            folderLink.style.color = '#00d4ff';
+            folderLink.textContent = 'shared folder';
+            span.appendChild(folderLink);
+            $('meta').appendChild(br);
+            $('meta').appendChild(span);
         }
 
         // Generate the curl command following paranoia/file.go
@@ -753,23 +798,68 @@
         // Populate info section
         const curlCmd = generateCurlCommand();
         const sha256Hex = sha256ToHex(params[0].sha256);
-        let infoHtml = `
-            <div class="info-row"><span class="info-label">Shared with:</span> <a href="https://github.com/leijurv/gb" style="color: #00d4ff;">gb</a></div>
-            <div class="info-row"><span class="info-label">File size:</span> ${size.toLocaleString()} bytes${compression ? ` (${length.toLocaleString()} bytes compressed)` : ''}</div>
-            <div class="info-row"><span class="info-label">SHA-256:</span> ${sha256Hex}</div>
-            <div class="info-row"><span class="info-label">Compression:</span> ${compression || 'none'}</div>
-            ${expiresAt ? `<div class="info-row"><span class="info-label">URL expires in:</span> <span class="expiry-countdown" id="expiry-countdown">${formatCountdown(expiresAt - Date.now())}</span></div>` : ''}
-            <div class="info-row"><span class="info-label">Manual download command:</span></div>
-            <div class="cmd-box" id="cmd-box">${curlCmd.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        `;
-        $('info-content').innerHTML = infoHtml;
+        const infoContent = $('info-content');
+
+        function createInfoRow(label, value) {
+            const row = document.createElement('div');
+            row.className = 'info-row';
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'info-label';
+            labelSpan.textContent = label;
+            row.appendChild(labelSpan);
+            row.appendChild(document.createTextNode(' ' + value));
+            return row;
+        }
+
+        // Shared with row (with link)
+        const sharedRow = document.createElement('div');
+        sharedRow.className = 'info-row';
+        const sharedLabel = document.createElement('span');
+        sharedLabel.className = 'info-label';
+        sharedLabel.textContent = 'Shared with:';
+        const gbLink = document.createElement('a');
+        gbLink.href = 'https://github.com/leijurv/gb';
+        gbLink.style.color = '#00d4ff';
+        gbLink.textContent = 'gb';
+        sharedRow.appendChild(sharedLabel);
+        sharedRow.appendChild(document.createTextNode(' '));
+        sharedRow.appendChild(gbLink);
+        infoContent.appendChild(sharedRow);
+
+        infoContent.appendChild(createInfoRow('File size:', `${size.toLocaleString()} bytes${compression ? ` (${length.toLocaleString()} bytes compressed)` : ''}`));
+        infoContent.appendChild(createInfoRow('SHA-256:', sha256Hex));
+        infoContent.appendChild(createInfoRow('Compression:', compression || 'none'));
+
+        if (expiresAt) {
+            const expiryRow = document.createElement('div');
+            expiryRow.className = 'info-row';
+            const expiryLabel = document.createElement('span');
+            expiryLabel.className = 'info-label';
+            expiryLabel.textContent = 'URL expires in:';
+            const expiryValue = document.createElement('span');
+            expiryValue.className = 'expiry-countdown';
+            expiryValue.id = 'expiry-countdown';
+            expiryValue.textContent = formatCountdown(expiresAt - Date.now());
+            expiryRow.appendChild(expiryLabel);
+            expiryRow.appendChild(document.createTextNode(' '));
+            expiryRow.appendChild(expiryValue);
+            infoContent.appendChild(expiryRow);
+        }
+
+        infoContent.appendChild(createInfoRow('Manual download command:', ''));
+
+        const cmdBox = document.createElement('div');
+        cmdBox.className = 'cmd-box';
+        cmdBox.id = 'cmd-box';
+        cmdBox.textContent = curlCmd;
+        infoContent.appendChild(cmdBox);
 
         // Click to copy
-        $('cmd-box').addEventListener('click', async () => {
+        cmdBox.addEventListener('click', async () => {
             try {
                 await navigator.clipboard.writeText(curlCmd);
-                $('cmd-box').classList.add('copied');
-                setTimeout(() => $('cmd-box').classList.remove('copied'), 2000);
+                cmdBox.classList.add('copied');
+                setTimeout(() => cmdBox.classList.remove('copied'), 2000);
             } catch (e) {
                 console.error('Copy failed:', e);
             }

@@ -1,0 +1,11 @@
+{
+  "password": "testpassword",
+  "masterKey": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "derivedFilename": "c0d5772084e4263ad2779d2ad676f4cc",
+  "contentKeyHex": "5af5df366980b7af368c829ed0f0cb8d",
+  "entries": [
+    "test-zstd",
+    "test-plain",
+    "test-lepton"
+  ]
+}

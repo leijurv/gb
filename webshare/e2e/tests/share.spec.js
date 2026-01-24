@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import AdmZip from 'adm-zip';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = join(__dirname, '..', 'fixtures');
@@ -146,5 +147,64 @@ test.describe('Hash mode file share', () => {
     const mediaContainer = page.locator('#media-container');
     await expect(mediaContainer).not.toContainText('Hello from the webshare e2e test!');
     await expect(mediaContainer).not.toContainText('If you can read this');
+  });
+
+  test('downloads zip file with correct contents for password-based multi-file share', async ({ page }) => {
+    // Navigate to password-based share
+    const url = '/testpassword/';
+
+    page.on('console', msg => console.log(`[browser] ${msg.type()}: ${msg.text()}`));
+    page.on('pageerror', err => console.log(`[browser error] ${err.message}`));
+
+    await page.goto(url);
+
+    // Wait for filename to show zip name (indicates share was loaded)
+    await expect(page.locator('#filename')).toHaveText('download.zip', { timeout: 15000 });
+
+    // Verify the zip container shows 3 files
+    const zipContainer = page.locator('#zip-container');
+    await expect(zipContainer).toBeVisible({ timeout: 10000 });
+    await expect(zipContainer.locator('li')).toHaveCount(3, { timeout: 10000 });
+
+    // Wait for download button to be enabled
+    const downloadBtn = page.locator('#download');
+    await expect(downloadBtn).toBeEnabled({ timeout: 20000 });
+
+    // Start waiting for download before clicking
+    const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
+
+    // Click download button
+    await downloadBtn.click();
+
+    // Wait for download to complete
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+
+    // Read and verify zip contents
+    const zip = new AdmZip(downloadPath);
+    const zipEntries = zip.getEntries();
+
+    // Should have 3 files
+    expect(zipEntries.length).toBe(3);
+
+    // Get entry names
+    const entryNames = zipEntries.map(e => e.entryName).sort();
+    expect(entryNames).toEqual(['test-lepton.jpg', 'test-plain.txt', 'test-zstd.txt']);
+
+    // Verify text file contents
+    const zstdEntry = zip.getEntry('test-zstd.txt');
+    const zstdContent = zstdEntry.getData().toString('utf-8');
+    expect(zstdContent).toContain('Hello from the webshare e2e test!');
+    expect(zstdContent).toContain('If you can read this in the browser, the test passed!');
+
+    const plainEntry = zip.getEntry('test-plain.txt');
+    const plainContent = plainEntry.getData().toString('utf-8');
+    expect(plainContent).toContain('Hello from the webshare e2e test!');
+
+    // Verify JPEG matches the original fixture (lepton-decompressed)
+    const leptonEntry = zip.getEntry('test-lepton.jpg');
+    const leptonData = leptonEntry.getData();
+    const originalJpeg = readFileSync(join(fixturesDir, 'test-lepton.jpg'));
+    expect(leptonData.equals(originalJpeg)).toBe(true);
   });
 });

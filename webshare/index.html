@@ -1081,14 +1081,8 @@
         try {
             await registerServiceWorker();
             await waitForSwIntercepting();
-
-            const iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            document.body.appendChild(iframe);
-            iframe.src = downloadUrl;  // src AFTER appendChild (Firefox SW fix)
-
-            setTimeout(() => iframe.remove(), 5000);
-
+            // Navigate to download URL - SW responds with Content-Disposition: attachment
+            window.location.href = downloadUrl;
         } catch (e) {
             showStatus('Error: ' + e.message, 'error');
             $('progress-container').style.display = 'none';

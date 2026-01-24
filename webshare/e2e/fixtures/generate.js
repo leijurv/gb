@@ -2,7 +2,7 @@
 // Creates encrypted, optionally compressed test files
 
 import { execSync } from 'child_process';
-import { createCipheriv, createHash } from 'crypto';
+import { createCipheriv, createHash, createHmac, randomBytes } from 'crypto';
 import { writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -21,6 +21,34 @@ function sha256Base64Url(buffer) {
 
 // Fixed test key (not random to avoid git churn on regeneration)
 const TEST_KEY = Buffer.from('0123456789abcdef0123456789abcdef', 'hex');
+
+// Fixed master key for password-based shares (matches what e2e server uses)
+const TEST_MASTER_KEY = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+
+// Derive content key from password using HMAC (matches worker.js)
+function deriveShareContentKey(masterKey, password) {
+  const hmac = createHmac('sha256', Buffer.from(masterKey, 'hex'));
+  hmac.update('content:' + password);
+  return hmac.digest().slice(0, 16); // AES-128
+}
+
+// Derive filename from password using HMAC (matches worker.js)
+function deriveShareFilename(masterKey, password) {
+  const hmac = createHmac('sha256', Buffer.from(masterKey, 'hex'));
+  hmac.update('filename:' + password);
+  return hmac.digest().toString('hex').slice(0, 32);
+}
+
+// Encrypt with AES-GCM (matches worker.js decryption expectations)
+function encryptAesGcm(plaintext, keyBytes) {
+  // Use fixed nonce for reproducibility (12 bytes)
+  const nonce = Buffer.from('000102030405060708090a0b', 'hex');
+  const cipher = createCipheriv('aes-128-gcm', keyBytes, nonce);
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  // Format: nonce (12) || ciphertext || tag (16)
+  return Buffer.concat([nonce, encrypted, tag]);
+}
 
 function encrypt(buffer) {
   const counter = Buffer.alloc(16, 0);
@@ -110,11 +138,75 @@ img.save('${jpegPath}', 'JPEG', quality=85)
   const original = readFileSync(jpegPath);
   const sha256 = sha256Base64Url(original);
   const compressed = compressLepton(jpegPath, name);
-  unlinkSync(jpegPath);
+
+  // Keep the original JPEG for test verification (don't delete it)
+  // unlinkSync(jpegPath);
 
   const params = writeFixture(name, `${name}.jpg`, original.length, sha256, compressed, 'lepton');
   logFixture(name, original.length, compressed.length, sha256);
   return params;
+}
+
+// Generate a password-based zip share fixture
+// Creates an AES-GCM encrypted JSONL file containing entries for multiple files
+function generateZipShareFixture(name, password, fileFixtures) {
+  console.log(`Generating: ${name} (password: ${password})`);
+
+  // Build JSONL entries from existing fixture params
+  // Include url field pointing to the fixture file (e2e server will serve these)
+  const entries = fileFixtures.map(fixtureName => {
+    const params = loadFixtureParams(fixtureName);
+    return {
+      name: params.name,
+      path: `fixtures/${fixtureName}.bin`, // Local path for e2e server
+      url: `http://localhost:3456/fixtures/${fixtureName}.bin`, // Direct URL for SW to fetch
+      key: params.key,
+      offset: params.offset,
+      length: params.length,
+      size: params.size,
+      sha256: params.sha256,
+      cmp: params.cmp
+    };
+  });
+
+  // Convert to JSONL (newline-delimited JSON)
+  // Note: worker expects \n before and after each entry for range requests
+  const jsonl = '\n' + entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+  const plaintextBytes = Buffer.from(jsonl, 'utf-8');
+
+  // Derive content key from password
+  const contentKey = deriveShareContentKey(TEST_MASTER_KEY, password);
+  const derivedFilename = deriveShareFilename(TEST_MASTER_KEY, password);
+
+  // Encrypt with AES-GCM
+  const encrypted = encryptAesGcm(plaintextBytes, contentKey);
+
+  // Write the encrypted JSONL file
+  const blobPath = join(__dirname, `${name}.bin`);
+  writeFileSync(blobPath, encrypted);
+
+  // Write metadata that e2e server will use for /share-data/{password}.json
+  const meta = {
+    password,
+    masterKey: TEST_MASTER_KEY,
+    derivedFilename,
+    contentKeyHex: contentKey.toString('hex'),
+    entries: fileFixtures
+  };
+  writeFileSync(join(__dirname, `${name}.meta.json`), JSON.stringify(meta, null, 2));
+
+  console.log(`  Password: ${password}`);
+  console.log(`  Derived filename: ${derivedFilename}`);
+  console.log(`  Files: ${fileFixtures.join(', ')}`);
+  console.log(`  Encrypted size: ${encrypted.length} bytes\n`);
+
+  return meta;
+}
+
+// Load existing fixture params (for building zip share)
+function loadFixtureParams(name) {
+  const paramsPath = join(__dirname, `${name}.params.json`);
+  return JSON.parse(readFileSync(paramsPath, 'utf-8'));
 }
 
 // --- Main ---
@@ -133,5 +225,8 @@ generateTextFixture('test-zstd', TEST_TEXT, 'zstd');
 generateTextFixture('test-plain', TEST_TEXT, '');
 generateBadHashFixture('test-bad-hash', TEST_TEXT, 'zstd');
 generateLeptonFixture('test-lepton');
+
+// Generate zip share fixture (must be after individual fixtures are created)
+generateZipShareFixture('test-zip', 'testpassword', ['test-zstd', 'test-plain', 'test-lepton']);
 
 console.log('Done!');

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/gdrive"
@@ -151,7 +152,24 @@ func ClearCache() {
 	cacheLock.Unlock()
 }
 
+func storageSelectPrintOptions() {
+	descs := GetAllDescriptors()
+	log.Println("Options:")
+	for _, d := range descs {
+		var label string
+		err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)
+		if err != nil {
+			panic(err)
+		}
+		log.Println("•", d.Kind, d.RootPath, "To use this one, add the option `--label=\""+label+"\"`")
+	}
+}
+
 func StorageSelect(label string) (storage_base.Storage, bool) {
+	if label == "" && config.Config().DefaultStorage != "" {
+		label = config.Config().DefaultStorage
+		log.Println("Using default storage from config:", label)
+	}
 	if label == "" {
 		descs := GetAllDescriptors()
 		if len(descs) == 1 {
@@ -159,22 +177,16 @@ func StorageSelect(label string) (storage_base.Storage, bool) {
 			return StorageDataToStorage(descs[0]), true
 		}
 		log.Println("First, we need to pick a storage to fetch em from")
-		log.Println("Options:")
-		for _, d := range descs {
-			var label string
-			err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)
-			if err != nil {
-				panic(err)
-			}
-			log.Println("•", d.Kind, d.RootPath, "To use this one, add the option `--label=\""+label+"\"`")
-		}
+		storageSelectPrintOptions()
 		return nil, false
 	}
 	GetAll()
 	var storageID []byte
 	err := db.DB.QueryRow("SELECT storage_id FROM storage WHERE readable_label = ?", label).Scan(&storageID)
 	if err != nil {
-		panic(err)
+		log.Println("No storage found with label:", label)
+		storageSelectPrintOptions()
+		return nil, false
 	}
 	storage := GetByID(storageID)
 	log.Println("Using storage:", storage)

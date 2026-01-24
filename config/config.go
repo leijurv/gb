@@ -38,6 +38,7 @@ type ConfigData struct {
 	DisableLeptonGo        bool     `json:"disable_lepton_go"`
 	SkipHashFailures       bool     `json:"skip_hash_failures"`
 	UseGitignore           bool     `json:"use_gitignore"`
+	DefaultStorage         string   `json:"default_storage"`
 }
 
 func Config() ConfigData {

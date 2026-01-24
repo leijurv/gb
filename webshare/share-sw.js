@@ -686,7 +686,10 @@ const leptonCache = new Map();  // path -> { body: ArrayBuffer|string, contentTy
 const leptonIntegrity = {
     '/lepton_rust.js': 'sha384-pPPidBbrirqvbJ4vVQ24oOM3nCkO2B3L6BQg9yInBWsXB6aT7ffLASo7YGMwObfN',
     '/lepton_rust.wasm': 'sha384-fLOeSO2Kkh5ngSpJR2f4ZRFgNIlcVEihXYjCFz+qOQ7TmRWGCtZN0PJSQ+DkRrpe',
-    '/lepton-worker.js': 'sha384-7yfbqiu+j4M4LyS0G0E/wvcqZxvorhkXsLMPrVEmpVE3xtm3KfIt4zW7oTUVjbx1',
+    '/lepton-worker.js': 'sha384-3cMhpTCwrhAKO07QRaXnYIGAiGpSIX8s9r6CbUPNdSY1VkhSDIf8QPOnh3cxRQUx',
+    '/lepton-worker-st.js': 'sha384-yDi4xikrVwDHh9AGqwNzv5ZiCeBsIT6o9Xbk5vOryD76KahEVLZsiRLhvwqmMTFC',
+    '/lepton_rust_st.js': 'sha384-ssAIykjtlT/xOVAUncqcozDEuP8YeMTX9bQ8HFZ0FAr4Ie1ZIUS4MkWZFnRCUCvQ',
+    '/lepton_rust_st_bg.wasm': 'sha384-1ra5Ou5caxU0SQukIkA9ImiISEK3AMH6N/jCnZUcljiWl7IMuOD16xq70MJuhFtS',
     '/snippets/wasm-bindgen-rayon-38edf6e439f6d70d/src/workerHelpers.no-bundler.js': 'sha384-hUWHQYRixf7a9bhQ/Ga09aCXo/QEhlkN2B9PaK598KNdt8gZpRvb8Pizjbi9H6Um'
 };
 
@@ -861,7 +864,9 @@ self.addEventListener('fetch', (event) => {
     }
 
     // Proxy lepton files with COOP/COEP headers for multi-threading support
-    if (url.pathname.includes('/lepton/') && url.origin === location.origin) {
+    // On localhost, serve local files directly (for e2e testing)
+    const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (url.pathname.includes('/lepton/') && url.origin === location.origin && !isLocalhost) {
         event.respondWith(proxyLeptonFile(url.pathname));
         return;
     }

@@ -336,33 +336,51 @@
         showErrorBox('This share link has expired.', {br:true}, {br:true}, 'Expired at: ', expiredTime, {br:true}, {br:true}, 'Ask the sender for a new link.');
     }
 
-    // Lepton worker for multi-threaded JPEG decompression (SW can't spawn workers)
-    // Initialize immediately to overlap WASM/thread pool setup with .lep download
+    // Lepton worker for JPEG decompression (SW can't spawn workers)
+    // Uses multi-threaded version when available, single-threaded for Safari/WebKit
     let leptonWorker = null;
     let leptonWorkerReady = null;
+
+    // Safari/WebKit detection - their wasm-bindgen-rayon thread pool init hangs
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
     function initLeptonWorker() {
         if (leptonWorkerReady) return leptonWorkerReady;
 
         leptonWorkerReady = new Promise((resolve, reject) => {
-            // Use path relative to current location (works on both GitHub Pages and CF Workers)
-            const leptonWorkerUrl = new URL('lepton/lepton-worker.js', location.href);
-            // Allow thread count override via ?lepton_threads=N for debugging
-            const threadOverride = new URLSearchParams(location.search).get('lepton_threads');
-            if (threadOverride) {
-                leptonWorkerUrl.searchParams.set('threads', threadOverride);
+            // Use multi-threaded if: SAB available, cross-origin isolated, and not Safari
+            const canUseMultiThreaded = !isSafari &&
+                typeof SharedArrayBuffer !== 'undefined' && crossOriginIsolated;
+
+            const workerFile = canUseMultiThreaded ? 'lepton-worker.js' : 'lepton-worker-st.js';
+            const leptonWorkerUrl = new URL(`lepton/${workerFile}`, location.href);
+
+            if (canUseMultiThreaded) {
+                const threadOverride = new URLSearchParams(location.search).get('lepton_threads');
+                if (threadOverride) {
+                    leptonWorkerUrl.searchParams.set('threads', threadOverride);
+                }
             }
+
+            console.log(`[Page] Using ${canUseMultiThreaded ? 'multi-threaded' : 'single-threaded'} lepton worker`);
             leptonWorker = new Worker(leptonWorkerUrl.href, { type: 'module' });
+
+            const handleFailure = (error) => {
+                leptonWorkerReady = null;
+                leptonWorker = null;
+                reject(error);
+            };
 
             leptonWorker.onerror = (e) => {
                 console.error('[Page] Lepton worker error:', e);
-                reject(e);
+                handleFailure(new Error('Lepton worker failed to load'));
             };
 
-            // Wait for worker to signal it's ready (after WASM + thread pool init)
             leptonWorker.onmessage = (e) => {
                 if (e.data.type === 'ready') {
                     resolve();
+                } else if (e.data.type === 'init-error') {
+                    handleFailure(new Error(`Lepton init failed: ${e.data.message}`));
                 }
             };
         });

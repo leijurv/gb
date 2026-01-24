@@ -91,8 +91,6 @@ test.describe('Hash mode file share', () => {
   });
 
   test('renders lepton-compressed JPEG as an image', async ({ page, browserName }) => {
-    test.skip(browserName === 'webkit', 'Lepton requires SharedArrayBuffer which is not available in WebKit');
-
     const params = loadFixtureParams('test-lepton');
     const hash = buildUrlHash(params);
     const url = `/gb/webshare/${hash}`;

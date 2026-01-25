@@ -68,7 +68,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		startOffset := postEncInfo.Size()
 		verify := utils.NewSHA256HasherSizer()
 
-		f, err := os.Open(planned.path)
+		f, err := fileOpener.Open(planned.path)
 		if err != nil {
 			log.Println("I can no longer read from it to back it up???", err, planned.path)
 			// call this here since we will NOT be adding an entry to entries, so it won't be called later on lol

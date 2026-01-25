@@ -9,7 +9,6 @@ import (
 
 	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
-	"github.com/leijurv/gb/utils"
 )
 
 // use the includePaths that are deeper than the inputPath but if there are none just use the inputPath
@@ -30,9 +29,13 @@ func getDirectoriesToScan(inputPath string, includePaths []string) []string {
 func scannerThread(inputs []File) {
 	var ctx ScannerTransactionContext
 	log.Println("Beginning scan now!")
+
+	// Collect all directory paths to walk and track files for pruning
+	var allPathsToBackup []string
+	filesMap := make(map[string]os.FileInfo)
+
 	for _, input := range inputs {
 		if input.info.IsDir() {
-			filesMap := make(map[string]os.FileInfo)
 			for _, exclude := range config.Config().ExcludePrefixes {
 				if strings.HasPrefix(input.path, exclude) {
 					log.Printf("Input input bypasses exclude \"%s\"\n", exclude)
@@ -40,21 +43,25 @@ func scannerThread(inputs []File) {
 				}
 			}
 			pathsToBackup := getDirectoriesToScan(input.path, config.Config().Includes)
-			for _, path := range pathsToBackup {
-				utils.WalkFiles(path, func(path string, info os.FileInfo) {
-					filesMap[path] = info
-					scanFile(File{path, info}, ctx.Tx())
-				})
-			}
-			defer func() {
-				for _, path := range pathsToBackup {
-					pruneDeletedFiles(path, filesMap)
-				}
-			}()
+			allPathsToBackup = append(allPathsToBackup, pathsToBackup...)
 		} else {
 			scanFile(input, ctx.Tx())
 		}
 	}
+
+	// Walk all directories using the walker interface
+	if len(allPathsToBackup) > 0 {
+		walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
+			filesMap[path] = info
+			scanFile(File{path, info}, ctx.Tx())
+		})
+
+		// Prune deleted files after walking is complete
+		for _, path := range allPathsToBackup {
+			pruneDeletedFiles(path, filesMap)
+		}
+	}
+
 	log.Println("Scanner committing")
 	ctx.Close() // do this before wg.Wait
 	log.Println("Scanner committed")

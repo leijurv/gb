@@ -27,7 +27,7 @@ func statInputPaths(rawPaths []string) []File {
 		}
 		log.Println("Converted to absolute:", path)
 
-		stat, err := os.Stat(path)
+		stat, err := fileOpener.Stat(path)
 		if err != nil {
 			panic("Path doesn't exist?")
 		}
@@ -151,25 +151,25 @@ func DryBackup(rawPaths []string) {
 	}
 	defer tx.Rollback()
 	statuses := make([]FileStatus, 0)
+	var allPathsToBackup []string
 	for _, input := range inputs {
 		if input.info.IsDir() {
-			filesMap := make(map[string]os.FileInfo)
 			pathsToBackup := getDirectoriesToScan(input.path, config.Config().Includes)
-			for _, path := range pathsToBackup {
-				utils.WalkFiles(path, func(path string, info os.FileInfo) {
-					filesMap[path] = info
-					comparison := CompareFileToDb(path, info, tx, false)
-					if comparison.Modified || comparison.New {
-						statuses = append(statuses, comparison)
-					}
-				})
-			}
+			allPathsToBackup = append(allPathsToBackup, pathsToBackup...)
 		} else {
 			comparison := CompareFileToDb(input.path, input.info, tx, false)
 			if comparison.Modified || comparison.New {
 				statuses = append(statuses, comparison)
 			}
 		}
+	}
+	if len(allPathsToBackup) > 0 {
+		walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
+			comparison := CompareFileToDb(path, info, tx, false)
+			if comparison.Modified || comparison.New {
+				statuses = append(statuses, comparison)
+			}
+		})
 	}
 	sort.Slice(statuses, func(i, j int) bool {
 		return statuses[i].file.info.Size() < statuses[j].file.info.Size()

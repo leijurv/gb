@@ -93,6 +93,8 @@ func ResetForTesting() {
 	stats = Stats{
 		currentlyUploading: make(map[string]*utils.HasherSizer),
 	}
+	walker = defaultWalker{}
+	fileOpener = osFileOpener{}
 }
 
 func GetTestingTimestamp() int64 {
@@ -120,7 +122,7 @@ func (s *Stats) CurrentlyUploading() []string {
 	defer s.lock.Unlock()
 	keys := make([]string, 0, len(s.currentlyUploading))
 	for k, v := range s.currentlyUploading {
-		stat, err := os.Stat(k)
+		stat, err := fileOpener.Stat(k)
 		if err == nil {
 			sz := stat.Size()
 			progress := v.Size()
@@ -193,7 +195,7 @@ func SamplePaddingLength(size int64) int64 {
 }
 
 func hashAFile(path string) ([]byte, int64, error) {
-	f, err := os.Open(path)
+	f, err := fileOpener.Open(path)
 	if err != nil {
 		return nil, 0, err
 	}

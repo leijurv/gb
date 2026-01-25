@@ -293,3 +293,8 @@ func SetTestConfig(databaseLocation string) {
 	config.UploadStatusInterval = -1
 	config.MinBlobSize = 1000
 }
+
+// SetSkipHashFailures sets the SkipHashFailures config option (for testing).
+func SetSkipHashFailures(value bool) {
+	config.SkipHashFailures = value
+}

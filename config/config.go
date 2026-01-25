@@ -16,6 +16,7 @@ var inited = false
 
 type ConfigData struct {
 	MinBlobSize            int64    `json:"min_blob_size"`
+	MinBlobCount           int64    `json:"min_blob_count"`
 	MinCompressSize        int64    `json:"min_compress_size"`
 	DatabaseLocation       string   `json:"database_location"`
 	PaddingMinBytes        int64    `json:"padding_min_bytes"`
@@ -48,6 +49,7 @@ func Config() ConfigData {
 
 var config = ConfigData{
 	MinBlobSize:          64000000,
+	MinBlobCount:         5000,
 	MinCompressSize:      1024,
 	DatabaseLocation:     HomeDir + "/.gb.db",
 	PaddingMinBytes:      5021,

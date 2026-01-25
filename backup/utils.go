@@ -30,8 +30,6 @@ type Planned struct {
 
 	// if this is non-nil, then this is a staked size claim, and hash and confirmedSize MUST both be nil.
 	stakedClaim *int64
-
-	// if all three are nil, this is a dummy plan used to signal the bucketer that all its inputs are "done", so it should write whatever it has so far, even if it isn't big enough
 }
 
 type HashPlan struct {
@@ -71,8 +69,10 @@ var hashLateMapLock sync.Mutex
 var hasherCh = make(chan HashPlan)
 var bucketerCh = make(chan Planned)
 var uploaderCh = make(chan BlobPlan)
+var bucketerPassthrough = make(chan struct{})
 
-var wg sync.WaitGroup // files + threads
+var wg sync.WaitGroup       // files
+var hasherWg sync.WaitGroup // hasher goroutines only
 
 var stats = Stats{
 	currentlyUploading: make(map[string]*utils.HasherSizer),
@@ -89,7 +89,9 @@ func ResetForTesting() {
 	hasherCh = make(chan HashPlan)
 	bucketerCh = make(chan Planned)
 	uploaderCh = make(chan BlobPlan)
+	bucketerPassthrough = make(chan struct{})
 	wg = sync.WaitGroup{}
+	hasherWg = sync.WaitGroup{}
 	stats = Stats{
 		currentlyUploading: make(map[string]*utils.HasherSizer),
 	}

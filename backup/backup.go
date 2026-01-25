@@ -63,7 +63,7 @@ func backupImpl(rawPaths []string) {
 	inputs := statInputPaths(rawPaths)
 
 	for i := 0; i < config.Config().NumHasherThreads; i++ {
-		wg.Add(1)
+		hasherWg.Add(1)
 		go hasherThread()
 	}
 

@@ -12,7 +12,7 @@ import (
 )
 
 func hasherThread() {
-	defer wg.Done()
+	defer hasherWg.Done()
 	for hashPlan := range hasherCh {
 		hashOneFile(hashPlan)
 	}

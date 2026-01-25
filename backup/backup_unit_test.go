@@ -364,8 +364,8 @@ func TestBackupSameSizeDifferentContent(t *testing.T) {
 	env := setupUnitTestEnv(t)
 	defer env.cleanup()
 
-	content1 := []byte("first file with this exact size!")  // 32 bytes
-	content2 := []byte("other file with this exact size!")  // 32 bytes (same size, different content)
+	content1 := []byte("first file with this exact size!") // 32 bytes
+	content2 := []byte("other file with this exact size!") // 32 bytes (same size, different content)
 	file1Path := "/mock/file1.txt"
 	file2Path := "/mock/file2.txt"
 
@@ -448,8 +448,8 @@ func TestBackupHashLateMapRevival(t *testing.T) {
 	defer env.cleanup()
 
 	// All four files have the same size (30 bytes)
-	file0Content := []byte("different content, same size!!")   // 30 bytes, different hash
-	originalContent := []byte("original content before grow!!") // 30 bytes
+	file0Content := []byte("different content, same size!!")               // 30 bytes, different hash
+	originalContent := []byte("original content before grow!!")            // 30 bytes
 	appendedContent := []byte("original content before grow!!" + " GROWN") // 36 bytes
 
 	file0Path := "/mock/file0.txt"
@@ -578,7 +578,7 @@ func TestBackupHashAlreadyInDatabase(t *testing.T) {
 	// No more opens expected - hash is found in blob_entries, so no upload needed
 	env.completeBackup()
 
-	env.assertFileCount(2) // both files recorded
+	env.assertFileCount(2)   // both files recorded
 	env.assertBlobEntries(1) // still only one blob entry - deduplication across backups!
 	env.assertUploaded(file2Path, content)
 }
@@ -658,7 +658,7 @@ func TestBackupModifiedFileHashChanged(t *testing.T) {
 	// Both contents must be the same size so the second backup goes through hasher
 	// (if size differs, it would take the staked claim path since new size is unique)
 	originalContent := []byte("original file content!!!") // 24 bytes
-	modifiedContent := []byte("modified file content!!!")  // 24 bytes (same size, different content)
+	modifiedContent := []byte("modified file content!!!") // 24 bytes (same size, different content)
 	filePath := "/mock/file.txt"
 
 	// First backup: upload the file with original content
@@ -699,7 +699,7 @@ func TestBackupModifiedFileHashChanged(t *testing.T) {
 	env.completeBackup()
 
 	// Old version is ended, new version is current
-	env.assertFileCount(1) // only 1 current (end IS NULL)
+	env.assertFileCount(1)   // only 1 current (end IS NULL)
 	env.assertBlobEntries(2) // two different hashes
 	env.assertUploaded(filePath, modifiedContent)
 
@@ -951,7 +951,7 @@ func TestBackupPruneDeletedFiles(t *testing.T) {
 	env.completeBackup()
 
 	// file2 is still current, file1 is now ended
-	env.assertFileCount(1)          // only file2 is current
+	env.assertFileCount(1)           // only file2 is current
 	env.assertNonCurrentFileCount(1) // file1 is ended
 	env.assertBlobEntries(2)         // both blob entries still exist
 

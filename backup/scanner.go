@@ -65,26 +65,11 @@ func scannerThread(inputs []File) {
 	log.Println("Scanner committing")
 	ctx.Close() // do this before wg.Wait
 	log.Println("Scanner committed")
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case bucketerCh <- Planned{}: // unstick
-			case <-done: // but, bucketerCh has no buffer, so, we don't want to get stuck
-				return
-			}
-			select {
-			case <-done:
-				return
-			case <-ticker.C: // wait 1 second
-			}
-		}
-	}()
 	close(hasherCh)
+	hasherWg.Wait() // wait for all hasher goroutines to exit
+	log.Println("Hashers done, switching bucketer to passthrough mode")
+	bucketerPassthrough <- struct{}{}
 	wg.Wait()
-	done <- struct{}{}
 }
 
 func scanFile(file File, tx *sql.Tx) {

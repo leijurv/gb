@@ -28,20 +28,20 @@ func BackupDB() {
 	log.Println("Database closed")
 
 	loc := config.Config().DatabaseLocation
-	if _, err := fileOpener.Stat(loc + "-wal"); !os.IsNotExist(err) {
+	if _, err := os.Stat(loc + "-wal"); !os.IsNotExist(err) {
 		panic("closed the database but " + loc + "-wal still exists?! this can happen if you have the database open in another program like sqlite3 command line :)")
 	}
-	if _, err := fileOpener.Stat(loc + "-shm"); !os.IsNotExist(err) {
+	if _, err := os.Stat(loc + "-shm"); !os.IsNotExist(err) {
 		panic("closed the database but " + loc + "-shm still exists?!")
 	}
 
-	f, err := fileOpener.Open(loc)
+	f, err := os.Open(loc)
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
 
-	fname := "db-v2backup-" + strconv.FormatInt(now, 10)
+	fname := "db-v2backup-" + strconv.FormatInt(GetLastSessionTimestamp(), 10)
 	uploads := make([]storage_base.StorageUpload, 0)
 	writers := make([]io.Writer, 0)
 	for _, s := range storages {

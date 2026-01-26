@@ -14,8 +14,6 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-var now = time.Now().Unix() // all files whose contents are set during this backup are set to the same "now", explanation is in the spec
-
 type File struct {
 	path string
 	info os.FileInfo
@@ -42,12 +40,6 @@ type HashPlan struct {
 
 type BlobPlan []Planned
 
-type Stats struct {
-	inProgress         []*utils.HasherSizer
-	currentlyUploading map[string]*utils.HasherSizer
-	lock               sync.Mutex
-}
-
 // an abstraction over uploading to our storage destinations
 // stateful, End must be called after Begin (so, obviously, cannot be used from multiple threads)
 // can be reused sequentially, though
@@ -57,74 +49,118 @@ type UploadService interface {
 	Cancel()
 }
 
-// a map to manage gb's size optimization
-// (which is: if we see a file whose size is X, and we've never seen a file of that size before, we know it's going to be unique (and should be uploaded) without needing to calculate its hash)
-var sizeClaimMap = make(map[int64]*sync.Mutex)
-var sizeClaimMapLock sync.Mutex
+// BackupSession holds all state for a single backup operation.
+// This replaces the previous package-level global variables.
+type BackupSession struct {
+	// all files whose contents are set during this backup are set to the same "now"
+	now int64
 
-// a map to manage the behavior when multiple distinct files with the same hash are to be backed up
-var hashLateMap = make(map[[32]byte][]File)
-var hashLateMapLock sync.Mutex
+	// a map to manage gb's size optimization
+	// (which is: if we see a file whose size is X, and we've never seen a file of that size before,
+	// we know it's going to be unique (and should be uploaded) without needing to calculate its hash)
+	sizeClaimMap     map[int64]*sync.Mutex
+	sizeClaimMapLock sync.Mutex
 
-var hasherCh = make(chan HashPlan)
-var bucketerCh = make(chan Planned)
-var uploaderCh = make(chan BlobPlan)
-var bucketerPassthrough = make(chan struct{})
+	// a map to manage the behavior when multiple distinct files with the same hash are to be backed up
+	hashLateMap     map[[32]byte][]File
+	hashLateMapLock sync.Mutex
 
-var wg sync.WaitGroup       // files
-var hasherWg sync.WaitGroup // hasher goroutines only
+	// Pipeline channels
+	hasherCh            chan HashPlan
+	bucketerCh          chan Planned
+	uploaderCh          chan BlobPlan
+	bucketerPassthrough chan struct{}
 
-var stats = Stats{
-	currentlyUploading: make(map[string]*utils.HasherSizer),
+	// Synchronization
+	filesWg  sync.WaitGroup // files in the upload pipeline
+	hasherWg sync.WaitGroup // hasher goroutines only
+
+	// Stats for tracking upload progress
+	statsLock          sync.Mutex
+	statsInProgress    []*utils.HasherSizer
+	currentlyUploading map[string]*utils.HasherSizer
+
+	// Filesystem abstraction (injectable for tests)
+	Walker     Walker
+	FileOpener FileOpener
 }
 
-func ResetForTesting() {
-	newNow := time.Now().Unix()
-	if newNow <= now {
-		newNow = now + 1
+// lastSessionTime tracks the last timestamp used to ensure monotonically increasing timestamps.
+// This is necessary because the database has a constraint that end > start, and rapid
+// successive backups could otherwise get the same second-resolution timestamp.
+var lastSessionTime int64
+var lastSessionTimeLock sync.Mutex
+
+// NewBackupSession creates a new backup session with all state initialized.
+func NewBackupSession() *BackupSession {
+	lastSessionTimeLock.Lock()
+	now := time.Now().Unix()
+	if now <= lastSessionTime {
+		now = lastSessionTime + 1
 	}
-	now = newNow
-	sizeClaimMap = make(map[int64]*sync.Mutex)
-	hashLateMap = make(map[[32]byte][]File)
-	hasherCh = make(chan HashPlan)
-	bucketerCh = make(chan Planned)
-	uploaderCh = make(chan BlobPlan)
-	bucketerPassthrough = make(chan struct{})
-	wg = sync.WaitGroup{}
-	hasherWg = sync.WaitGroup{}
-	stats = Stats{
-		currentlyUploading: make(map[string]*utils.HasherSizer),
+	lastSessionTime = now
+	lastSessionTimeLock.Unlock()
+
+	return &BackupSession{
+		now:                 now,
+		sizeClaimMap:        make(map[int64]*sync.Mutex),
+		hashLateMap:         make(map[[32]byte][]File),
+		hasherCh:            make(chan HashPlan),
+		bucketerCh:          make(chan Planned),
+		uploaderCh:          make(chan BlobPlan),
+		bucketerPassthrough: make(chan struct{}),
+		currentlyUploading:  make(map[string]*utils.HasherSizer),
+		Walker:              defaultWalker{},
+		FileOpener:          osFileOpener{},
 	}
-	walker = defaultWalker{}
-	fileOpener = osFileOpener{}
 }
 
-func GetTestingTimestamp() int64 {
-	return now
+// NewBackupSessionWithTime creates a new backup session with a specific timestamp.
+// Used by tests to ensure monotonically increasing timestamps.
+func NewBackupSessionWithTime(now int64) *BackupSession {
+	s := NewBackupSession()
+	s.now = now
+	return s
 }
 
-func (s *Stats) Add(hs *utils.HasherSizer) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.inProgress = append(s.inProgress, hs)
+// GetTimestamp returns the backup session's timestamp.
+func (s *BackupSession) GetTimestamp() int64 {
+	return s.now
 }
 
-func (s *Stats) Total() int64 {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+// GetLastSessionTimestamp returns the timestamp used by the most recent BackupSession.
+// This is useful for tests that need to restore to the exact time a backup was made.
+func GetLastSessionTimestamp() int64 {
+	lastSessionTimeLock.Lock()
+	defer lastSessionTimeLock.Unlock()
+	if lastSessionTime == 0 {
+		panic("hasn't happened yet")
+	}
+	return lastSessionTime
+}
+
+func (s *BackupSession) addUploadStats(hs *utils.HasherSizer) {
+	s.statsLock.Lock()
+	defer s.statsLock.Unlock()
+	s.statsInProgress = append(s.statsInProgress, hs)
+}
+
+func (s *BackupSession) totalBytesWritten() int64 {
+	s.statsLock.Lock()
+	defer s.statsLock.Unlock()
 	var sum int64
-	for _, hs := range s.inProgress {
+	for _, hs := range s.statsInProgress {
 		sum += hs.Size()
 	}
 	return sum
 }
 
-func (s *Stats) CurrentlyUploading() []string {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *BackupSession) currentlyUploadingPaths() []string {
+	s.statsLock.Lock()
+	defer s.statsLock.Unlock()
 	keys := make([]string, 0, len(s.currentlyUploading))
 	for k, v := range s.currentlyUploading {
-		stat, err := fileOpener.Stat(k)
+		stat, err := s.FileOpener.Stat(k)
 		if err == nil {
 			sz := stat.Size()
 			progress := v.Size()
@@ -135,15 +171,15 @@ func (s *Stats) CurrentlyUploading() []string {
 	return keys
 }
 
-func (s *Stats) AddCurrentlyUploading(path string, sizer *utils.HasherSizer) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *BackupSession) addCurrentlyUploading(path string, sizer *utils.HasherSizer) {
+	s.statsLock.Lock()
+	defer s.statsLock.Unlock()
 	s.currentlyUploading[path] = sizer
 }
 
-func (s *Stats) FinishedUploading(path string) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *BackupSession) finishedUploading(path string) {
+	s.statsLock.Lock()
+	defer s.statsLock.Unlock()
 	delete(s.currentlyUploading, path)
 }
 
@@ -153,25 +189,25 @@ func (s *Stats) FinishedUploading(path string) {
 // if there happens to be more files of the exact same size, they will stay queued until the first one completes its upload
 // (and that upload also calculates its hash)
 // so only once the first upload is finished can gb properly decide if any further ones should be uploaded, by comparing hashes
-func stakeSizeClaim(size int64) bool {
-	sizeClaimMapLock.Lock()
-	defer sizeClaimMapLock.Unlock()
-	_, ok := sizeClaimMap[size]
+func (s *BackupSession) stakeSizeClaim(size int64) bool {
+	s.sizeClaimMapLock.Lock()
+	defer s.sizeClaimMapLock.Unlock()
+	_, ok := s.sizeClaimMap[size]
 	if ok {
 		return false
 	}
 	mut := &sync.Mutex{}
 	mut.Lock()
-	sizeClaimMap[size] = mut
+	s.sizeClaimMap[size] = mut
 	return true
 }
 
 // once the first file of this size is uploaded and its hash tabulated in the database, this unstakes its claim, and allows other files of the same size to proceed
-func releaseAndUnstakeSizeClaim(size int64) {
+func (s *BackupSession) releaseAndUnstakeSizeClaim(size int64) {
 	log.Println("UNSTAKING", size)
-	sizeClaimMapLock.Lock()
-	defer sizeClaimMapLock.Unlock()
-	lock, ok := sizeClaimMap[size]
+	s.sizeClaimMapLock.Lock()
+	defer s.sizeClaimMapLock.Unlock()
+	lock, ok := s.sizeClaimMap[size]
 	if !ok {
 		panic("i must have screwed up the concurrency :(")
 	}
@@ -179,10 +215,10 @@ func releaseAndUnstakeSizeClaim(size int64) {
 }
 
 // check if this size is staked, and, if so, fetch the mutex that we are to block on before proceeding
-func fetchContentionMutex(size int64) (*sync.Mutex, bool) {
-	sizeClaimMapLock.Lock()
-	defer sizeClaimMapLock.Unlock()
-	lock, ok := sizeClaimMap[size]
+func (s *BackupSession) fetchContentionMutex(size int64) (*sync.Mutex, bool) {
+	s.sizeClaimMapLock.Lock()
+	defer s.sizeClaimMapLock.Unlock()
+	lock, ok := s.sizeClaimMap[size]
 	return lock, ok
 }
 
@@ -196,8 +232,8 @@ func SamplePaddingLength(size int64) int64 {
 	return ret
 }
 
-func hashAFile(path string) ([]byte, int64, error) {
-	f, err := fileOpener.Open(path)
+func (s *BackupSession) hashAFile(path string) ([]byte, int64, error) {
+	f, err := s.FileOpener.Open(path)
 	if err != nil {
 		return nil, 0, err
 	}

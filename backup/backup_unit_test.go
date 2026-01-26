@@ -21,8 +21,10 @@ type testEnv struct {
 	mockWalker *mockWalker
 	mockFS     *mockFileOpener
 	mockStor   *storage_base.MockStorage
+	session    *BackupSession
 	t          *testing.T
 	done       chan struct{}
+	lastNow    int64 // track timestamp for monotonic increase between resets
 }
 
 func setupUnitTestEnv(t *testing.T) *testEnv {
@@ -45,20 +47,21 @@ func setupUnitTestEnv(t *testing.T) *testEnv {
 	storage.ClearCache()
 	storage.RegisterMockStorage(mockStor, "test-storage")
 
-	// Reset backup state and inject mocks
-	ResetForTesting()
-
+	// Create a new BackupSession with mocks injected
 	mockW := newMockWalker()
 	mockF := newMockFileOpener(t)
-	walker = mockW
-	fileOpener = mockF
+	session := NewBackupSession()
+	session.Walker = mockW
+	session.FileOpener = mockF
 
 	return &testEnv{
 		tmpDir:     tmpDir,
 		mockWalker: mockW,
 		mockFS:     mockF,
 		mockStor:   mockStor,
+		session:    session,
 		t:          t,
+		lastNow:    session.GetTimestamp(),
 	}
 }
 
@@ -70,11 +73,19 @@ func (e *testEnv) cleanup() {
 // reset prepares the environment for another backup run.
 // Call this between backups in tests that need multiple backup passes.
 func (e *testEnv) reset() {
-	ResetForTesting()
+	// Ensure monotonically increasing timestamp
+	newNow := time.Now().Unix()
+	if newNow <= e.lastNow {
+		newNow = e.lastNow + 1
+	}
+
+	// Create a fresh BackupSession with new mocks
 	e.mockWalker = newMockWalker()
 	e.mockFS = newMockFileOpener(e.t)
-	walker = e.mockWalker
-	fileOpener = e.mockFS
+	e.session = NewBackupSessionWithTime(newNow)
+	e.session.Walker = e.mockWalker
+	e.session.FileOpener = e.mockFS
+	e.lastNow = newNow
 }
 
 // beginBackupOnDir starts a backup on a fake directory and waits for the walker to be ready.
@@ -104,7 +115,7 @@ func (e *testEnv) beginBackupOnDir(dir string) {
 	e.done = make(chan struct{})
 	go func() {
 		defer close(e.done)
-		backupImpl([]string{backupPath})
+		e.session.Run([]string{backupPath})
 	}()
 
 	// Handle the stat call for the input path
@@ -256,7 +267,7 @@ func TestBackupSingleFileDirectly(t *testing.T) {
 	env.done = make(chan struct{})
 	go func() {
 		defer close(env.done)
-		backupImpl([]string{filePath})
+		env.session.Run([]string{filePath})
 	}()
 
 	// Handle the stat call for the single file

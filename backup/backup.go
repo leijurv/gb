@@ -15,7 +15,7 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func statInputPaths(rawPaths []string) []File {
+func (s *BackupSession) statInputPaths(rawPaths []string) []File {
 	files := make([]File, 0)
 	for _, path := range rawPaths {
 		log.Println("Going to back up this path:", path)
@@ -27,7 +27,7 @@ func statInputPaths(rawPaths []string) []File {
 		}
 		log.Println("Converted to absolute:", path)
 
-		stat, err := fileOpener.Stat(path)
+		stat, err := s.FileOpener.Stat(path)
 		if err != nil {
 			panic("Path doesn't exist?")
 		}
@@ -51,27 +51,30 @@ func statInputPaths(rawPaths []string) []File {
 
 func Backup(rawPaths []string) {
 	DBKey()
-	backupImpl(rawPaths)
+	s := NewBackupSession()
+	s.Run(rawPaths)
 }
 
 func BackupNonInteractive(rawPaths []string) {
 	DBKeyNonInteractive()
-	backupImpl(rawPaths)
+	s := NewBackupSession()
+	s.Run(rawPaths)
 }
 
-func backupImpl(rawPaths []string) {
-	inputs := statInputPaths(rawPaths)
+// Run executes the backup with the given paths using this session's state.
+func (s *BackupSession) Run(rawPaths []string) {
+	inputs := s.statInputPaths(rawPaths)
 
 	for i := 0; i < config.Config().NumHasherThreads; i++ {
-		hasherWg.Add(1)
-		go hasherThread()
+		s.hasherWg.Add(1)
+		go s.hasherThread()
 	}
 
-	go bucketerThread()
+	go s.bucketerThread()
 
 	storages := storage.GetAll()
 	for i := 0; i < config.Config().NumUploaderThreads; i++ {
-		go uploaderThread(BeginDirectUpload(storages))
+		go s.uploaderThread(BeginDirectUpload(storages))
 	}
 
 	done := make(chan struct{}, 1)
@@ -85,19 +88,19 @@ func backupImpl(rawPaths []string) {
 					return
 				case <-ticker.C:
 				}
-				uploading := stats.CurrentlyUploading()
+				uploading := s.currentlyUploadingPaths()
 				if len(uploading) > 0 {
 					log.Println("Currently uploading:", strings.Join(uploading, ","))
 				}
-				log.Println("Bytes written:", utils.FormatCommas(stats.Total()))
+				log.Println("Bytes written:", utils.FormatCommas(s.totalBytesWritten()))
 			}
 		}()
 	}
 
-	scannerThread(inputs)
-	wg.Wait()
+	s.scannerThread(inputs)
+	s.filesWg.Wait()
 	done <- struct{}{}
-	close(bucketerCh)
+	close(s.bucketerCh)
 	log.Println("Backup complete")
 }
 
@@ -142,7 +145,9 @@ func CompareFileToDb(path string, info os.FileInfo, tx *sql.Tx, debugPrint bool)
 }
 
 func DryBackup(rawPaths []string) {
-	inputs := statInputPaths(rawPaths)
+	// Create a temporary session just for path resolution
+	s := NewBackupSession()
+	inputs := s.statInputPaths(rawPaths)
 
 	// scanning
 	tx, err := db.DB.Begin()
@@ -164,7 +169,7 @@ func DryBackup(rawPaths []string) {
 		}
 	}
 	if len(allPathsToBackup) > 0 {
-		walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
+		s.Walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
 			comparison := CompareFileToDb(path, info, tx, false)
 			if comparison.Modified || comparison.New {
 				statuses = append(statuses, comparison)

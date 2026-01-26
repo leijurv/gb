@@ -84,14 +84,14 @@ func TestBackupAndRestoreSingleFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backup.ResetForTesting()
 	backup.BackupNonInteractive([]string{srcFile})
 
 	if err := os.Remove(srcFile); err != nil {
 		t.Fatal(err)
 	}
 
-	download.RestoreNonInteractive(srcFile, restoreFile, backup.GetTestingTimestamp(), mockStor)
+	// Use the backup session's timestamp for restore
+	download.RestoreNonInteractive(srcFile, restoreFile, backup.GetLastSessionTimestamp(), mockStor)
 
 	restoredContent, err := os.ReadFile(restoreFile)
 	if err != nil {
@@ -274,7 +274,6 @@ func (e *testEnv) removeRestored(relPath string) {
 }
 
 func (e *testEnv) backup() {
-	backup.ResetForTesting()
 	backup.BackupNonInteractive([]string{e.srcDir})
 
 	paranoia.DBParanoia()
@@ -284,7 +283,8 @@ func (e *testEnv) backup() {
 }
 
 func (e *testEnv) restore() {
-	download.RestoreNonInteractive(e.srcDir, e.restoreDir, backup.GetTestingTimestamp(), e.mockStor)
+	// Use the backup session's timestamp for restore
+	download.RestoreNonInteractive(e.srcDir, e.restoreDir, backup.GetLastSessionTimestamp(), e.mockStor)
 }
 
 func (e *testEnv) verifyRestored(relPath string, expectedHash [32]byte) {
@@ -415,7 +415,6 @@ func TestRestoreDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	backup.ResetForTesting()
 	backup.BackupNonInteractive([]string{srcDir})
 
 	// Get the db key and convert to mnemonic
@@ -438,7 +437,7 @@ func TestRestoreDB(t *testing.T) {
 	}
 
 	// Get the encrypted backup from MockStorage
-	backupFilename := "db-v2backup-" + strconv.FormatInt(backup.GetTestingTimestamp(), 10)
+	backupFilename := "db-v2backup-" + strconv.FormatInt(backup.GetLastSessionTimestamp(), 10)
 	_, size := mockStor.Metadata(backupFilename)
 	if size == 0 {
 		t.Fatal("backup not found in storage")

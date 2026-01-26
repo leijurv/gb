@@ -6,27 +6,27 @@ import (
 	"github.com/leijurv/gb/config"
 )
 
-func bucketerThread() {
+func (s *BackupSession) bucketerThread() {
 	var tmp BlobPlan
 	var tmpSize int64
 
 	for {
 		select {
-		case <-bucketerPassthrough:
+		case <-s.bucketerPassthrough:
 			// Scanner is done - flush remaining buffer and switch to passthrough mode
 			if len(tmp) > 0 {
 				log.Println("Passthrough mode: flushing remaining")
-				uploaderCh <- tmp
+				s.uploaderCh <- tmp
 				tmp = nil
 				tmpSize = 0
 			}
 			log.Println("Bucketer now in passthrough mode")
-			for plan := range bucketerCh {
+			for plan := range s.bucketerCh {
 				log.Println("Bucketer passthrough")
-				uploaderCh <- []Planned{plan}
+				s.uploaderCh <- []Planned{plan}
 			}
 			return
-		case plan, ok := <-bucketerCh:
+		case plan, ok := <-s.bucketerCh:
 			if !ok {
 				panic("unreachable?")
 			}
@@ -41,13 +41,13 @@ func bucketerThread() {
 
 			if sz >= config.Config().MinBlobSize {
 				log.Println("Dumping solo")
-				uploaderCh <- []Planned{plan}
+				s.uploaderCh <- []Planned{plan}
 			} else {
 				tmp = append(tmp, plan)
 				tmpSize += sz
 				if tmpSize >= config.Config().MinBlobSize || int64(len(tmp)) > config.Config().MinBlobCount {
 					log.Println("Dumping blob")
-					uploaderCh <- tmp
+					s.uploaderCh <- tmp
 					tmp = nil
 					tmpSize = 0
 				}

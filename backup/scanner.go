@@ -26,7 +26,7 @@ func getDirectoriesToScan(inputPath string, includePaths []string) []string {
 	}
 }
 
-func scannerThread(inputs []File) {
+func (s *BackupSession) scannerThread(inputs []File) {
 	var ctx ScannerTransactionContext
 	log.Println("Beginning scan now!")
 
@@ -45,34 +45,34 @@ func scannerThread(inputs []File) {
 			pathsToBackup := getDirectoriesToScan(input.path, config.Config().Includes)
 			allPathsToBackup = append(allPathsToBackup, pathsToBackup...)
 		} else {
-			scanFile(input, ctx.Tx())
+			s.scanFile(input, ctx.Tx())
 		}
 	}
 
 	// Walk all directories using the walker interface
 	if len(allPathsToBackup) > 0 {
-		walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
+		s.Walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
 			filesMap[path] = info
-			scanFile(File{path, info}, ctx.Tx())
+			s.scanFile(File{path, info}, ctx.Tx())
 		})
 
 		// Prune deleted files after walking is complete
 		for _, path := range allPathsToBackup {
-			pruneDeletedFiles(path, filesMap)
+			s.pruneDeletedFiles(path, filesMap)
 		}
 	}
 
 	log.Println("Scanner committing")
 	ctx.Close() // do this before wg.Wait
 	log.Println("Scanner committed")
-	close(hasherCh)
-	hasherWg.Wait() // wait for all hasher goroutines to exit
+	close(s.hasherCh)
+	s.hasherWg.Wait() // wait for all hasher goroutines to exit
 	log.Println("Hashers done, switching bucketer to passthrough mode")
-	bucketerPassthrough <- struct{}{}
-	wg.Wait()
+	s.bucketerPassthrough <- struct{}{}
+	s.filesWg.Wait()
 }
 
-func scanFile(file File, tx *sql.Tx) {
+func (s *BackupSession) scanFile(file File, tx *sql.Tx) {
 	status := CompareFileToDb(file.path, file.info, tx, true)
 	if !status.Modified && !status.New {
 		return
@@ -87,11 +87,11 @@ func scanFile(file File, tx *sql.Tx) {
 			panic(err) // unexpected error, maybe sql syntax error?
 		}
 		// ErrNoRows = no existing files of this size stored in the db! we can do the bypass!
-		if stakeSizeClaim(size) { // no files of this size in the database yet... but check if there is already one in progress Right Now?
+		if s.stakeSizeClaim(size) { // no files of this size in the database yet... but check if there is already one in progress Right Now?
 			// UwU we CAN do the bypass YAY
 			log.Println("Staked size claim", size, "skipping hasher directly to bucketer epic style", file.path)
-			wg.Add(1)
-			bucketerCh <- Planned{file, nil, nil, &size}
+			s.filesWg.Add(1)
+			s.bucketerCh <- Planned{file, nil, nil, &size}
 			log.Println("wrote", file.path)
 			return
 		}
@@ -99,11 +99,11 @@ func scanFile(file File, tx *sql.Tx) {
 	// no bypass :(
 	// we know of a file with the exact same size (either in db, or currently being uploaded)
 	// so we do actually need to check the hash of this file to determine if it's unique or not
-	hasherCh <- HashPlan{file, status.Hash}
+	s.hasherCh <- HashPlan{file, status.Hash}
 }
 
 // find files in the database for this path, that no longer exist on disk (i.e. they're DELETED LOL)
-func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
+func (s *BackupSession) pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 	// we cannot upgrade the long lived RO transaction to a RW transaction, it would conflict with the intermediary RW transactions, it seems
 	// reusing the tx from scanner results in a sqlite busy panic, very consistently
 	tx, err := db.DB.Begin()
@@ -128,7 +128,7 @@ func pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
 		}
 		if _, ok := filesMap[databasePath]; !ok {
 			log.Println(databasePath, "used to exist but does not any longer. Marking as ended.")
-			_, err = tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", now, databasePath)
+			_, err = tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", s.now, databasePath)
 			if err != nil {
 				panic(err)
 			}

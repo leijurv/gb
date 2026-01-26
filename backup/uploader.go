@@ -16,19 +16,19 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func uploaderThread(service UploadService) {
-	for plan := range uploaderCh {
-		executeBlobUploadPlan(plan, service)
+func (s *BackupSession) uploaderThread(service UploadService) {
+	for plan := range s.uploaderCh {
+		s.executeBlobUploadPlan(plan, service)
 	}
 }
 
-func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
+func (s *BackupSession) executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	log.Println("Executing upload plan", plan)
 	for _, f := range plan {
-		defer wg.Done() // there's a wg.Add(1) for each and every entry in the plan
+		defer s.filesWg.Done() // there's a wg.Add(1) for each and every entry in the plan
 		if f.stakedClaim != nil {
 			sz := *f.stakedClaim
-			defer releaseAndUnstakeSizeClaim(sz)
+			defer s.releaseAndUnstakeSizeClaim(sz)
 			// NO MATTER HOW this function exits, the claim is over
 			// whether it's successful upload, IO error, or size mismatch
 		}
@@ -50,7 +50,7 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	postEncInfo := utils.NewSHA256HasherSizer()
 	postEncOut := io.MultiWriter(rawServOut, &postEncInfo)
 
-	stats.Add(&postEncInfo)
+	s.addUploadStats(&postEncInfo)
 
 	type blobEntry struct {
 		originalPlan        Planned
@@ -68,21 +68,21 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		startOffset := postEncInfo.Size()
 		verify := utils.NewSHA256HasherSizer()
 
-		f, err := fileOpener.Open(planned.path)
+		f, err := s.FileOpener.Open(planned.path)
 		if err != nil {
 			log.Println("I can no longer read from it to back it up???", err, planned.path)
 			// call this here since we will NOT be adding an entry to entries, so it won't be called later on lol
 			func() {
-				hashLateMapLock.Lock()
-				defer hashLateMapLock.Unlock()
-				uploadFailure(planned)
+				s.hashLateMapLock.Lock()
+				defer s.hashLateMapLock.Unlock()
+				s.uploadFailure(planned)
 			}()
 			continue
 		}
-		stats.AddCurrentlyUploading(planned.path, &verify)
+		s.addCurrentlyUploading(planned.path, &verify)
 		encryptedOut, key := crypto.EncryptBlob(postEncOut, startOffset)
 		compAlg := compression.Compress(compression.SelectCompressionForPath(planned.path), encryptedOut, io.TeeReader(f, &verify), &verify)
-		stats.FinishedUploading(planned.path)
+		s.finishedUploading(planned.path)
 		f.Close()
 		realHash, realSize := verify.HashAndSize()
 		if len(planned.hash) > 0 && !bytes.Equal(realHash, planned.hash) {
@@ -121,8 +121,8 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	completeds := serv.End(hashPostEnc, totalSize)
 	log.Println("All bytes flushed")
 
-	hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
-	defer hashLateMapLock.Unlock()
+	s.hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
+	defer s.hashLateMapLock.Unlock()
 	tx, err := db.DB.Begin()
 	if err != nil {
 		panic(err)
@@ -154,25 +154,25 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 		}
 		if bytes.Equal(entry.originalPlan.hash, entry.hash) {
 			// fetch ALL the files that hashed to this hash
-			files := hashLateMap[utils.SliceToArr(entry.hash)]
+			files := s.hashLateMap[utils.SliceToArr(entry.hash)]
 			// time to add ALL of them to the files table, now that this hash is backed up :D
 			if files[0] != entry.originalPlan.File {
 				panic("something is profoundly broken")
 			}
 			for _, file := range files {
-				fileHasKnownData(tx, file.path, file.info, entry.hash)
+				s.fileHasKnownData(tx, file.path, file.info, entry.hash)
 			}
-			delete(hashLateMap, utils.SliceToArr(entry.hash))
+			delete(s.hashLateMap, utils.SliceToArr(entry.hash))
 		} else {
 			// a dummy stupid file changed from underneath us, now we need to clean up that mess :(
 			// it is possible that other files were relying on this thread to complete the upload for this hash
 			// but we let them down :(
 			// the file we uploaded was not of the hash we wanted
-			uploadFailure(entry.originalPlan)
+			s.uploadFailure(entry.originalPlan)
 
 			// even if the contents of the file were not as expected, they are still the contents of the file, and we should still back up this file since we just uploaded it and it is a file lol
 			// note: even though the file has demonstrably changed since our original os.Stat, we should NOT stat it again (to get an updated permissions / last modified time). reason: if we stat-then-hash, the last modified time will be less than or equal to the "correct" time for that hash. other way around, not so much. we don't want to end up in a scenario where the next time we scan this directory, we don't rehash this file because we incorrectly stored a last modified time that's potentially newer than the data we actually read and backed up!
-			fileHasKnownData(tx, entry.originalPlan.path, entry.originalPlan.info, entry.hash)
+			s.fileHasKnownData(tx, entry.originalPlan.path, entry.originalPlan.info, entry.hash)
 		}
 		// and either way, make a note of what hash is stored in this blob at this location
 		_, err = tx.Exec("INSERT INTO blob_entries (hash, blob_id, encryption_key, final_size, offset, compression_alg) VALUES (?, ?, ?, ?, ?, ?)", entry.hash, blobID, entry.key, entry.postCompressionSize, entry.offset, entry.compression)
@@ -190,9 +190,9 @@ func executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	log.Println("Committed uploaded blob")
 }
 
-func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
+func (s *BackupSession) fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
 	// important to use the same "now" for both of these queries, so that the file's history is presented without "gaps" (that could be present if we called time.Now() twice in a row)
-	_, err := tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", now, path)
+	_, err := tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", s.now, path)
 	if err != nil {
 		panic(err)
 	}
@@ -200,14 +200,14 @@ func fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
 	if modTime < 0 {
 		panic(fmt.Sprintf("Invalid modification time for %s: %d", path, modTime))
 	}
-	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, now, modTime, info.Mode()&os.ModePerm)
+	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, s.now, modTime, info.Mode()&os.ModePerm)
 	if err != nil {
 		panic(err)
 	}
 }
 
 // this function should be called if the uploader thread was intended to upload a backup of a certain hash, but failed to do so, for any reason
-func uploadFailure(planned Planned) {
+func (s *BackupSession) uploadFailure(planned Planned) {
 	plannedHash := planned.hash
 	// NOTE: this can be called on file open error on a staked size claim plan, without a confirmed hash size
 	// therefore, we cannot assume that we even HAVE an expected hash lmao
@@ -215,21 +215,21 @@ func uploadFailure(planned Planned) {
 		return
 	}
 	expected := utils.SliceToArr(plannedHash)
-	late := hashLateMap[expected]
+	late := s.hashLateMap[expected]
 	if late[0] != planned.File {
 		panic("somehow something isn't being synchronized :(")
 	}
 	late = late[1:] // we failed :(
 	if len(late) > 0 {
-		hashLateMap[expected] = late
+		s.hashLateMap[expected] = late
 		// confirmed, another file was relying on this
 		newSource := late[0] // enqueue THAT file to be uploaded
-		wg.Add(1)
+		s.filesWg.Add(1)
 		go func() {
 			// obviously, only write ONE of the other files we know to have this hash, not all
-			bucketerCh <- Planned{newSource, plannedHash, planned.confirmedSize, nil}
+			s.bucketerCh <- Planned{newSource, plannedHash, planned.confirmedSize, nil}
 		}() // we will upload the next file on the list with the same hash so they don't get left stranded (hashed, planned, but not actually uploaded)
 	} else {
-		delete(hashLateMap, expected) // important! otherwise the ok / len(late) > 0 check would panic lmao
+		delete(s.hashLateMap, expected) // important! otherwise the ok / len(late) > 0 check would panic lmao
 	}
 }

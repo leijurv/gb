@@ -41,7 +41,5 @@ func (defaultWalker) Walk(roots []string, callback func(path string, info os.Fil
 	return nil
 }
 
-// Global instances - will be replaced by mocks in tests.
-// These will be moved into a BackupSession struct in step 3.
-var walker Walker = defaultWalker{}
-var fileOpener FileOpener = osFileOpener{}
+// Default implementations are used in BackupSession.
+// Tests can inject mock implementations via the BackupSession fields.

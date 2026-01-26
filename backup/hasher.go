@@ -11,22 +11,22 @@ import (
 	"github.com/leijurv/gb/utils"
 )
 
-func hasherThread() {
-	defer hasherWg.Done()
-	for hashPlan := range hasherCh {
-		hashOneFile(hashPlan)
+func (s *BackupSession) hasherThread() {
+	defer s.hasherWg.Done()
+	for hashPlan := range s.hasherCh {
+		s.hashOneFile(hashPlan)
 	}
 	log.Println("Hasher thread exiting")
 }
 
-func hashOneFile(plan HashPlan) {
+func (s *BackupSession) hashOneFile(plan HashPlan) {
 	path := plan.path
 	info := plan.info
 	expectedHash := plan.expectedHash
 	// now, it's time to hash the file to see if it needs to be backed up or if we've already got it
 	log.Println("Beginning read for sha256 calc:", path)
 
-	hash, size, err := hashAFile(path)
+	hash, size, err := s.hashAFile(path)
 	if err != nil {
 		if config.Config().SkipHashFailures {
 			log.Println("Skipping", path, "due to", err, "(maybe it was deleted?) because skip_hash_failures is true")
@@ -61,8 +61,8 @@ func hashOneFile(plan HashPlan) {
 	}
 
 	bucketWithKnownHash := func() *Planned {
-		hashLateMapLock.Lock() // this lock ensures atomicity between the hashLateMap, and the database (blob_entries and files)
-		defer hashLateMapLock.Unlock()
+		s.hashLateMapLock.Lock() // this lock ensures atomicity between the hashLateMap, and the database (blob_entries and files)
+		defer s.hashLateMapLock.Unlock()
 		tx, err := db.DB.Begin()
 		if err != nil {
 			panic(err)
@@ -72,7 +72,7 @@ func hashOneFile(plan HashPlan) {
 		err = tx.QueryRow("SELECT hash FROM blob_entries WHERE hash = ?", hash).Scan(&dbHash)
 		if err == nil {
 			// yeah so we already have this hash backed up, so the train stops here. we just need to add this to files table, and we're done!
-			fileHasKnownData(tx, path, info, hash)
+			s.fileHasKnownData(tx, path, info, hash)
 			if err := tx.Commit(); err != nil {
 				panic(err)
 			}
@@ -82,7 +82,7 @@ func hashOneFile(plan HashPlan) {
 			panic(err) // unexpected error, maybe sql syntax error?
 		}
 		hashArr := utils.SliceToArr(hash)
-		late, ok := hashLateMap[hashArr]
+		late, ok := s.hashLateMap[hashArr]
 		if ok {
 			if late == nil || len(late) == 0 {
 				panic("i am dummy and didnt lock properly somewhere")
@@ -90,11 +90,11 @@ func hashOneFile(plan HashPlan) {
 			// another thread is *currently* uploading a file that is confirmed to have *this same hash*
 			// let's just let them do that
 			// but let em know that once they're done they should put OUR file into files too
-			hashLateMap[hashArr] = append(late, plan.File)
+			s.hashLateMap[hashArr] = append(late, plan.File)
 			return nil
 		}
 		// wow! we are the FIRST! how exciting! how exciting!
-		hashLateMap[hashArr] = []File{plan.File}
+		s.hashLateMap[hashArr] = []File{plan.File}
 		// even though we want to, we **cannot** write to bucketerCh here, since we're still holding hashLateMapLock and that would cause deadlock
 		// so we return and let the caller do it it lmao!
 		return &Planned{plan.File, hash, &size, nil}
@@ -104,21 +104,21 @@ func hashOneFile(plan HashPlan) {
 	nextStepWrapper := func() {
 		plan := bucketWithKnownHash()
 		if plan != nil {
-			bucketerCh <- *plan
+			s.bucketerCh <- *plan
 		} else {
 			// waitgroup should only be incremented for a real write to bucketerCh
 			// so decrement if we aren't actually going to do that now
-			wg.Done()
+			s.filesWg.Done()
 		}
 	}
 
 	// given that this can start a new goroutine and block on a size claim, we should add to the in progress wait group now, so that we don't forget about it
 	// > this wouldn't be necessary if we always blockingly wrote to bucketerCh (i.e. called nextStepWrapper directly, not through a new goroutine)
 	// >> reason being that wg can only be completed once all hasher threads exit, which couldn't happen if one of said threads was blocking on a channel write
-	wg.Add(1)
+	s.filesWg.Add(1)
 	// we also can't do this only in the case where there is a preexisting size claim in contention, because it's entirely possible (downright likely, even) that the staked size claim may have actually been the same hash as this file, resulting in us not actually needing to write anything to bucketerCh.
 
-	lock, ok := fetchContentionMutex(size)
+	lock, ok := s.fetchContentionMutex(size)
 	if ok {
 		go func() {
 			lock.Lock()   // this will block for a LONG time – until unstakeClaim is called, which is once the file upload in the other thread is complete

@@ -33,6 +33,9 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND rowid != (SELECT rowid FROM blob_entries WHERE final_size = 0 LIMIT 1)",
 	// ensure we only have one zero-byte sizes entry
 	"SELECT hash FROM sizes WHERE size = 0 AND rowid != (SELECT rowid FROM sizes WHERE size = 0 LIMIT 1)",
+	// zero byte entries should have expected hash
+	"SELECT hash FROM sizes WHERE size = 0 AND hash != X'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'",
+	"SELECT blob_id FROM blob_entries WHERE final_size = 0 AND hash != X'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'",
 
 	// make sure that there are no two blob_entries at the same blob_id and offset, EXCEPT for the one entry that's allowed to be zero-byte
 	`
@@ -93,6 +96,8 @@ var queriesThatShouldHaveNoRows = []string{
 	"SELECT hash FROM files WHERE start > strftime('%s', 'now') + 60",
 	"SELECT hash FROM files WHERE end > strftime('%s', 'now') + 60",
 	"SELECT blob_id FROM blob_storage WHERE timestamp > strftime('%s', 'now') + 60",
+	"SELECT password FROM shares WHERE shared_at > strftime('%s','now') + 60",
+	"SELECT password FROM shares WHERE revoked_at > strftime('%s','now') + 60",
 
 	// prior to the gb epoch (first commit)
 	"SELECT hash FROM files WHERE start < 1572924988",
@@ -165,6 +170,9 @@ var queriesThatShouldHaveNoRows = []string{
 	// checksum is de facto required
 	"SELECT blob_id FROM blob_storage WHERE checksum IS NULL",
 
+	// path ends with hex blob id (except for gdrive, where it's an opaque ID)
+	"SELECT blob_id FROM blob_storage INNER JOIN storage USING (storage_id) WHERE (LENGTH(path) < 64 OR LOWER(SUBSTR(path, -64)) != LOWER(HEX(blob_id))) AND type != 'GDrive'",
+
 	// if the same blob has been uploaded to two storages of the same type (such as S3), make sure that the path and checksum matches
 	// this is a good sanity check after doing a `gb replicate`!
 	`
@@ -221,6 +229,12 @@ var queriesThatShouldHaveNoRows = []string{
 
 	// older blobs with 1 encryption key should not be shared
 	"SELECT blob_id FROM blob_entries WHERE blob_id IN (SELECT blob_id FROM share_entries) GROUP BY blob_id HAVING COUNT(DISTINCT encryption_key) = 1 AND COUNT(*) > 1",
+
+	// ensure ordinals are contiguous
+	"SELECT password FROM share_entries GROUP BY password HAVING MIN(ordinal) != 0 OR MAX(ordinal) != COUNT(*) - 1",
+
+	// all shares have an entry
+	"SELECT password FROM shares LEFT OUTER JOIN share_entries USING (password) GROUP BY password HAVING COUNT(share_entries.rowid) = 0",
 
 	// these next two could totally be rewritten as one query with a WHERE giant_condition_1 OR giant_condition_2
 	// but it's super slow since it can't efficiently use indexes then

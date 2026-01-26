@@ -40,6 +40,15 @@ type HashPlan struct {
 
 type BlobPlan []Planned
 
+// sizeClaim tracks a staked size claim and any callbacks waiting for it to be released.
+// This ensures FIFO ordering: callbacks registered before release are invoked in order,
+// and callbacks registered after release will execute synchronously.
+type sizeClaim struct {
+	callbacks []func()
+	released  bool
+	mu        sync.Mutex // protects callbacks and released
+}
+
 // an abstraction over uploading to our storage destinations
 // stateful, End must be called after Begin (so, obviously, cannot be used from multiple threads)
 // can be reused sequentially, though
@@ -58,7 +67,7 @@ type BackupSession struct {
 	// a map to manage gb's size optimization
 	// (which is: if we see a file whose size is X, and we've never seen a file of that size before,
 	// we know it's going to be unique (and should be uploaded) without needing to calculate its hash)
-	sizeClaimMap     map[int64]*sync.Mutex
+	sizeClaimMap     map[int64]*sizeClaim
 	sizeClaimMapLock sync.Mutex
 
 	// a map to manage the behavior when multiple distinct files with the same hash are to be backed up
@@ -103,7 +112,7 @@ func NewBackupSession() *BackupSession {
 
 	return &BackupSession{
 		now:                 now,
-		sizeClaimMap:        make(map[int64]*sync.Mutex),
+		sizeClaimMap:        make(map[int64]*sizeClaim),
 		hashLateMap:         make(map[[32]byte][]File),
 		hasherCh:            make(chan HashPlan),
 		bucketerCh:          make(chan Planned),
@@ -196,9 +205,7 @@ func (s *BackupSession) stakeSizeClaim(size int64) bool {
 	if ok {
 		return false
 	}
-	mut := &sync.Mutex{}
-	mut.Lock()
-	s.sizeClaimMap[size] = mut
+	s.sizeClaimMap[size] = &sizeClaim{}
 	return true
 }
 
@@ -206,20 +213,49 @@ func (s *BackupSession) stakeSizeClaim(size int64) bool {
 func (s *BackupSession) releaseAndUnstakeSizeClaim(size int64) {
 	log.Println("UNSTAKING", size)
 	s.sizeClaimMapLock.Lock()
-	defer s.sizeClaimMapLock.Unlock()
-	lock, ok := s.sizeClaimMap[size]
+	claim, ok := s.sizeClaimMap[size]
 	if !ok {
 		panic("i must have screwed up the concurrency :(")
 	}
-	lock.Unlock()
+	s.sizeClaimMapLock.Unlock()
+	// any call to registerSizeClaimCallback around here will successfully register a callback - works fine
+	claim.mu.Lock() // will be released in the goroutine below
+	if claim.released {
+		panic("sanity")
+	}
+	claim.released = true
+	callbacks := claim.callbacks
+	claim.callbacks = nil
+	go func() {
+		// any call to registerSizeClaimCallback around here will block on claim.mu.Lock - works fine
+		for _, cb := range callbacks {
+			cb() // note that this callback could block for a little while; it writes to bucketerCh which has backpressure from the uploaderCh
+		}
+		claim.mu.Unlock()
+	}()
 }
 
-// check if this size is staked, and, if so, fetch the mutex that we are to block on before proceeding
-func (s *BackupSession) fetchContentionMutex(size int64) (*sync.Mutex, bool) {
+// registerSizeClaimCallback registers a callback to be invoked when the size claim is released.
+// If already released, invokes callback immediately (after any earlier callbacks finish).
+// This ensures FIFO ordering for all callbacks on a given size claim IF they are registered while waiting for the original staked upload to finish.
+func (s *BackupSession) registerSizeClaimCallback(size int64, callback func()) {
 	s.sizeClaimMapLock.Lock()
-	defer s.sizeClaimMapLock.Unlock()
-	lock, ok := s.sizeClaimMap[size]
-	return lock, ok
+	claim, ok := s.sizeClaimMap[size]
+	s.sizeClaimMapLock.Unlock()
+	if !ok {
+		// This size is not claimed at all - means that a previous backup session uploaded a file of this size, so the current backup session was unable to bypass hashing
+		callback()
+		return
+	}
+	claim.mu.Lock()
+	// It is possible for hashers to race here (whether the claim is released or not) and hit claim.mu.Lock nondeterminism ^ but this is fine, since it can only happen if the hashers were racing to complete in the first place (already nondeterministic)
+	if claim.released {
+		claim.mu.Unlock()
+		callback() // callback outside the lock
+		return
+	}
+	claim.callbacks = append(claim.callbacks, callback)
+	claim.mu.Unlock() // lock protects claim.callbacks
 }
 
 func SamplePaddingLength(size int64) int64 {

@@ -86,6 +86,8 @@ func (s *BackupSession) scanFile(file File, tx *sql.Tx) {
 		if err != db.ErrNoRows {
 			panic(err) // unexpected error, maybe sql syntax error?
 		}
+		// this SQL runs in the scanner tx, which may or may not be updated with what the uploader is doing - to avoid this causing problems, size claims are kept indefinitely within the BackupSession.
+		// in other words, we don't clear the claim once the file is done uploading, because 1. the scanner uses a long running transaction that won't immediately see the uploader commit 2. there is no lock in this critical section between the SQL check ^ and this v sizeClaimMap check
 		// ErrNoRows = no existing files of this size stored in the db! we can do the bypass!
 		if s.stakeSizeClaim(size) { // no files of this size in the database yet... but check if there is already one in progress Right Now?
 			// UwU we CAN do the bypass YAY

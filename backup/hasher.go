@@ -112,20 +112,14 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 		}
 	}
 
-	// given that this can start a new goroutine and block on a size claim, we should add to the in progress wait group now, so that we don't forget about it
-	// > this wouldn't be necessary if we always blockingly wrote to bucketerCh (i.e. called nextStepWrapper directly, not through a new goroutine)
-	// >> reason being that wg can only be completed once all hasher threads exit, which couldn't happen if one of said threads was blocking on a channel write
+	// Add to wait group now since the callback may be invoked later (after size claim is released).
+	// We also can't do this only in the case where there is a preexisting size claim in contention,
+	// because it's entirely possible (downright likely, even) that the staked size claim may have
+	// actually been the same hash as this file, resulting in us not actually needing to write
+	// anything to bucketerCh.
 	s.filesWg.Add(1)
-	// we also can't do this only in the case where there is a preexisting size claim in contention, because it's entirely possible (downright likely, even) that the staked size claim may have actually been the same hash as this file, resulting in us not actually needing to write anything to bucketerCh.
 
-	lock, ok := s.fetchContentionMutex(size)
-	if ok {
-		go func() {
-			lock.Lock()   // this will block for a LONG time – until unstakeClaim is called, which is once the file upload in the other thread is complete
-			lock.Unlock() // we aren't staking a claim since that's no longer sensical (the file of that length is already uploaded), so instantly unlock once we've confirmed the first claim is over
-			nextStepWrapper()
-		}()
-	} else {
-		nextStepWrapper()
-	}
+	// Register callback to be invoked when the size claim is released (or immediately if no claim).
+	// This ensures FIFO ordering - callbacks are invoked in the order they were registered.
+	s.registerSizeClaimCallback(size, nextStepWrapper)
 }

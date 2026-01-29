@@ -1,8 +1,10 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -911,6 +913,147 @@ func TestBackupUnmodifiedFilesSkipped(t *testing.T) {
 	// Still only 1 file, 1 blob entry - nothing changed
 	env.assertFileCount(1)
 	env.assertBlobEntries(1)
+}
+
+// Test that the hasher cannot race arbitrarily far ahead of the bucketer/uploader.
+// This prevents OOM when backing up directories with millions of files.
+// With sync callback(), blocked bucketer → blocked hasher → blocked sendFile.
+// With async go callback(), hasher spawns goroutines and returns immediately.
+func TestBackupBackpressure(t *testing.T) {
+	env := setupUnitTestEnv(t)
+	defer env.cleanup()
+
+	// All files >= MinBlobSize to bypass bucketer batching.
+	seedContent := make([]byte, 1500)
+	file1Content := make([]byte, 1500)
+	file2Content := make([]byte, 1500)
+	blocker1Content := make([]byte, 1502)
+	blocker2Content := make([]byte, 1503)
+	for i := range seedContent {
+		seedContent[i] = byte(i % 256)
+		file1Content[i] = byte((i + 50) % 256)
+		file2Content[i] = byte((i + 100) % 256)
+	}
+	for i := range blocker1Content {
+		blocker1Content[i] = byte(i % 256)
+	}
+	for i := range blocker2Content {
+		blocker2Content[i] = byte((i + 1) % 256)
+	}
+
+	// First backup: establish size 1500 in the database
+	env.beginBackupOnDir("/mock1/")
+	env.sendFile("/mock1/seed.bin", seedContent)
+	env.endWalk()
+	env.shouldOpen("/mock1/seed.bin", seedContent)
+	env.completeBackup()
+	env.reset()
+
+	// Second backup: create scenario where bucketer is blocked on uploaderCh
+	env.beginBackupOnDir("/mock2/")
+
+	// blocker1 occupies the uploader (blocked in Open)
+	env.sendFile("/mock2/blocker1.bin", blocker1Content)
+	blocker1OpenCall := <-env.mockFS.openCalls
+	if blocker1OpenCall.path != "/mock2/blocker1.bin" {
+		t.Fatalf("expected open for blocker1, got %s", blocker1OpenCall.path)
+	}
+
+	// blocker2 causes bucketer to block on uploaderCh (uploader busy)
+	env.sendFile("/mock2/blocker2.bin", blocker2Content)
+
+	// file1 goes to hasher (size 1500 exists in DB), callback will try bucketerCh
+	env.sendFile("/mock2/file1.bin", file1Content)
+	env.shouldOpen("/mock2/file1.bin", file1Content)
+
+	// file2 in goroutine to detect blocking
+	file2Done := make(chan struct{})
+	go func() {
+		env.sendFile("/mock2/file2.bin", file2Content)
+		close(file2Done)
+	}()
+
+	select {
+	case <-file2Done:
+		t.Error("backpressure not working: file2 sendFile completed immediately")
+	case <-time.After(200 * time.Millisecond):
+		// blocked as expected
+	}
+
+	// Cleanup: unblock everything
+	blocker1OpenCall.response <- openResponse{reader: io.NopCloser(bytes.NewReader(blocker1Content))}
+	env.shouldOpen("/mock2/blocker2.bin", blocker2Content)
+	<-file2Done
+	env.shouldOpen("/mock2/file2.bin", file2Content)
+	env.endWalk()
+
+	// Drain file1 and file2 upload opens
+	for i := 0; i < 2; i++ {
+		call := <-env.mockFS.openCalls
+		var content []byte
+		if call.path == "/mock2/file1.bin" {
+			content = file1Content
+		} else {
+			content = file2Content
+		}
+		call.response <- openResponse{reader: io.NopCloser(bytes.NewReader(content))}
+	}
+	env.completeBackup()
+}
+
+// Test that size claims don't block the hasher - callbacks are appended, not waited on.
+// This prevents a deadlock where hasher waits on a claim that can't release because
+// it's stuck in the bucketer waiting for more files to reach min blob size.
+func TestBackupSizeClaimsDontBlockHasher(t *testing.T) {
+	env := setupUnitTestEnv(t)
+	defer env.cleanup()
+
+	const numFiles = 20
+	contents := make([][]byte, numFiles)
+	for i := range contents {
+		contents[i] = make([]byte, 1500) // >= MinBlobSize, same size for all
+		for j := range contents[i] {
+			contents[i][j] = byte((i + j) % 256) // different content per file
+		}
+	}
+
+	env.beginBackupOnDir("/mock/")
+
+	// file0 stakes claim, goes to bucketer, immediately to uploader (large file)
+	env.sendFile("/mock/file00.bin", contents[0])
+
+	// Hold uploader's Open - don't respond, keeping claim unreleased
+	file0OpenCall := <-env.mockFS.openCalls
+	if file0OpenCall.path != "/mock/file00.bin" {
+		t.Fatalf("expected open for file00, got %s", file0OpenCall.path)
+	}
+
+	// Send remaining 19 files - all same size, so they go to hasher
+	// Each registers a callback on file0's claim and returns (doesn't block)
+	for i := 1; i < numFiles; i++ {
+		path := fmt.Sprintf("/mock/file%02d.bin", i)
+		env.sendFile(path, contents[i])
+		env.shouldOpen(path, contents[i]) // hasher opens for hashing
+	}
+	// If callbacks blocked, we'd timeout waiting for shouldOpen above
+
+	env.endWalk()
+
+	// Now unblock uploader
+	file0OpenCall.response <- openResponse{reader: io.NopCloser(bytes.NewReader(contents[0]))}
+
+	// Drain remaining opens (file0 completes, then callbacks fire, triggering uploads)
+	for {
+		select {
+		case call := <-env.mockFS.openCalls:
+			// Find matching content by parsing file number from path
+			var fileNum int
+			fmt.Sscanf(call.path, "/mock/file%02d.bin", &fileNum)
+			call.response <- openResponse{reader: io.NopCloser(bytes.NewReader(contents[fileNum]))}
+		case <-env.done:
+			return
+		}
+	}
 }
 
 // Test that deleted files are marked as ended by pruneDeletedFiles.

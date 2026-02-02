@@ -124,6 +124,10 @@ test.describe('Hash mode file share', () => {
     }));
     expect(dimensions.naturalWidth).toBe(123);
     expect(dimensions.naturalHeight).toBe(456);
+
+    // Verify download button is still enabled after media loads
+    // (regression test: without &media=true, progress messages would disable it)
+    await expect(page.locator('#download')).toBeEnabled();
   });
 
   test('shows error and does not display content when SHA256 hash is wrong', async ({ page }) => {

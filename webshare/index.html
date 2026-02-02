@@ -1113,7 +1113,7 @@
                 initLeptonWorker();
                 if (params.length === 1) {
                     const mediaUrl = window.location.hash ?
-                      `/gb/webshare/gb-download?${window.location.hash.slice(1)}`
+                      `/gb/webshare/gb-download?${window.location.hash.slice(1)}&media=true`
                     : `/gb/webshare/gb-download?password=${params[0].shortUrlKey}&hash=${params[0].sha256}&media=true`;
                     showMediaPlayer(params[0].filename, mediaUrl, false, 'media-container');
                 }

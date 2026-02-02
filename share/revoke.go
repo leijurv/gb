@@ -55,13 +55,20 @@ func ListShares() {
 		if err != nil {
 			panic(err)
 		}
+		fileIndex := 0
 		for fileRows.Next() {
 			var filename string
 			err = fileRows.Scan(&filename)
 			if err != nil {
 				panic(err)
 			}
-			fmt.Printf("    %s\n", filename)
+			if fileIndex < 3 {
+				fmt.Printf("    %s\n", filename)
+			}
+			fileIndex++
+		}
+		if fileIndex > 3 {
+			fmt.Printf("    ....\n")
 		}
 		if err = fileRows.Err(); err != nil {
 			panic(err)

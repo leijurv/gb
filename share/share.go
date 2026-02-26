@@ -36,9 +36,7 @@ func ResolvePathOrHash(pathOrHash string, overrideName string) (hash []byte, sha
 			panic("this is something weird")
 		}
 		tx, err := db.DB.Begin()
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		defer tx.Rollback()
 		status := backup.CompareFileToDb(path, stat, tx, false)
 		if status.New || status.Modified {

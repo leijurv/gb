@@ -19,6 +19,15 @@ var ErrNoRows = sql.ErrNoRows
 
 var DB *sql.DB
 
+// only to be used for sqlite errors
+// sql errors in gb are 1. unrecoverable 2. not expected to ever be user-facing
+// a panic is the right choice
+func Must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
 // see https://sqlite.org/forum/info/eabfcd13dcd71807
 func StartsWithPattern(arg int32) string {
 	return fmt.Sprintf(" BETWEEN (?%d) AND (?%d || x'ff') ", arg, arg)
@@ -47,13 +56,9 @@ func setupDatabase(fullPath string, setupSchema bool) {
 	//log.Println("Opening database file", fullPath)
 	var err error
 	DB, err = sql.Open("sqlite3", fullPath)
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	_, err = DB.Exec("PRAGMA journal_size_limit = 100000000") // 100 megabytes
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	//log.Println("Database connection created")
 	//DB.SetMaxOpenConns(1) // 100x better to block for a few hundred ms than to panic with SQLITE_BUSY!!!!
 	// commenting out until i actually hit a sqlite_busy

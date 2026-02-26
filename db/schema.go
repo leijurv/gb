@@ -12,22 +12,13 @@ const (
 func initialSetup() {
 	switch determineDatabaseLayer() {
 	case DATABASE_LAYER_EMPTY:
-		err := schemaVersionOne()
-		if err != nil {
-			panic(err)
-		}
+		Must(schemaVersionOne())
 		fallthrough
 	case DATABASE_LAYER_1:
-		err := schemaVersionTwo()
-		if err != nil {
-			panic(err)
-		}
+		Must(schemaVersionTwo())
 		fallthrough
 	case DATABASE_LAYER_2:
-		err := schemaVersionThree()
-		if err != nil {
-			panic(err)
-		}
+		Must(schemaVersionThree())
 		fallthrough
 	case DATABASE_LAYER_3:
 		// up to date
@@ -54,9 +45,7 @@ To see the final schema that gb actually uses today, refer to schema.sql
 
 func schemaVersionOne() error {
 	tx, err := DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	defer tx.Rollback()
 	_, err = tx.Exec(`
 	CREATE TABLE sizes (
@@ -180,22 +169,15 @@ func schemaVersionOne() error {
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	Must(tx.Commit())
 	return nil
 }
 
 func schemaVersionTwo() error {
 	_, err := DB.Exec("PRAGMA foreign_keys = OFF")
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	tx, err := DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	// defer rollback BUT commit after successful execution
 	defer tx.Rollback() // !!!intended to NOT actually rollback!!!
 	_, err = tx.Exec(`
@@ -248,22 +230,15 @@ func schemaVersionTwo() error {
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	Must(tx.Commit())
 	_, err = DB.Exec("PRAGMA foreign_keys = ON")
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	return nil
 }
 
 func schemaVersionThree() error {
 	tx, err := DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	defer tx.Rollback()
 	_, err = tx.Exec(`
 	DROP INDEX blob_entries_by_blob_id;
@@ -314,32 +289,21 @@ func schemaVersionThree() error {
 	if err != nil {
 		return err
 	}
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	Must(tx.Commit())
 	return nil
 }
 
 func query(query string) string {
 	rows, err := DB.Query(query)
-	if err != nil {
-		panic(err)
-	}
+	Must(err)
 	defer rows.Close()
 	ret := ""
 	for rows.Next() {
 		var tableName string
-		err = rows.Scan(&tableName)
-		if err != nil {
-			panic(err)
-		}
+		Must(rows.Scan(&tableName))
 		ret = ret + tableName + ","
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	Must(rows.Err())
 	return ret
 }
 

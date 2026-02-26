@@ -83,9 +83,7 @@ func dbKeyImpl(interactive bool) []byte {
 		}
 		_, err = db.DB.Exec("INSERT INTO db_key (key, id) VALUES (?, 0)", key)
 	}
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	if len(key) != 16 {
 		panic("bad key")
 	}

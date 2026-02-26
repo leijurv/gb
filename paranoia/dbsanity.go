@@ -298,52 +298,36 @@ func DBParanoiaOn(q Querier) {
 func pathValidityOn(q Querier) {
 	log.Println("Running files path validity check")
 	rows, err := q.Query("SELECT path FROM files")
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	cnt := 0
 	for rows.Next() {
 		var path string
-		err = rows.Scan(&path)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&path))
 		if path[0] != '/' || !fs.ValidPath(path[1:]) {
 			panic("invalid utf8 in the files database at path " + path)
 		}
 		cnt++
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	log.Printf("Done running files path validity check on %d rows\n", cnt)
 }
 
 func sqliteVerifyPragmaCheckOn(q Querier, pragma string) {
 	log.Println("Running sqlite `PRAGMA " + pragma + ";`")
 	rows, err := q.Query("PRAGMA " + pragma)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	ok := false
 	for rows.Next() {
 		var result string
-		err = rows.Scan(&result)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&result))
 		if result != "ok" {
 			panic("sqlite " + pragma + " failed " + result)
 		}
 		ok = true
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	if !ok {
 		panic("`PRAGMA " + pragma + ";` returned no rows?")
 	}
@@ -353,9 +337,7 @@ func sqliteVerifyPragmaCheckOn(q Querier, pragma string) {
 func sqliteVerifyForeignKeysOn(q Querier) {
 	log.Println("Running sqlite `PRAGMA foreign_key_check;`")
 	rows, err := q.Query("PRAGMA foreign_key_check")
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	failed := false
 	for rows.Next() {
@@ -363,17 +345,11 @@ func sqliteVerifyForeignKeysOn(q Querier) {
 		var rowid int64
 		var referredTable string
 		var foreignIdx int
-		err = rows.Scan(&table, &rowid, &referredTable, &foreignIdx)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&table, &rowid, &referredTable, &foreignIdx))
 		log.Printf("Failed foreign key check: rowid %d in table `%s` wants to reference a matching row in table `%s` due to foreign key constraint index %d but there is none\n", rowid, table, referredTable, foreignIdx)
 		failed = true
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	if failed {
 		panic("`PRAGMA foreign_key_check;` failed, see above")
 	}
@@ -383,44 +359,31 @@ func sqliteVerifyForeignKeysOn(q Querier) {
 func blobsCoherenceOn(q Querier) {
 	log.Println("Running blob entry coherence")
 	rows, err := q.Query("SELECT blob_id, size FROM blobs")
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	cnt := 0
 	entriesCnt := 0
 	defer rows.Close()
 	for rows.Next() {
 		var blobID []byte
 		var size int64
-		err = rows.Scan(&blobID, &size)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&blobID, &size))
 		entriesCnt += blobCoherenceOn(q, blobID, size)
 		cnt++
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	log.Println("Verified entry coherence on", cnt, "blobs and", entriesCnt, "entries")
 }
 
 func blobCoherenceOn(q Querier, blobID []byte, size int64) int {
 	rows, err := q.Query("SELECT final_size, offset FROM blob_entries WHERE blob_id = ? ORDER BY offset, final_size", blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	cnt := 0
 	defer rows.Close()
 	var nextStartsAt int64
 	for rows.Next() {
 		var finalSize int64
 		var offset int64
-		err = rows.Scan(&finalSize, &offset)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&finalSize, &offset))
 		cnt++
 		if nextStartsAt != offset {
 			log.Println(offset)
@@ -430,10 +393,7 @@ func blobCoherenceOn(q Querier, blobID []byte, size int64) int {
 		}
 		nextStartsAt += finalSize
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	remain := size - nextStartsAt
 	if remain < config.Config().PaddingMinBytes+int64(float64(nextStartsAt)*(config.Config().PaddingMinPercent)/100) {
 		panic("not enough padding at end of file")

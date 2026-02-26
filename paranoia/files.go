@@ -22,9 +22,7 @@ func TestAllFiles(label string) {
 	for worker := 0; worker < nWorkers; worker++ {
 		go func() {
 			tx, err := db.DB.Begin()
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 			defer tx.Rollback()
 			didISucceed := true
 			for hash := range hashes {
@@ -49,23 +47,15 @@ func TestAllFiles(label string) {
 		//rows, err := tx.Query(`SELECT d.hash FROM (SELECT DISTINCT hash FROM files WHERE end IS NULL) d INNER JOIN sizes ON sizes.hash = d.hash WHERE sizes.size < 100000000 ORDER BY sizes.hash`)
 		// SELECT DISTINCT hash, path FROM (SELECT files.*, sizes.size FROM files INNER JOIN sizes ON files.hash = sizes.hash) WHERE size < 10000000 ORDER BY start DESC
 		rows, err := db.DB.Query(`SELECT hash FROM blob_entries WHERE compression_alg = "lepton" GROUP BY hash ORDER BY hash ASC`)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		defer rows.Close()
 		for rows.Next() {
 			var hash []byte
 			//var path string
-			err := rows.Scan(&hash) //, &path)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(rows.Scan(&hash)) //, &path)
 			hashes <- hash
 		}
-		err = rows.Err()
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Err())
 		close(hashes)
 	}()
 	for worker := 0; worker < nWorkers; worker++ {

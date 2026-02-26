@@ -87,9 +87,7 @@ func LookupBlobEntry(hash []byte, tx *sql.Tx, stor storage_base.Storage) BlobEnt
 			INNER JOIN sizes ON sizes.hash = blob_entries.hash
 		WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?`,
 		hash, stor.GetID()).Scan(&blobID, &offset, &length, &compressionAlg, &key, &path, &expectedSize)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
 	return BlobEntryInfo{
 		BlobID:         blobID,
@@ -116,9 +114,7 @@ func Cat(hash []byte, tx *sql.Tx, stor storage_base.Storage) io.Reader {
 
 func CatEz(hash []byte, stor storage_base.Storage) io.Reader {
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer tx.Rollback()
 
 	return Cat(hash, tx, stor)

@@ -452,36 +452,24 @@ func locateSourcesOnDisk(plan map[[32]byte]*Restoration) {
 	// we cannot do a "AND hash IN (?, ?, ?...)" because sqlite only allows 999 of those ?s lmfao
 	log.Println("Sorry, need to run some queries now that can be slow...")
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer tx.Rollback()
 	// use a prepared statement since we're going to do it MANY MANY MANY times in a row
 	stmt, err := tx.Prepare("SELECT path, fs_modified FROM files WHERE end IS NULL AND hash = ?")
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer stmt.Close()
 	for hash, rest := range plan {
 		func() { // wrap in a closure so that rows.Close isn't all saved till the end
 			rows, err := stmt.Query(hash[:])
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 			defer rows.Close()
 			for rows.Next() {
 				var path string
 				var fsModified int64
-				err = rows.Scan(&path, &fsModified)
-				if err != nil {
-					panic(err)
-				}
+				db.Must(rows.Scan(&path, &fsModified))
 				rest.sourcesOnDisk[path] = fsModified
 			}
-			err = rows.Err()
-			if err != nil {
-				panic(err)
-			}
+			db.Must(rows.Err())
 		}()
 	}
 	log.Println("Done with the slow queries lol")
@@ -511,21 +499,13 @@ func generatePlan(path string, timestamp int64, assumingFile bool) []Item {
 
 	plan := make([]Item, 0)
 	log.Println(path, timestamp, assumingFile)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	for rows.Next() {
 		var item Item
-		err = rows.Scan(&item.hash, &item.origPath, &item.fsModified, &item.permissions, &item.start, &item.size)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&item.hash, &item.origPath, &item.fsModified, &item.permissions, &item.start, &item.size))
 		plan = append(plan, item)
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	return plan
 }

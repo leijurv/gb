@@ -24,9 +24,7 @@ func FileHistory(path string) {
 		log.Println("It is unlikely for a file to end in \"/\"...")
 	}
 	rows, err := db.DB.Query(`SELECT files.start, files.end, files.permissions, files.fs_modified, sizes.size, files.hash FROM files INNER JOIN sizes ON sizes.hash = files.hash WHERE files.path = ? ORDER BY files.start`, path)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	log.Println()
 	log.Println("Revision start - Revision end: permissions, filesystem modified, size, hash")
@@ -37,10 +35,7 @@ func FileHistory(path string) {
 		var fsModified int64
 		var size int64
 		var hash []byte
-		err := rows.Scan(&start, &end, &perms, &fsModified, &size, &hash)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&start, &end, &perms, &fsModified, &size, &hash))
 		line := ""
 		line += time.Unix(start, 0).Format(time.RFC3339)
 		line += " - "
@@ -59,9 +54,6 @@ func FileHistory(path string) {
 		line += hex.EncodeToString(hash)
 		log.Println(line)
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	log.Println("Done")
 }

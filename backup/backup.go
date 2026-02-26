@@ -151,9 +151,7 @@ func DryBackup(rawPaths []string) {
 
 	// scanning
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer tx.Rollback()
 	statuses := make([]FileStatus, 0)
 	var allPathsToBackup []string

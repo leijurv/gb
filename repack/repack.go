@@ -105,39 +105,25 @@ func Repack(label string, mode RepackMode) {
 			SELECT DISTINCT blob_id FROM blob_entries
 			WHERE hash IN (SELECT hash FROM blob_entries GROUP BY hash HAVING COUNT(*) > 1)
 		`)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		for rows.Next() {
 			var blobID []byte
-			err := rows.Scan(&blobID)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(rows.Scan(&blobID))
 			blobIDs = append(blobIDs, blobID)
 		}
-		if err := rows.Err(); err != nil {
-			panic(err)
-		}
+		db.Must(rows.Err())
 		rows.Close()
 	case UpgradeEncryption:
 		rows, err := db.DB.Query(`
 			SELECT blob_id FROM blob_entries GROUP BY blob_id HAVING COUNT(DISTINCT encryption_key) = 1 AND COUNT(*) > 1
 		`)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		for rows.Next() {
 			var blobID []byte
-			err := rows.Scan(&blobID)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(rows.Scan(&blobID))
 			blobIDs = append(blobIDs, blobID)
 		}
-		if err := rows.Err(); err != nil {
-			panic(err)
-		}
+		db.Must(rows.Err())
 		rows.Close()
 	}
 
@@ -167,44 +153,30 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 	blobsToDelete := make([][]byte, 0)        // large blobs that are duplicates and should just be deleted
 	for _, blobID := range blobIDs {
 		rows, err := db.DB.Query(`SELECT hash FROM blob_entries WHERE blob_id = ?`, blobID)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		var hashes [][]byte
 		for rows.Next() {
 			var hash []byte
-			err := rows.Scan(&hash)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(rows.Scan(&hash))
 			hashes = append(hashes, hash)
 		}
-		if err := rows.Err(); err != nil {
-			panic(err)
-		}
+		db.Must(rows.Err())
 		rows.Close()
 
 		// Check global uniqueness: for each hash, all blobs containing it must be in seenBlobIDs
 		for _, hash := range hashes {
 			rows, err := db.DB.Query(`SELECT blob_id FROM blob_entries WHERE hash = ?`, hash)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 			for rows.Next() {
 				var otherBlobID []byte
-				err := rows.Scan(&otherBlobID)
-				if err != nil {
-					panic(err)
-				}
+				db.Must(rows.Scan(&otherBlobID))
 				if !seenBlobIDs[utils.SliceToArr(otherBlobID)] {
 					rows.Close()
 					panic("Hash " + hex.EncodeToString(hash) + " in blob " + hex.EncodeToString(blobID) +
 						" also appears in blob " + hex.EncodeToString(otherBlobID) + " which is not being repacked")
 				}
 			}
-			if err := rows.Err(); err != nil {
-				panic(err)
-			}
+			db.Must(rows.Err())
 			rows.Close()
 		}
 
@@ -240,10 +212,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 	var beforeFinalSize int64
 	for _, blobID := range append(blobsToProcess, blobsToDelete...) {
 		var blobSize int64
-		err := db.DB.QueryRow("SELECT size FROM blobs WHERE blob_id = ?", blobID).Scan(&blobSize)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(db.DB.QueryRow("SELECT size FROM blobs WHERE blob_id = ?", blobID).Scan(&blobSize))
 		beforeFinalSize += blobSize
 
 		rows, err := db.DB.Query(`
@@ -252,22 +221,15 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 			INNER JOIN sizes ON blob_entries.hash = sizes.hash
 			WHERE blob_id = ?
 		`, blobID)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		for rows.Next() {
 			var uncompSize, compSize int64
-			err := rows.Scan(&uncompSize, &compSize)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(rows.Scan(&uncompSize, &compSize))
 			beforeEntries++
 			beforeUncompressed += uncompSize
 			beforeCompressed += compSize
 		}
-		if err := rows.Err(); err != nil {
-			panic(err)
-		}
+		db.Must(rows.Err())
 		rows.Close()
 	}
 
@@ -354,9 +316,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 	// Step 9: Database Transaction
 	log.Println("Beginning database transaction...")
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer tx.Rollback()
 
 	now := time.Now().Unix()
@@ -365,9 +325,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 		// Insert blob record
 		_, err = tx.Exec("INSERT INTO blobs (blob_id, padding_key, size, final_hash) VALUES (?, ?, ?, ?)",
 			blob.blobID, blob.paddingKey, blob.totalSize, blob.hashPostEnc)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 
 		// Insert blob_storage records
 		for _, completed := range blob.completeds {
@@ -376,18 +334,14 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 			}
 			_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)",
 				blob.blobID, completed.StorageID, completed.Path, completed.Checksum, now)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 		}
 
 		// Insert blob_entries records
 		for _, entry := range blob.entries {
 			_, err = tx.Exec("INSERT INTO blob_entries (hash, blob_id, encryption_key, final_size, offset, compression_alg) VALUES (?, ?, ?, ?, ?, ?)",
 				entry.hash, blob.blobID, entry.key, entry.postCompressionSize, entry.offset, entry.compression)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 		}
 	}
 
@@ -402,18 +356,15 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 	for _, blob := range newBlobs {
 		for _, entry := range blob.entries {
 			rows, err := tx.Query(`UPDATE share_entries SET blob_id = ? WHERE hash = ? RETURNING password, storage_id`, blob.blobID, entry.hash)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 			for rows.Next() {
 				var password string
 				var storageID []byte
-				if err := rows.Scan(&password, &storageID); err != nil {
-					panic(err)
-				}
+				db.Must(rows.Scan(&password, &storageID))
 				log.Printf("Updated share entry %s to point to new blob %s", password, hex.EncodeToString(blob.blobID[:8]))
 				updatedShares = append(updatedShares, updatedShare{password: password, storageID: storageID})
 			}
+			db.Must(rows.Err())
 			rows.Close()
 		}
 	}
@@ -425,19 +376,13 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 	for _, blobID := range allBlobsToDelete {
 		// Delete blob_entries first (foreign key to blobs)
 		_, err = tx.Exec("DELETE FROM blob_entries WHERE blob_id = ?", blobID)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		// Delete blob_storage (foreign key to blobs)
 		_, err = tx.Exec("DELETE FROM blob_storage WHERE blob_id = ?", blobID)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		// Delete blobs
 		_, err = tx.Exec("DELETE FROM blobs WHERE blob_id = ?", blobID)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 	}
 	log.Println("Deleted", len(allBlobsToDelete), "old blob records")
 
@@ -446,10 +391,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 	paranoia.DBParanoiaTx(tx)
 
 	log.Println("Committing transaction...")
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(tx.Commit())
 
 	// Regenerate and upload share JSONs for updated shares
 	if len(updatedShares) > 0 {
@@ -543,9 +485,7 @@ func uploadEntries(entries []Entry, uploadService backup.UploadService) newBlobD
 			) DESC
 			LIMIT 1
 		`, entry.Hash).Scan(&path)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 
 		// Encrypt
 		encryptedOut, key := crypto.EncryptBlob(postEncOut, startOffset)

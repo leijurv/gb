@@ -127,14 +127,9 @@ func lookupBlobParams(hash []byte, blobID []byte, filename string, expiresAt *in
 		WHERE blob_entries.hash = ? AND blob_entries.blob_id = ? AND blob_storage.storage_id = ?
 		LIMIT 1
 	`, hash, blobID, stor.GetID()).Scan(&offset, &length, &compressionAlg, &key, &pathInStorage)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
-	err = db.DB.QueryRow(`SELECT size FROM sizes WHERE hash = ?`, hash).Scan(&originalSize)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(db.DB.QueryRow(`SELECT size FROM sizes WHERE hash = ?`, hash).Scan(&originalSize))
 
 	params := map[string]string{
 		"name":   filename,
@@ -165,9 +160,7 @@ func sanityCheckEntry(e *entry, stor storage_base.Storage) bool {
 			INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id
 		WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?
 	`, e.hash, stor.GetID()).Scan(&distinctBlobCount)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	if distinctBlobCount != 1 {
 		panic(fmt.Sprintf("Expected hash %s to be in exactly 1 blob in storage %s, but found %d", hex.EncodeToString(e.hash), stor, distinctBlobCount))
 	}
@@ -183,9 +176,7 @@ func sanityCheckEntry(e *entry, stor storage_base.Storage) bool {
 		WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?
 		LIMIT 1
 	`, e.hash, stor.GetID()).Scan(&e.blobID, &sharedKeyCount)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
 	return sharedKeyCount > 1
 }
@@ -355,9 +346,7 @@ func insertShare(entries []entry, name string, stor storage_base.Storage, expiry
 
 	// Insert into shares and share_entries tables
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer tx.Rollback()
 
 	// Insert parent share record
@@ -365,9 +354,7 @@ func insertShare(entries []entry, name string, stor storage_base.Storage, expiry
 		INSERT INTO shares (password, name, storage_id, shared_at, expires_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, password, name, stor.GetID(), now, expiresAt)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
 	// Insert share entries with ordinal based on position in slice
 	for i, e := range entries {
@@ -375,15 +362,10 @@ func insertShare(entries []entry, name string, stor storage_base.Storage, expiry
 			INSERT INTO share_entries (password, hash, filename, blob_id, storage_id, ordinal)
 			VALUES (?, ?, ?, ?, ?, ?)
 		`, password, e.hash, e.path, e.blobID, stor.GetID(), i)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 	}
 
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(tx.Commit())
 
 	UploadShareJSON(password, stor)
 
@@ -445,9 +427,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 	err := db.DB.QueryRow(`
 		SELECT expires_at, revoked_at FROM shares WHERE password = ? AND storage_id = ?
 	`, password, stor.GetID()).Scan(&expiresAt, &revokedAt)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
 	if revokedAt != nil {
 		return []byte(RevokedShareJSON)
@@ -459,9 +439,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 		WHERE password = ? AND storage_id = ?
 		ORDER BY ordinal
 	`, password, stor.GetID())
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 
 	var lines [][]byte
@@ -470,10 +448,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 		var blobID []byte
 		var filename string
 
-		err = rows.Scan(&hash, &blobID, &filename)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&hash, &blobID, &filename))
 
 		params := lookupBlobParams(hash, blobID, filename, expiresAt, stor)
 		lineBytes, err := json.Marshal(params)
@@ -482,9 +457,7 @@ func GenerateShareJSON(password string, stor storage_base.Storage) []byte {
 		}
 		lines = append(lines, lineBytes)
 	}
-	if err = rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 
 	// If no entries exist, still return the revoked sentinel for safety
 	if len(lines) == 0 {
@@ -512,18 +485,13 @@ func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
 		FROM shares
 		WHERE storage_id = ?
 	`, stor.GetID())
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 
 	var result []ExpectedShareFile
 	for rows.Next() {
 		var password string
-		err = rows.Scan(&password)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&password))
 
 		jsonBytes := GenerateShareJSON(password, stor)
 
@@ -538,9 +506,7 @@ func ExpectedShareJSONs(stor storage_base.Storage) []ExpectedShareFile {
 			Checksum: hex.EncodeToString(sum[:]),
 		})
 	}
-	if err = rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 
 	return result
 }

@@ -131,9 +131,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 				INNER JOIN storage ON storage.storage_id = blob_storage.storage_id
 			WHERE files.path = ? AND files.end IS NULL
 		`, path)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	toSkip := make(map[string]struct{})
 	for rows.Next() {
@@ -152,10 +150,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 		var rootPath string
 		var sharedKeyCount int
 
-		err := rows.Scan(&hash, &blobID, &offset, &length, &compressionAlg, &key, &finalSize, &pathInStorage, &checksum, &storageID, &kind, &identifier, &rootPath, &sharedKeyCount)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&hash, &blobID, &offset, &length, &compressionAlg, &key, &finalSize, &pathInStorage, &checksum, &storageID, &kind, &identifier, &rootPath, &sharedKeyCount))
 		log.Println("This file can be found in blob ID", hex.EncodeToString(blobID), "which is located in storage", kind, "at the path", pathInStorage, "decrypting with key", hex.EncodeToString(key), "seeking", offset, "bytes in and reading", length, "bytes from there, and decompressing using", compressionAlg)
 
 		// Create the storage object to try generating a presigned URL
@@ -274,10 +269,7 @@ func paranoia(path string, info os.FileInfo, level int) {
 			}
 		}
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	if count == 0 {
 		panic("this blob is not stored anywhere?!")
 	}

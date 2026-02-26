@@ -124,15 +124,11 @@ func (s *BackupSession) executeBlobUploadPlan(plan BlobPlan, serv UploadService)
 	s.hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
 	defer s.hashLateMapLock.Unlock()
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer tx.Rollback()
 	// **obviously** all this needs to be in a tx
 	_, err = tx.Exec("INSERT INTO blobs (blob_id, padding_key, size, final_hash) VALUES (?, ?, ?, ?)", blobID, paddingKey, totalSize, hashPostEnc)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	now := time.Now().Unix()
 	for _, completed := range completeds {
 		if !bytes.Equal(completed.BlobID, blobID) {
@@ -142,16 +138,12 @@ func (s *BackupSession) executeBlobUploadPlan(plan BlobPlan, serv UploadService)
 			panic("sanity check")
 		}
 		_, err = tx.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blobID, completed.StorageID, completed.Path, completed.Checksum, now)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 	}
 	for _, entry := range entries {
 		// do this first (before fileHasKnownData) because of that pesky foreign key
 		_, err = tx.Exec("INSERT OR IGNORE INTO sizes (hash, size) VALUES (?, ?)", entry.hash, entry.preCompressionSize)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		if bytes.Equal(entry.originalPlan.hash, entry.hash) {
 			// fetch ALL the files that hashed to this hash
 			files := s.hashLateMap[utils.SliceToArr(entry.hash)]
@@ -176,34 +168,25 @@ func (s *BackupSession) executeBlobUploadPlan(plan BlobPlan, serv UploadService)
 		}
 		// and either way, make a note of what hash is stored in this blob at this location
 		_, err = tx.Exec("INSERT INTO blob_entries (hash, blob_id, encryption_key, final_size, offset, compression_alg) VALUES (?, ?, ?, ?, ?, ?)", entry.hash, blobID, entry.key, entry.postCompressionSize, entry.offset, entry.compression)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 	}
 	log.Println("Uploader done with blob", plan)
 	log.Println("Uploader committing to database")
 	txCommitted = true // err on the side of caution - if tx.Commit returns an err, very likely it did not actually commit, but, it's possible! so don't delete the blob if there's ANY chance that the db is expecting this blob to exist.
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(tx.Commit())
 	log.Println("Committed uploaded blob")
 }
 
 func (s *BackupSession) fileHasKnownData(tx *sql.Tx, path string, info os.FileInfo, hash []byte) {
 	// important to use the same "now" for both of these queries, so that the file's history is presented without "gaps" (that could be present if we called time.Now() twice in a row)
 	_, err := tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", s.now, path)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	modTime := info.ModTime().Unix()
 	if modTime < 0 {
 		panic(fmt.Sprintf("Invalid modification time for %s: %d", path, modTime))
 	}
 	_, err = tx.Exec("INSERT INTO files (path, hash, start, fs_modified, permissions) VALUES (?, ?, ?, ?, ?)", path, hash, s.now, modTime, info.Mode()&os.ModePerm)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 }
 
 // this function should be called if the uploader thread was intended to upload a backup of a certain hash, but failed to do so, for any reason

@@ -21,9 +21,7 @@ func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, st
 	_, clientHasRange := req.Header["Range"]
 	var realContentLength int64
 	err := db.DB.QueryRow("SELECT size FROM sizes WHERE hash = ?", hash).Scan(&realContentLength)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	var blobID []byte
 	var path string
 	var key []byte
@@ -33,9 +31,7 @@ func ServeHashOverHTTP(hash []byte, w http.ResponseWriter, req *http.Request, st
 	err = db.DB.QueryRow(
 		"SELECT blob_entries.blob_id, blob_entries.encryption_key, blob_storage.path, blob_entries.final_size, blob_entries.offset, blob_entries.compression_alg FROM blob_entries INNER JOIN blob_storage ON blob_storage.blob_id = blob_entries.blob_id INNER JOIN blobs ON blobs.blob_id = blob_storage.blob_id WHERE blob_entries.hash = ? AND blob_storage.storage_id = ?",
 		hash, storage.GetID()).Scan(&blobID, &key, &path, &compressedSize, &offsetIntoBlob, &comp)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	log.Println(req)
 	log.Println("Offset into blob", offsetIntoBlob)
 	claimedLength := compressedSize

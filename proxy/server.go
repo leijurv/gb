@@ -198,8 +198,6 @@ func handleHTTP(w http.ResponseWriter, req *http.Request, storage storage_base.S
 		handleDirMaybe(w, req, pathOnDisk, base)
 		return
 	}
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	ServeHashOverHTTP(hash, w, req, storage)
 }

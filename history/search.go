@@ -23,9 +23,7 @@ func Search(input string) {
 		log.Println("Query is:", arg)
 	}
 	rows, err := db.DB.Query(query, arg)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	log.Println()
 	log.Println("Path: revision start - revision end: permissions, filesystem modified, size, hash")
@@ -37,10 +35,7 @@ func Search(input string) {
 		var fsModified int64
 		var size int64
 		var hash []byte
-		err := rows.Scan(&path, &start, &end, &perms, &fsModified, &size, &hash)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&path, &start, &end, &perms, &fsModified, &size, &hash))
 		line := ""
 		line += path
 		line += ": "
@@ -61,9 +56,6 @@ func Search(input string) {
 		line += hex.EncodeToString(hash)
 		log.Println(line)
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	log.Println("Done")
 }

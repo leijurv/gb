@@ -186,9 +186,7 @@ func showDeduplicationStats() {
 		fmt.Printf("  %s × %d copies = %s saved\n",
 			formatBytes(size), count, formatBytes(saved))
 	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 }
 
 func showCompressionStats() {
@@ -230,9 +228,7 @@ func showCompressionStats() {
 		totalOriginal += cs.OriginalSize
 		totalCompressed += cs.CompressedSize
 	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 
 	totalSaved := totalOriginal - totalCompressed
 	fmt.Printf("Total compression savings: %s (%.1f%%)\n",
@@ -284,9 +280,7 @@ func showTopLargestFiles() {
 		fmt.Println()
 		i++
 	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 }
 
 func showFileExtensionStats() {
@@ -334,9 +328,7 @@ func showFileExtensionStats() {
 		}
 		extStats = append(extStats, es)
 	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 
 	for i, es := range extStats {
 		if i >= 10 {
@@ -430,9 +422,7 @@ func showStorageStats() {
 		fmt.Printf("%-20s: %s blobs, %s\n",
 			ss.Label, utils.FormatCommas(ss.BlobCount), formatBytes(ss.TotalSize))
 	}
-	if err := rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 }
 
 func formatBytes(bytes int64) string {

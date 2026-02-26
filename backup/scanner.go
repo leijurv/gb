@@ -112,42 +112,27 @@ func (s *BackupSession) pruneDeletedFiles(backupPath string, filesMap map[string
 	// we cannot upgrade the long lived RO transaction to a RW transaction, it would conflict with the intermediary RW transactions, it seems
 	// reusing the tx from scanner results in a sqlite busy panic, very consistently
 	tx, err := db.DB.Begin()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	if !strings.HasSuffix(backupPath, "/") {
 		panic(backupPath) // sanity check, should have already been completed
 	}
 	log.Println("Finally, handling deleted files!")
 	// anything that was in this directory but is no longer can be deleted
 	rows, err := tx.Query("SELECT path FROM files WHERE end IS NULL AND path "+db.StartsWithPattern(1), backupPath)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	for rows.Next() {
 		var databasePath string
-		err := rows.Scan(&databasePath)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&databasePath))
 		if _, ok := filesMap[databasePath]; !ok {
 			log.Println(databasePath, "used to exist but does not any longer. Marking as ended.")
 			_, err = tx.Exec("UPDATE files SET end = ? WHERE path = ? AND end IS NULL", s.now, databasePath)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(err)
 		}
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	log.Println("Pruner committing")
-	err = tx.Commit()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(tx.Commit())
 	log.Println("Pruner committed")
 }
 
@@ -165,9 +150,7 @@ func (ctx *ScannerTransactionContext) Tx() *sql.Tx {
 	}
 	if ctx.tx == nil {
 		tx, err := db.DB.Begin()
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		ctx.tx = tx
 		return tx
 	}
@@ -183,10 +166,7 @@ func (ctx *ScannerTransactionContext) Tx() *sql.Tx {
 
 func (ctx *ScannerTransactionContext) Close() {
 	if ctx.tx != nil {
-		err := ctx.tx.Commit()
-		if err != nil {
-			panic(err)
-		}
+		db.Must(ctx.tx.Commit())
 		ctx.tx = nil
 	}
 }

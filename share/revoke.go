@@ -17,9 +17,7 @@ func ListShares() {
 		FROM shares
 		ORDER BY shared_at DESC
 	`)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 
 	shareCount := 0
@@ -29,10 +27,7 @@ func ListShares() {
 		var expiresAt, revokedAt *int64
 		var fileCount int
 
-		err = rows.Scan(&password, &name, &sharedAt, &expiresAt, &revokedAt, &fileCount)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&password, &name, &sharedAt, &expiresAt, &revokedAt, &fileCount))
 
 		var status string
 		if revokedAt != nil {
@@ -52,16 +47,11 @@ func ListShares() {
 		fileRows, err := db.DB.Query(`
 			SELECT filename FROM share_entries WHERE password = ? ORDER BY ordinal
 		`, password)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		fileIndex := 0
 		for fileRows.Next() {
 			var filename string
-			err = fileRows.Scan(&filename)
-			if err != nil {
-				panic(err)
-			}
+			db.Must(fileRows.Scan(&filename))
 			if fileIndex < 3 {
 				fmt.Printf("    %s\n", filename)
 			}
@@ -70,16 +60,12 @@ func ListShares() {
 		if fileIndex > 3 {
 			fmt.Printf("    ....\n")
 		}
-		if err = fileRows.Err(); err != nil {
-			panic(err)
-		}
+		db.Must(fileRows.Err())
 		fileRows.Close()
 
 		shareCount++
 	}
-	if err = rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 
 	if shareCount == 0 {
 		log.Println("No shares found")
@@ -106,9 +92,7 @@ func RevokeShare(password string) {
 		log.Printf("Share with password '%s' not found\n", password)
 		return
 	}
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
 	// Check if already revoked
 	if revokedAt != nil {
@@ -120,23 +104,16 @@ func RevokeShare(password string) {
 	rows, err := db.DB.Query(`
 		SELECT filename FROM share_entries WHERE password = ? ORDER BY ordinal
 	`, password)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 
 	var filenames []string
 	for rows.Next() {
 		var filename string
-		err = rows.Scan(&filename)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&filename))
 		filenames = append(filenames, filename)
 	}
-	if err = rows.Err(); err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 
 	// Display share information
 	fmt.Println()
@@ -179,9 +156,7 @@ func RevokeShare(password string) {
 	_, err = db.DB.Exec(`
 		UPDATE shares SET revoked_at = ? WHERE password = ?
 	`, now, password)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 
 	// Upload revoked JSON to storage (GenerateShareJSON will see revoked_at and return revoked JSON)
 	storage.GetAll() // Ensure storage cache is populated

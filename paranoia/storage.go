@@ -180,9 +180,7 @@ func fetchAllExpected() map[storageAndPath]storage_base.UploadedBlob {
 				blob_storage.storage_id
 			FROM blob_storage
 				INNER JOIN blobs ON blob_storage.blob_id = blobs.blob_id`)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	result := make(map[storageAndPath]storage_base.UploadedBlob)
 	for rows.Next() {
@@ -191,10 +189,7 @@ func fetchAllExpected() map[storageAndPath]storage_base.UploadedBlob {
 		var size int64
 		var blobID []byte
 		var storageID []byte
-		err := rows.Scan(&path, &checksum, &size, &blobID, &storageID)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&path, &checksum, &size, &blobID, &storageID))
 		// the database has a unique constraint on storageID and path so this is safe
 		result[storageAndPath{utils.SliceToArr(storageID), path}] = storage_base.UploadedBlob{
 			Path:     path,
@@ -203,9 +198,6 @@ func fetchAllExpected() map[storageAndPath]storage_base.UploadedBlob {
 			BlobID:   blobID,
 		}
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	return result
 }

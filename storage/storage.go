@@ -40,25 +40,17 @@ func ResolveDescriptors(descriptors []StorageDescriptor) []storage_base.Storage 
 
 func GetAllDescriptors() []StorageDescriptor {
 	rows, err := db.DB.Query(`SELECT storage_id, type, identifier, root_path FROM storage`)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	descriptors := make([]StorageDescriptor, 0)
 	for rows.Next() {
 		var descriptor StorageDescriptor
 		var tmpsid []byte
-		err := rows.Scan(&tmpsid, &descriptor.Kind, &descriptor.Identifier, &descriptor.RootPath)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&tmpsid, &descriptor.Kind, &descriptor.Identifier, &descriptor.RootPath))
 		descriptor.StorageID = utils.SliceToArr(tmpsid)
 		descriptors = append(descriptors, descriptor)
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	return descriptors
 }
 
@@ -90,9 +82,7 @@ func NewStorage(kind string, identifier string, rootPath string, label string) s
 		panic("sanity check")
 	}
 	_, err := db.DB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, kind, identifier, rootPath, label)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	return storage
 }
 
@@ -141,9 +131,7 @@ func RegisterMockStorage(stor storage_base.Storage, label string) {
 	cache[utils.SliceToArr(storageID)] = stor
 	cacheLock.Unlock()
 	_, err := db.DB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, "Mock", "mock-identifier", "/mock", label)
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 }
 
 func ClearCache() {
@@ -157,10 +145,7 @@ func storageSelectPrintOptions() {
 	log.Println("Options:")
 	for _, d := range descs {
 		var label string
-		err := db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(db.DB.QueryRow("SELECT readable_label FROM storage WHERE storage_id = ?", d.StorageID[:]).Scan(&label))
 		log.Println("•", d.Kind, d.RootPath, "To use this one, add the option `--label=\""+label+"\"`")
 	}
 }

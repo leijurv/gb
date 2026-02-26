@@ -48,9 +48,7 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 		log.Println("Updating fs_modifed in db so next time I don't reread this for no reason lol")
 		// this is VERY uncommon, so it is NOT worth maintaining a db WRITE transaction for it sadly
 		_, err := db.DB.Exec("UPDATE files SET fs_modified = ?, permissions = ? WHERE path = ? AND end IS NULL", info.ModTime().Unix(), info.Mode()&os.ModePerm, path)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		return
 	}
 
@@ -64,18 +62,14 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 		s.hashLateMapLock.Lock() // this lock ensures atomicity between the hashLateMap, and the database (blob_entries and files)
 		defer s.hashLateMapLock.Unlock()
 		tx, err := db.DB.Begin()
-		if err != nil {
-			panic(err)
-		}
+		db.Must(err)
 		defer tx.Rollback() // fileHasKnownData can panic
 		var dbHash []byte
 		err = tx.QueryRow("SELECT hash FROM blob_entries WHERE hash = ?", hash).Scan(&dbHash)
 		if err == nil {
 			// yeah so we already have this hash backed up, so the train stops here. we just need to add this to files table, and we're done!
 			s.fileHasKnownData(tx, path, info, hash)
-			if err := tx.Commit(); err != nil {
-				panic(err)
-			}
+			db.Must(tx.Commit())
 			return nil // done, no need to upload
 		}
 		if err != db.ErrNoRows {

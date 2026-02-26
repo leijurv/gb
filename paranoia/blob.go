@@ -55,16 +55,10 @@ func BlobParanoia(label string) {
 func DownloadEntireBlob(blobID []byte, storage storage_base.Storage) io.Reader {
 	var blobSize int64
 	err := db.DB.QueryRow("SELECT size FROM blobs WHERE blob_id = ?", blobID).Scan(&blobSize)
-	if err != nil {
-		log.Println("This blob id does not exist")
-		panic(err)
-	}
+	db.Must(err)
 	var path string
 	err = db.DB.QueryRow("SELECT path FROM blob_storage WHERE blob_id = ? AND storage_id = ?", blobID, storage.GetID()).Scan(&path)
-	if err != nil {
-		log.Println("Error while grabbing the path of this blob in that storage. Perhaps this blob was never backed up to there?")
-		panic(err)
-	}
+	db.Must(err)
 	return utils.ReadCloserToReader(storage.DownloadSection(path, 0, blobSize))
 }
 
@@ -81,17 +75,12 @@ func BlobReaderParanoiaWithCallback(outerReader io.Reader, blobID []byte, storag
 	var blobSize int64
 	var hashPostEnc []byte
 	err := db.DB.QueryRow("SELECT padding_key, size, final_hash FROM blobs WHERE blob_id = ?", blobID).Scan(&paddingKey, &blobSize, &hashPostEnc)
-	if err != nil {
-		log.Println("This blob id does not exist")
-		panic(err)
-	}
+	db.Must(err)
 	hasherPostEnc := utils.NewSHA256HasherSizer()
 	encReader := io.TeeReader(outerReader, &hasherPostEnc)
 
 	rows, err := db.DB.Query(`SELECT hash, encryption_key, final_size, offset, compression_alg, size FROM blob_entries INNER JOIN sizes USING (hash) WHERE blob_id = ? ORDER BY offset, final_size`, blobID) // the ", final_size" serves to ensure that the empty entry comes before the nonempty entry at the same offset
-	if err != nil {
-		panic(err)
-	}
+	db.Must(err)
 	defer rows.Close()
 	for rows.Next() {
 		var hash []byte
@@ -100,10 +89,7 @@ func BlobReaderParanoiaWithCallback(outerReader io.Reader, blobID []byte, storag
 		var offset int64
 		var compressionAlg string
 		var expectedSize int64
-		err := rows.Scan(&hash, &key, &entrySize, &offset, &compressionAlg, &expectedSize)
-		if err != nil {
-			panic(err)
-		}
+		db.Must(rows.Scan(&hash, &key, &entrySize, &offset, &compressionAlg, &expectedSize))
 		if hasherPostEnc.Size() != offset {
 			panic("got misaligned somehow. gap between entries??")
 		}
@@ -140,10 +126,7 @@ func BlobReaderParanoiaWithCallback(outerReader io.Reader, blobID []byte, storag
 			callback(realHash, data)
 		}
 	}
-	err = rows.Err()
-	if err != nil {
-		panic(err)
-	}
+	db.Must(rows.Err())
 	remain, err := ioutil.ReadAll(crypto.DecryptBlobEntry(encReader, hasherPostEnc.Size(), paddingKey))
 	if err != nil {
 		panic(err)

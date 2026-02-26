@@ -284,7 +284,7 @@ func main() {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				timestamp, err := parseTimestamp(c.String("at"))
+				timestamp, err := parseTimestamp(c.String("since"))
 				if err != nil {
 					return err
 				}

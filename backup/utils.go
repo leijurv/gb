@@ -259,7 +259,6 @@ func (s *BackupSession) registerSizeClaimCallback(size int64, callback func()) {
 }
 
 func SamplePaddingLength(size int64) int64 {
-	rand.Seed(time.Now().UnixNano())
 	conf := config.Config()
 
 	ret := conf.PaddingMinBytes + rand.Int63n(conf.PaddingMaxBytes-conf.PaddingMinBytes+1)

@@ -51,10 +51,13 @@ func (s *BackupSession) scannerThread(inputs []File) {
 
 	// Walk all directories using the walker interface
 	if len(allPathsToBackup) > 0 {
-		s.Walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
+		err := s.Walker.Walk(allPathsToBackup, func(path string, info os.FileInfo) {
 			filesMap[path] = info
 			s.scanFile(File{path, info}, ctx.Tx())
 		})
+		if err != nil {
+			panic(err)
+		}
 
 		// Prune deleted files after walking is complete
 		for _, path := range allPathsToBackup {

@@ -27,6 +27,16 @@ func TestETagCalculator(t *testing.T) {
 			data:     make([]byte, 1<<20),
 			expected: "b6d81b360a5672d80c27430f39153e2c",
 		},
+		{
+			// Multipart: 17MB of zeros (just over the 16MB part size)
+			// s3PartSize is 16777216 bytes (1<<24 = 16MB)
+			// Part 1: 16777216 bytes of zeros -> MD5: 2c2ceccb5ec5574f791d45b63c940cff
+			// Part 2: 1048576 bytes of zeros  -> MD5: b6d81b360a5672d80c27430f39153e2c
+			// Combined MD5 of concatenated hashes: d7f0e9878e982a33237d7f6f946e7951-2
+			name:     "17MB zeros multipart",
+			data:     make([]byte, 17<<20),
+			expected: "d7f0e9878e982a33237d7f6f946e7951-2",
+		},
 	}
 
 	for _, tt := range tests {
@@ -45,29 +55,5 @@ func TestETagCalculator(t *testing.T) {
 				t.Errorf("Size = %d, want %d", result.Size, len(tt.data))
 			}
 		})
-	}
-}
-
-func TestETagCalculatorMultipart(t *testing.T) {
-	// Test multipart: 17MB of zeros (just over the 16MB part size)
-	// s3PartSize is 16777216 bytes (1<<24 = 16MB)
-	// Part 1: 16777216 bytes of zeros -> MD5: 2c2ceccb5ec5574f791d45b63c940cff
-	// Part 2: 1048576 bytes of zeros  -> MD5: b6d81b360a5672d80c27430f39153e2c
-	// Combined MD5 of concatenated hashes: d7f0e9878e982a33237d7f6f946e7951-2
-	data := make([]byte, 17<<20) // 17MB
-	expected := "d7f0e9878e982a33237d7f6f946e7951-2"
-
-	calc := CreateETagCalculator()
-	_, err := io.Copy(calc.Writer, bytes.NewReader(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	calc.Writer.Close()
-	result := <-calc.Result
-	if result.ETag != expected {
-		t.Errorf("ETag = %q, want %q", result.ETag, expected)
-	}
-	if result.Size != int64(len(data)) {
-		t.Errorf("Size = %d, want %d", result.Size, len(data))
 	}
 }

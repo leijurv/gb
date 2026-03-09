@@ -761,7 +761,7 @@
         }
 
         // Generate the curl command following paranoia/file.go
-        function generateCurlCommand() {
+        function generateCurlCommand(urlForCurl) {
             const alignedOffset = Math.floor(offset / 16) * 16;
             const remainingSeek = offset % 16;
             const fetchLength = length + remainingSeek;
@@ -775,7 +775,7 @@
                 n = Math.floor(n / 256);
             }
 
-            let cmd = `curl -H 'Range: bytes=${alignedOffset}-${alignedOffset + fetchLength - 1}' '${s3Url}' | `;
+            let cmd = `curl -H 'Range: bytes=${alignedOffset}-${alignedOffset + fetchLength - 1}' '${urlForCurl}' | `;
             cmd += `openssl enc -aes-128-ctr -d -K ${keyHex} -iv ${iv} 2>/dev/null | `;
             if (remainingSeek > 0) {
                 cmd += `{ dd bs=${remainingSeek} skip=1 count=0 status=none; cat; } | `;
@@ -788,6 +788,22 @@
             }
             cmd += ` > '${filename.replace(/'/g, "'\\''")}'`;
             return cmd;
+        }
+
+        // Ask SW for a fresh presigned URL for this file entry
+        async function fetchUrlFromSW() {
+            const reg = await navigator.serviceWorker.ready;
+            const { port1, port2 } = new MessageChannel();
+            return new Promise((resolve, reject) => {
+                port1.onmessage = (event) => {
+                    if (event.data.error) {
+                        reject(new Error(event.data.error));
+                    } else {
+                        resolve(event.data.url);
+                    }
+                };
+                reg.active.postMessage({ type: 'get-url', password: shortUrlKey, sha256: params[0].sha256 }, [port2]);
+            });
         }
 
         // Convert base64url sha256 to hex for display
@@ -814,7 +830,6 @@
         }
 
         // Populate info section
-        const curlCmd = generateCurlCommand();
         const sha256Hex = sha256ToHex(params[0].sha256);
         const infoContent = $('info-content');
 
@@ -869,19 +884,43 @@
         const cmdBox = document.createElement('div');
         cmdBox.className = 'cmd-box';
         cmdBox.id = 'cmd-box';
-        cmdBox.textContent = curlCmd;
         infoContent.appendChild(cmdBox);
+
+        let currentCurlCmd = null;
+
+        function populateCurlCommand(urlForCurl) {
+            currentCurlCmd = generateCurlCommand(urlForCurl);
+            cmdBox.textContent = currentCurlCmd;
+        }
 
         // Click to copy
         cmdBox.addEventListener('click', async () => {
+            if (!currentCurlCmd) return;
             try {
-                await navigator.clipboard.writeText(curlCmd);
+                await navigator.clipboard.writeText(currentCurlCmd);
                 cmdBox.classList.add('copied');
                 setTimeout(() => cmdBox.classList.remove('copied'), 2000);
             } catch (e) {
                 console.error('Copy failed:', e);
             }
         });
+
+        if (shortUrlKey) {
+            // Password mode: fetch URL from SW when "more info" is expanded
+            cmdBox.textContent = 'Loading...';
+            $('more-info').addEventListener('toggle', async () => {
+                if (!$('more-info').open) return;
+                try {
+                    const freshUrl = await fetchUrlFromSW();
+                    populateCurlCommand(freshUrl);
+                } catch (e) {
+                    cmdBox.textContent = 'Failed to fetch URL: ' + e.message;
+                }
+            });
+        } else {
+            // URL params mode: URL is available immediately
+            populateCurlCommand(s3Url);
+        }
 
         // Update countdown every second (only meaningful for static hash URLs)
         if (expiresAt && !shortUrlKey) {

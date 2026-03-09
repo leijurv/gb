@@ -133,6 +133,23 @@ async function requestParamsFromPage(password) {
     return data.params;
 }
 
+// Get cached share metadata for a password link, with restart-safe rehydration.
+async function getShareCache(password) {
+    let cached = cachedShareByPassword.get(password);
+    if (cached) {
+        return cached;
+    }
+
+    await requestParamsFromPage(password);
+    cached = cachedShareByPassword.get(password);
+    if (cached) {
+        return cached;
+    }
+
+    await queryAndParseParameters(password);
+    return cachedShareByPassword.get(password) || null;
+}
+
 // Ask page for params - broadcast to all clients, first response wins
 async function requestParamsFromPage0(id, type, callback) {
     const clients = await self.clients.matchAll({ type: 'window' });
@@ -888,16 +905,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
         let paramsArray;
         if (password) {
-            let cached = cachedShareByPassword.get(password);
-            if (cached) {
-                paramsArray = cached.params;
-            } else {
-                let pageParams = await requestParamsFromPage(password);
-                if (!pageParams) {
-                    return new Response('Error: unknown zip file id', { status: 404 });
-                }
-                paramsArray = pageParams;
+            let cached;
+            try {
+                cached = await getShareCache(password);
+            } catch (e) {
+                return new Response(`Error: ${e.message}`, { status: 404 });
             }
+            if (!cached) {
+                return new Response('Error: unknown zip file id', { status: 404 });
+            }
+            paramsArray = cached.params;
             if (hash) {
                 const found = paramsArray.find(p => p.sha256 === hash);
                 if (found) {
@@ -942,17 +959,7 @@ self.addEventListener('fetch', (event) => {
             return addCoiHeaders(response);
         } else if (password) {
             let downloadFilename = url.searchParams.get('download-filename');
-            let array;
-            let cached = cachedShareByPassword.get(password);
-            if (cached) {
-                array = cached.params;
-            } else {
-                let pageParams = await requestParamsFromPage(password);
-                if (!pageParams) {
-                    return new Response('Error: unknown zip file id', { status: 404 });
-                }
-                array = pageParams;
-            }
+            const array = paramsArray;
 
             let responses = fileResponses(array, password);
             let zipResponse = downloadZip(responses, {metadata: fileMetadata(array)});
@@ -987,6 +994,28 @@ self.addEventListener('message', async (event) => {
                 nonce: cached.nonce,
                 byteOffsets: cached.byteOffsets
             });
+        } catch (e) {
+            event.ports[0].postMessage({ error: e.message });
+        }
+    } else if (event.data.type === 'get-url') {
+        const { password, sha256 } = event.data;
+        try {
+            const cached = await getShareCache(password);
+            if (!cached) {
+                event.ports[0].postMessage({ error: 'No cached share data' });
+                return;
+            }
+            const entry = cached.params.find(p => p.sha256 === sha256);
+            if (!entry) {
+                event.ports[0].postMessage({ error: 'Entry not found' });
+                return;
+            }
+            const url = await getPresignedUrl(entry);
+            if (!url) {
+                event.ports[0].postMessage({ error: 'Share link expired' });
+                return;
+            }
+            event.ports[0].postMessage({ url });
         } catch (e) {
             event.ports[0].postMessage({ error: e.message });
         }

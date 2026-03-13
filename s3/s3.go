@@ -362,17 +362,21 @@ func (up *s3Upload) Cancel() {
 }
 
 func (up *s3Upload) assertNotPubliclyAccessible(url string) {
-	resp, err := http.Get(url)
-	if err != nil {
-		panic(err)
+	for retry := 0; retry < 10; retry++ {
+		resp, err := http.Get(url)
+		if err != nil {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 { // hilarious: backblaze gives 401, oracle cloud gives 404, AWS S3 gives 403
+			// good, bucket is not publicly accessible
+			return
+		}
+		up.s3.DeleteBlob(up.path)
+		panic("Your bucket is publicly accessible, probably not a good idea! (Use `gb share` to share files). Got status " + resp.Status + " when fetching " + url)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 && resp.StatusCode < 500 { // hilarious: backblaze gives 401, oracle cloud gives 404, AWS S3 gives 403
-		// good, bucket is not publicly accessible
-		return
-	}
-	up.s3.DeleteBlob(up.path)
-	panic("Your bucket is publicly accessible, probably not a good idea! (Use `gb share` to share files). Got status " + resp.Status + " when fetching " + url)
+	panic("Unable to check if your bucket is publicly accessible")
 }
 
 func fetchETagAndSize(remote *S3, path string) (string, int64) {

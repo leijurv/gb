@@ -473,40 +473,6 @@ func main() {
 			},
 		},
 		{
-			Name:  "shared",
-			Usage: "run a server that fulfills requests for files shared with `gb share-url`. files are served proxied from storage, not locally",
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:  "label",
-					Usage: "storage label",
-				},
-				cli.StringFlag{
-					Name:  "listen",
-					Usage: "ip and port to listen on",
-					Value: ":7894",
-				},
-			},
-			Action: func(c *cli.Context) error {
-				share.Shared(c.String("label"), c.String("listen"))
-				return nil
-			},
-		},
-		{
-			Name:  "share-url",
-			Usage: "create a shareable url for a file or hash, assuming you are running the `gb shared` server somewhere publicly accessible on the internet",
-			Flags: []cli.Flag{
-				cli.StringFlag{
-					Name:  "name",
-					Usage: "override the filename",
-					Value: "",
-				},
-			},
-			Action: func(c *cli.Context) error {
-				share.CreateShareURL(c.Args().First(), c.String("name"))
-				return nil
-			},
-		},
-		{
 			Name:  "share",
 			Usage: "create a self-contained shareable URL that works without needing to run a server",
 			Flags: []cli.Flag{

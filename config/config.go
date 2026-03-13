@@ -33,7 +33,6 @@ type ConfigData struct {
 	DedupeExclude          []string `json:"dedupe_exclude"`
 	IgnorePermissionErrors bool     `json:"ignore_permission_errors"`
 	ShareUsePasswordURL    bool     `json:"share_use_password_url"`
-	ShareParameterizedURL  string   `json:"share_parameterized_url"`
 	SharePasswordURL       string   `json:"share_password_url"`
 	ShareUrlPasswordLength int      `json:"share_url_password_length"`
 	DisableLeptonGo        bool     `json:"disable_lepton_go"`
@@ -125,7 +124,6 @@ var config = ConfigData{
 	// Whether gb will by default generate a shortened share url served by `SharePasswordURL`.
 	// Default is false because it requires some setup and parameterized urls will always be usable through the hardcoded default url
 	ShareUsePasswordURL:    false,
-	ShareParameterizedURL:  "",
 	SharePasswordURL:       "",
 	ShareUrlPasswordLength: 10,
 	DisableLeptonGo:        false,

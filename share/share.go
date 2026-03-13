@@ -1,15 +1,12 @@
 package share
 
 import (
-	"bytes"
 	"encoding/hex"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/leijurv/gb/backup"
-	"github.com/leijurv/gb/config"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/utils"
 )
@@ -59,34 +56,3 @@ func ResolvePathOrHash(pathOrHash string, overrideName string) (hash []byte, sha
 	return hash, sharedName
 }
 
-func CreateShareURL(pathOrHash string, overrideName string) {
-	hash, sharedName := ResolvePathOrHash(pathOrHash, overrideName)
-	shareBase := config.Config().ShareParameterizedURL
-	if shareBase == "" {
-		log.Println("You don't appear to have `share_parameterized_url` set in your .gb.conf")
-		log.Println("If you were running `gb shared` on \"https://gb.yourdomain.com\", you'd want to set the `share_parameterized_url` to that, then I can print out the full URL right here instead of just the path")
-	} else {
-		log.Printf("Using the share base URL of `%s` as defined in `share_parameterized_url` of your .gb.conf\n", shareBase)
-	}
-	for strings.HasSuffix(shareBase, "/") {
-		shareBase = shareBase[:len(shareBase)-1]
-	}
-	url := MakeShareURL(hash, sharedName)
-
-	// sanity check
-	verifyHash, err := ValidateURL(url)
-	if err != nil {
-		log.Println("error, this can happen if you try to share a sha256 that isn't actually in .gb.db")
-		panic(err)
-	}
-	if !bytes.Equal(verifyHash, hash) {
-		panic("didn't decode / verify")
-	}
-	log.Println("Verified that this URL can be correctly decoded and verified back to the original hash")
-	log.Println(shareBase + url)
-	// but i want to share directories too. without revealing the full path to that directory
-	// ideas:
-	// encrypted directory? too long and reveals length maybe?
-	// new table in sqlite where its just two columns, the directory name and a random identifier?
-	// give the hash of some element of the directory, then compute what directory it's in?
-}

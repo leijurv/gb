@@ -91,6 +91,7 @@ var config = ConfigData{
 		"bzip2",
 		"xz",
 		"zst",
+		"zstd",
 		"aes",
 		"gpg",
 		"aac",

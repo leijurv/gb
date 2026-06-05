@@ -123,7 +123,7 @@ func (s *BackupSession) executeBlobUploadPlan(plan BlobPlan, serv UploadService)
 
 	s.hashLateMapLock.Lock() // YES, the database query MUST be within this lock (to make sure that the Commit happens before this defer!)
 	defer s.hashLateMapLock.Unlock()
-	tx, err := db.DB.Begin()
+	tx, err := db.RWDB.Begin()
 	db.Must(err)
 	defer tx.Rollback()
 	// **obviously** all this needs to be in a tx

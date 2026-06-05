@@ -81,7 +81,7 @@ func dbKeyImpl(interactive bool) []byte {
 		if interactive {
 			Mnemonic(key)
 		}
-		_, err = db.DB.Exec("INSERT INTO db_key (key, id) VALUES (?, 0)", key)
+		_, err = db.RWDB.Exec("INSERT INTO db_key (key, id) VALUES (?, 0)", key)
 	}
 	db.Must(err)
 	if len(key) != 16 {

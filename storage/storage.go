@@ -81,7 +81,7 @@ func NewStorage(kind string, identifier string, rootPath string, label string) s
 	if !bytes.Equal(storage.GetID(), storageID) {
 		panic("sanity check")
 	}
-	_, err := db.DB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, kind, identifier, rootPath, label)
+	_, err := db.RWDB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, kind, identifier, rootPath, label)
 	db.Must(err)
 	return storage
 }
@@ -130,7 +130,7 @@ func RegisterMockStorage(stor storage_base.Storage, label string) {
 	cacheLock.Lock()
 	cache[utils.SliceToArr(storageID)] = stor
 	cacheLock.Unlock()
-	_, err := db.DB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, "Mock", "mock-identifier", "/mock", label)
+	_, err := db.RWDB.Exec("INSERT INTO storage (storage_id, type, identifier, root_path, readable_label) VALUES (?, ?, ?, ?, ?)", storageID, "Mock", "mock-identifier", "/mock", label)
 	db.Must(err)
 }
 

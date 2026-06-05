@@ -345,7 +345,7 @@ func insertShare(entries []entry, name string, stor storage_base.Storage, expiry
 	}
 
 	// Insert into shares and share_entries tables
-	tx, err := db.DB.Begin()
+	tx, err := db.RWDB.Begin()
 	db.Must(err)
 	defer tx.Rollback()
 

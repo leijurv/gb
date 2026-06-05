@@ -47,7 +47,7 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 		log.Println("This hash is unchanged from last time, even though last modified is changed...?")
 		log.Println("Updating fs_modifed in db so next time I don't reread this for no reason lol")
 		// this is VERY uncommon, so it is NOT worth maintaining a db WRITE transaction for it sadly
-		_, err := db.DB.Exec("UPDATE files SET fs_modified = ?, permissions = ? WHERE path = ? AND end IS NULL", info.ModTime().Unix(), info.Mode()&os.ModePerm, path)
+		_, err := db.RWDB.Exec("UPDATE files SET fs_modified = ?, permissions = ? WHERE path = ? AND end IS NULL", info.ModTime().Unix(), info.Mode()&os.ModePerm, path)
 		db.Must(err)
 		return
 	}
@@ -61,7 +61,7 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 	bucketWithKnownHash := func() *Planned {
 		s.hashLateMapLock.Lock() // this lock ensures atomicity between the hashLateMap, and the database (blob_entries and files)
 		defer s.hashLateMapLock.Unlock()
-		tx, err := db.DB.Begin()
+		tx, err := db.RWDB.Begin() // reads then writes (fileHasKnownData)
 		db.Must(err)
 		defer tx.Rollback() // fileHasKnownData can panic
 		var dbHash []byte

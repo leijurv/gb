@@ -62,7 +62,7 @@ func ReplicateBlobs(label string) {
 					bytes := paranoia.BlobReaderParanoia(rd, blob.BlobID, storage)
 					atomic.AddInt64(sz, bytes)
 					completed := out.End()
-					_, err := db.DB.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blob.BlobID, completed.StorageID, completed.Path, completed.Checksum, time.Now().Unix())
+					_, err := db.RWDB.Exec("INSERT INTO blob_storage (blob_id, storage_id, path, checksum, timestamp) VALUES (?, ?, ?, ?, ?)", blob.BlobID, completed.StorageID, completed.Path, completed.Checksum, time.Now().Unix())
 					if err != nil {
 						panic(err)
 					}

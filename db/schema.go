@@ -44,7 +44,7 @@ To see the final schema that gb actually uses today, refer to schema.sql
 */
 
 func schemaVersionOne() error {
-	tx, err := DB.Begin()
+	tx, err := RWDB.Begin()
 	Must(err)
 	defer tx.Rollback()
 	_, err = tx.Exec(`
@@ -174,9 +174,9 @@ func schemaVersionOne() error {
 }
 
 func schemaVersionTwo() error {
-	_, err := DB.Exec("PRAGMA foreign_keys = OFF")
+	_, err := RWDB.Exec("PRAGMA foreign_keys = OFF")
 	Must(err)
-	tx, err := DB.Begin()
+	tx, err := RWDB.Begin()
 	Must(err)
 	// defer rollback BUT commit after successful execution
 	defer tx.Rollback() // !!!intended to NOT actually rollback!!!
@@ -231,13 +231,13 @@ func schemaVersionTwo() error {
 		return err
 	}
 	Must(tx.Commit())
-	_, err = DB.Exec("PRAGMA foreign_keys = ON")
+	_, err = RWDB.Exec("PRAGMA foreign_keys = ON")
 	Must(err)
 	return nil
 }
 
 func schemaVersionThree() error {
-	tx, err := DB.Begin()
+	tx, err := RWDB.Begin()
 	Must(err)
 	defer tx.Rollback()
 	_, err = tx.Exec(`
@@ -294,7 +294,8 @@ func schemaVersionThree() error {
 }
 
 func query(query string) string {
-	rows, err := DB.Query(query)
+	// runs during initialSetup(), before the read-only DB pool exists, so use RWDB
+	rows, err := RWDB.Query(query)
 	Must(err)
 	defer rows.Close()
 	ret := ""

@@ -315,7 +315,7 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 
 	// Step 9: Database Transaction
 	log.Println("Beginning database transaction...")
-	tx, err := db.DB.Begin()
+	tx, err := db.RWDB.Begin()
 	db.Must(err)
 	defer tx.Rollback()
 

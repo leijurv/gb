@@ -17,7 +17,13 @@ const databaseTestPath = "file::memory:?mode=memory&cache=shared&_foreign_keys=1
 
 var ErrNoRows = sql.ErrNoRows
 
+// Two pools so a read-then-write upgrade can never race into a SQLITE_BUSY_SNAPSHOT panic
+// (which _busy_timeout doesn't cover). All reads go through DB, all writes through RWDB.
+//
+// DB is read-only (query_only): writes fail immediately with SQLITE_READONLY.
+// RWDB is read-write (txlock=immediate): every tx is BEGIN IMMEDIATE, taking the write lock up front.
 var DB *sql.DB
+var RWDB *sql.DB
 
 // only to be used for sqlite errors
 // sql errors in gb are 1. unrecoverable 2. not expected to ever be user-facing
@@ -45,23 +51,25 @@ func SetupDatabase() {
 	} else {
 		db = config.Config().DatabaseLocation
 	}
-	setupDatabase("file:"+db+"?_foreign_keys=1&_journal_mode=wal&_sync=1&_busy_timeout=20000", true)
+	base := "file:" + db + "?_foreign_keys=1&_journal_mode=wal&_sync=1&_busy_timeout=20000"
+	// open RWDB first: it creates the WAL and schema, which a query_only connection can't bootstrap
+	var err error
+	RWDB, err = sql.Open("sqlite3", base+"&_txlock=immediate")
+	Must(err)
+	_, err = RWDB.Exec("PRAGMA journal_size_limit = 100000000") // 100 megabytes
+	Must(err)
+	initialSetup()
+
+	DB, err = sql.Open("sqlite3", base+"&_query_only=true")
+	Must(err)
 }
 
 func SetupDatabaseTestMode(setupSchema bool) {
-	setupDatabase(databaseTestPath, setupSchema)
-}
-
-func setupDatabase(fullPath string, setupSchema bool) {
-	//log.Println("Opening database file", fullPath)
+	// in-memory shared-cache db, not WAL: no concurrent-writer races, so DB and RWDB share one handle
 	var err error
-	DB, err = sql.Open("sqlite3", fullPath)
+	DB, err = sql.Open("sqlite3", databaseTestPath)
 	Must(err)
-	_, err = DB.Exec("PRAGMA journal_size_limit = 100000000") // 100 megabytes
-	Must(err)
-	//log.Println("Database connection created")
-	//DB.SetMaxOpenConns(1) // 100x better to block for a few hundred ms than to panic with SQLITE_BUSY!!!!
-	// commenting out until i actually hit a sqlite_busy
+	RWDB = DB
 	if setupSchema {
 		initialSetup()
 	}
@@ -72,5 +80,10 @@ func ShutdownDatabase() {
 		log.Println("Attempting to shutdown a database that has never been setup??")
 		return
 	}
+	if RWDB != nil && RWDB != DB { // in test mode RWDB and DB are the same handle
+		RWDB.Close()
+	}
 	DB.Close()
+	DB = nil
+	RWDB = nil
 }

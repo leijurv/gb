@@ -109,9 +109,8 @@ func (s *BackupSession) scanFile(file File, tx *sql.Tx) {
 
 // find files in the database for this path, that no longer exist on disk (i.e. they're DELETED LOL)
 func (s *BackupSession) pruneDeletedFiles(backupPath string, filesMap map[string]os.FileInfo) {
-	// we cannot upgrade the long lived RO transaction to a RW transaction, it would conflict with the intermediary RW transactions, it seems
-	// reusing the tx from scanner results in a sqlite busy panic, very consistently
-	tx, err := db.DB.Begin()
+	// the scanner's long-lived tx is read-only (DB pool); this prunes (UPDATE files SET end), so its own RWDB tx
+	tx, err := db.RWDB.Begin()
 	db.Must(err)
 	if !strings.HasSuffix(backupPath, "/") {
 		panic(backupPath) // sanity check, should have already been completed

@@ -153,7 +153,7 @@ func RevokeShare(password string) {
 
 	// Set revoked_at in shares table first, then upload
 	now := time.Now().Unix()
-	_, err = db.DB.Exec(`
+	_, err = db.RWDB.Exec(`
 		UPDATE shares SET revoked_at = ? WHERE password = ?
 	`, now, password)
 	db.Must(err)

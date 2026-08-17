@@ -1056,6 +1056,73 @@ func TestBackupSizeClaimsDontBlockHasher(t *testing.T) {
 	}
 }
 
+// Test that files which only reach the bucketer *after* every hasher has exited still get
+// batched into blobs, instead of each becoming its own undersized blob.
+//
+// hasherWg going to zero does NOT mean nothing more can reach the bucketer: hashOneFile
+// registers a callback rather than writing to bucketerCh itself, and a callback parked on a
+// size claim is only fired later, by an uploader, when the blob holding the staked file
+// finishes. A real backup hit this with two copies of a photo directory whose files had
+// byte-identical sizes: 236 files unparked after the hashers were gone and went out as 236
+// solo blobs averaging 5MB against a 256MB min_blob_size.
+func TestBackupUnparkedFilesAfterHashersExitAreStillBatched(t *testing.T) {
+	env := setupUnitTestEnv(t)
+	defer env.cleanup()
+
+	// all the same size, so only the first one gets to stake the size claim
+	const size = 300
+	const numDups = 5
+	blocker := bytes.Repeat([]byte{1}, size)
+	dups := make([][]byte, numDups)
+	for i := range dups {
+		dups[i] = bytes.Repeat([]byte{byte(i + 2)}, size)
+	}
+	dupPath := func(i int) string { return fmt.Sprintf("/mock/dup%d.bin", i) }
+
+	env.beginBackupOnDir("/mock/")
+
+	// stakes the size claim and skips the hasher, so it sits in the bucketer's buffer
+	// (300 < MinBlobSize) holding the claim, without ever being opened
+	env.sendFile("/mock/blocker.bin", blocker)
+
+	// these all fail to stake, so they go to the hasher, and each parks on blocker's claim
+	for i := range dups {
+		env.sendFile(dupPath(i), dups[i])
+		env.shouldOpen(dupPath(i), dups[i]) // hasher opens for hashing
+	}
+
+	env.endWalk() // scanner returns, hashers exit, but 5 writes to bucketerCh are still parked
+
+	// Nothing is uploading and every pending write is parked, so the bucketer is the only
+	// thing in the way: it flushes blocker, whose upload releases the claim.
+	env.shouldOpen("/mock/blocker.bin", blocker)
+
+	// The unparked files now arrive one at a time, and must be *bucketed*, not dumped solo.
+	// dup0..dup3 fill a blob (4*300 >= MinBlobSize of 1000), dup4 is the leftover tail.
+	for i := range dups {
+		env.shouldOpen(dupPath(i), dups[i])
+	}
+
+	env.completeBackup()
+
+	env.assertUploaded("/mock/blocker.bin", blocker)
+	for i := range dups {
+		env.assertUploaded(dupPath(i), dups[i])
+	}
+	env.assertFileCount(numDups + 1)
+	env.assertBlobEntries(numDups + 1)
+	// blocker, then dup0-dup3, then dup4. Before this was fixed it was 6: one per file.
+	env.assertBlobCount(3)
+
+	var biggest int
+	if err := db.DB.QueryRow("SELECT MAX(cnt) FROM (SELECT COUNT(*) cnt FROM blob_entries GROUP BY blob_id)").Scan(&biggest); err != nil {
+		t.Fatal(err)
+	}
+	if biggest != 4 {
+		t.Errorf("expected the unparked files to be batched into a blob of 4, biggest blob had %d entries", biggest)
+	}
+}
+
 // Test that deleted files are marked as ended by pruneDeletedFiles.
 func TestBackupPruneDeletedFiles(t *testing.T) {
 	env := setupUnitTestEnv(t)

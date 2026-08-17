@@ -49,6 +49,71 @@ type sizeClaim struct {
 	mu        sync.Mutex // protects callbacks and released
 }
 
+// bucketerState answers one question for the bucketer: can the pipeline make progress
+// without flushing a blob that isn't full yet?
+//
+// Only two things ever write to bucketerCh: the scanner (staked size claims, written
+// synchronously) and the callbacks registered by hashOneFile. Each registered callback is
+// either runnable (executing now, or about to be) or parked in a sizeClaim, in which case
+// only a completing upload can ever wake it.
+//
+// So once no new registrations are possible, the pipeline is deadlocked exactly when every
+// pending write is parked and no upload is running to unpark one. At that point the only
+// claims still held belong to files sitting in the bucketer's own buffer (every staked file
+// has already been received by the bucketer, so it's either in a finished blob - claim
+// already released - or in the buffer), which means flushing the buffer is guaranteed to
+// release them. That's a precise condition, so the bucketer never needs a timeout.
+type bucketerState struct {
+	mu          sync.Mutex
+	pending     int  // registered bucketerCh writes that have not been delivered yet
+	parked      int  // subset of pending that is waiting on a sizeClaim to be released
+	uploading   int  // blob plans dispatched to uploaderCh that have not finished yet
+	noMoreInput bool // the scanner has returned and every hasher goroutine has exited
+
+	poke chan struct{} // capacity 1, wakes the bucketer up to re-evaluate action()
+}
+
+// update mutates the state and then wakes the bucketer. The order matters: the bucketer
+// re-reads the whole state after draining a poke, so a mutation that becomes visible before
+// its poke can never be missed.
+func (b *bucketerState) update(f func()) {
+	b.mu.Lock()
+	f()
+	b.mu.Unlock()
+	select {
+	case b.poke <- struct{}{}:
+	default: // a wakeup is already queued, and it'll observe our mutation too
+	}
+}
+
+type bucketerAction int
+
+const (
+	bucketerWait bucketerAction = iota
+	bucketerFlush
+	bucketerDone
+)
+
+func (b *bucketerState) action() bucketerAction {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch {
+	case !b.noMoreInput:
+		// the scanner and/or a hasher can still produce more work, unprompted
+		return bucketerWait
+	case b.pending == 0:
+		// nothing can ever arrive again
+		return bucketerDone
+	case b.pending == b.parked && b.uploading == 0:
+		// everything left is parked on a size claim, and no upload is running to release
+		// one. every claim still held belongs to a file in the bucketer's buffer, so
+		// nothing moves until we flush it.
+		return bucketerFlush
+	default:
+		return bucketerWait
+	}
+}
+
 // an abstraction over uploading to our storage destinations
 // stateful, End must be called after Begin (so, obviously, cannot be used from multiple threads)
 // can be reused sequentially, though
@@ -75,10 +140,13 @@ type BackupSession struct {
 	hashLateMapLock sync.Mutex
 
 	// Pipeline channels
-	hasherCh            chan HashPlan
-	bucketerCh          chan Planned
-	uploaderCh          chan BlobPlan
-	bucketerPassthrough chan struct{}
+	hasherCh   chan HashPlan
+	bucketerCh chan Planned
+	uploaderCh chan BlobPlan
+
+	// tracks whether anything can still reach the bucketer, and whether the bucketer is
+	// the only thing standing in the way of progress
+	bucketer bucketerState
 
 	// Synchronization
 	filesWg  sync.WaitGroup // files in the upload pipeline
@@ -110,18 +178,19 @@ func NewBackupSession() *BackupSession {
 	lastSessionTime = now
 	lastSessionTimeLock.Unlock()
 
-	return &BackupSession{
-		now:                 now,
-		sizeClaimMap:        make(map[int64]*sizeClaim),
-		hashLateMap:         make(map[[32]byte][]File),
-		hasherCh:            make(chan HashPlan),
-		bucketerCh:          make(chan Planned),
-		uploaderCh:          make(chan BlobPlan),
-		bucketerPassthrough: make(chan struct{}),
-		currentlyUploading:  make(map[string]*utils.HasherSizer),
-		Walker:              defaultWalker{},
-		FileOpener:          osFileOpener{},
+	s := &BackupSession{
+		now:                now,
+		sizeClaimMap:       make(map[int64]*sizeClaim),
+		hashLateMap:        make(map[[32]byte][]File),
+		hasherCh:           make(chan HashPlan),
+		bucketerCh:         make(chan Planned),
+		uploaderCh:         make(chan BlobPlan),
+		currentlyUploading: make(map[string]*utils.HasherSizer),
+		Walker:             defaultWalker{},
+		FileOpener:         osFileOpener{},
 	}
+	s.bucketer.poke = make(chan struct{}, 1)
+	return s
 }
 
 // NewBackupSessionWithTime creates a new backup session with a specific timestamp.
@@ -226,6 +295,8 @@ func (s *BackupSession) releaseAndUnstakeSizeClaim(size int64) {
 	claim.released = true
 	callbacks := claim.callbacks
 	claim.callbacks = nil
+	// these are about to become runnable, so they no longer count against the bucketer
+	s.bucketer.update(func() { s.bucketer.parked -= len(callbacks) })
 	go func() {
 		// any call to registerSizeClaimCallback around here will block on claim.mu.Lock - works fine
 		for _, cb := range callbacks {
@@ -255,6 +326,9 @@ func (s *BackupSession) registerSizeClaimCallback(size int64, callback func()) {
 		return
 	}
 	claim.callbacks = append(claim.callbacks, callback)
+	// this write to bucketerCh can now only happen once some upload releases this claim,
+	// which the bucketer needs to know about to detect that it's the one holding things up
+	s.bucketer.update(func() { s.bucketer.parked++ })
 	claim.mu.Unlock() // lock protects claim.callbacks
 }
 

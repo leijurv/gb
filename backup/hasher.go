@@ -96,6 +96,9 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 
 	// split this up into two functions so that as above ^, we write the result after the defer unlock
 	nextStepWrapper := func() {
+		// note that this runs *after* the send has been received by the bucketer, so the
+		// bucketer can never see pending hit zero while a write is still in flight
+		defer s.bucketer.update(func() { s.bucketer.pending-- })
 		plan := bucketWithKnownHash()
 		if plan != nil {
 			s.bucketerCh <- *plan
@@ -112,6 +115,9 @@ func (s *BackupSession) hashOneFile(plan HashPlan) {
 	// actually been the same hash as this file, resulting in us not actually needing to write
 	// anything to bucketerCh.
 	s.filesWg.Add(1)
+	// likewise, the bucketer must not conclude that nothing more is coming while this
+	// callback is still outstanding, however long it ends up being parked for
+	s.bucketer.update(func() { s.bucketer.pending++ })
 
 	// Register callback to be invoked when the size claim is released (or immediately if no claim).
 	// This ensures FIFO ordering - callbacks are invoked in the order they were registered.

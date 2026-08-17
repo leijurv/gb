@@ -24,6 +24,10 @@ func (s *BackupSession) uploaderThread(service UploadService) {
 
 func (s *BackupSession) executeBlobUploadPlan(plan BlobPlan, serv UploadService) {
 	log.Println("Executing upload plan", plan)
+	// deliberately the first defer registered, so that it runs *last*: the size claims below
+	// must be released (unparking whatever was waiting on them) before the bucketer is told
+	// that no upload is in progress, otherwise it could flush a moment too early
+	defer s.bucketer.update(func() { s.bucketer.uploading-- })
 	for _, f := range plan {
 		defer s.filesWg.Done() // there's a wg.Add(1) for each and every entry in the plan
 		if f.stakedClaim != nil {
@@ -208,9 +212,16 @@ func (s *BackupSession) uploadFailure(planned Planned) {
 		// confirmed, another file was relying on this
 		newSource := late[0] // enqueue THAT file to be uploaded
 		s.filesWg.Add(1)
+		// this goes straight to the uploaders rather than back through the bucketer. the
+		// uploader is the one producer that can conjure up new work out of nowhere, long
+		// after the scanner and hashers are done, and letting it write to bucketerCh would
+		// mean the bucketer could never know when its input was really finished. this is a
+		// rare error path (a file changed underneath us, or became unreadable), so a solo
+		// blob for it is a fine trade.
+		s.bucketer.update(func() { s.bucketer.uploading++ }) // synchronously, so the count never dips to zero across the handoff
 		go func() {
 			// obviously, only write ONE of the other files we know to have this hash, not all
-			s.bucketerCh <- Planned{newSource, plannedHash, planned.confirmedSize, nil}
+			s.uploaderCh <- BlobPlan{{newSource, plannedHash, planned.confirmedSize, nil}}
 		}() // we will upload the next file on the list with the same hash so they don't get left stranded (hashed, planned, but not actually uploaded)
 	} else {
 		delete(s.hashLateMap, expected) // important! otherwise the ok / len(late) > 0 check would panic lmao

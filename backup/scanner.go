@@ -70,9 +70,12 @@ func (s *BackupSession) scannerThread(inputs []File) {
 	log.Println("Scanner committed")
 	close(s.hasherCh)
 	s.hasherWg.Wait() // wait for all hasher goroutines to exit
-	log.Println("Hashers done, switching bucketer to passthrough mode")
-	s.bucketerPassthrough <- struct{}{}
-	s.filesWg.Wait()
+	// every write to bucketerCh has now either happened (the scanner's own staked claims,
+	// which are sent synchronously above) or been registered as a callback by a hasher.
+	// nothing new can appear from here on, so the bucketer can start reasoning about when
+	// it's done and when it's the only thing blocking progress.
+	log.Println("Scanner and hashers done, no new work can enter the bucketer")
+	s.bucketer.update(func() { s.bucketer.noMoreInput = true })
 }
 
 func (s *BackupSession) scanFile(file File, tx *sql.Tx) {

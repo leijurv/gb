@@ -98,9 +98,8 @@ func (s *BackupSession) Run(rawPaths []string) {
 	}
 
 	s.scannerThread(inputs)
-	s.filesWg.Wait()
+	s.filesWg.Wait() // the bucketer flushes its tail and exits on its own once nothing more can reach it
 	done <- struct{}{}
-	close(s.bucketerCh)
 	log.Println("Backup complete")
 }
 

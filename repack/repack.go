@@ -352,6 +352,8 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 		storageID []byte
 	}
 	var updatedShares []updatedShare
+	// a single share can have many entries pointing into the repacked blobs, but its JSON only needs to be regenerated once per storage
+	seenShares := make(map[string]struct{})
 
 	for _, blob := range newBlobs {
 		for _, entry := range blob.entries {
@@ -362,6 +364,11 @@ func RepackBlobIDs(blobIDs [][]byte, stor storage_base.Storage, allowSingleEntry
 				var storageID []byte
 				db.Must(rows.Scan(&password, &storageID))
 				log.Printf("Updated share entry %s to point to new blob %s", password, hex.EncodeToString(blob.blobID[:8]))
+				key := password + "\x00" + string(storageID)
+				if _, ok := seenShares[key]; ok {
+					continue
+				}
+				seenShares[key] = struct{}{}
 				updatedShares = append(updatedShares, updatedShare{password: password, storageID: storageID})
 			}
 			db.Must(rows.Err())

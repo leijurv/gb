@@ -980,11 +980,19 @@ func TestBackupBackpressure(t *testing.T) {
 		// blocked as expected
 	}
 
-	// Cleanup: unblock everything
+	// Cleanup: unblock everything. Letting blocker1 finish frees the uploader, which takes
+	// blocker2 off uploaderCh, which unblocks the bucketer, which takes file1 off
+	// bucketerCh, which unblocks the hasher, which takes file2 off hasherCh.
 	blocker1OpenCall.response <- openResponse{reader: io.NopCloser(bytes.NewReader(blocker1Content))}
-	env.shouldOpen("/mock2/blocker2.bin", blocker2Content)
-	<-file2Done
-	env.shouldOpen("/mock2/file2.bin", file2Content)
+	<-file2Done // the whole chain above has drained, so backpressure has been relieved
+
+	// The tail of that chain leaves two goroutines runnable at the same instant, and both
+	// go on to call Open: the uploader reading blocker2 to upload it, and the hasher
+	// reading file2 to hash it. Either can reach the mock first.
+	env.mockFS.shouldOpenInAnyOrder(map[string][]byte{
+		"/mock2/blocker2.bin": blocker2Content,
+		"/mock2/file2.bin":    file2Content,
+	})
 	env.endWalk()
 
 	// Drain file1 and file2 upload opens

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -128,6 +129,41 @@ func (m *mockFileOpener) shouldOpen(path string, content []byte, err error) {
 		}
 	case <-time.After(5 * time.Second):
 		m.t.Fatalf("timeout waiting for open(%q)", path)
+	}
+}
+
+// shouldOpenInAnyOrder waits for exactly one Open call per entry in contents and answers
+// each with its matching content, without caring which order they arrive in.
+//
+// Use this when two goroutines become runnable at the same instant and both go on to call
+// Open - typically the hasher reading a file to hash it while an uploader reads a different
+// file to upload it. Which one reaches the mock first is genuinely arbitrary, so asserting a
+// particular order there is testing the scheduler, not the backup pipeline.
+func (m *mockFileOpener) shouldOpenInAnyOrder(contents map[string][]byte) {
+	remaining := make(map[string][]byte, len(contents))
+	for path, content := range contents {
+		remaining[path] = content
+	}
+	awaiting := func() []string {
+		paths := make([]string, 0, len(remaining))
+		for path := range remaining {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		return paths
+	}
+	for len(remaining) > 0 {
+		select {
+		case call := <-m.openCalls:
+			content, expected := remaining[call.path]
+			if !expected {
+				m.t.Fatalf("unexpected open(%q), still waiting for opens of %v", call.path, awaiting())
+			}
+			delete(remaining, call.path)
+			call.response <- openResponse{reader: io.NopCloser(bytes.NewReader(content))}
+		case <-time.After(5 * time.Second):
+			m.t.Fatalf("timeout waiting for opens of %v", awaiting())
+		}
 	}
 }
 

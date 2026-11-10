@@ -99,8 +99,8 @@ func showBasicStats() {
 
 	fmt.Printf("Total files:           %s\n", utils.FormatCommas(totalFiles))
 	fmt.Printf("Distinct files:        %s\n", utils.FormatCommas(distinctFiles))
-	fmt.Printf("Total original size:   %s\n", formatBytes(totalOriginalBytes))
-	fmt.Printf("Total storage used:    %s\n", formatBytes(totalStorageBytes))
+	fmt.Printf("Total original size:   %s\n", utils.FormatBytes(totalOriginalBytes))
+	fmt.Printf("Total storage used:    %s\n", utils.FormatBytes(totalStorageBytes))
 
 	if totalOriginalBytes > 0 {
 		efficiencyPercent := float64(totalStorageBytes) / float64(totalOriginalBytes) * 100
@@ -110,7 +110,7 @@ func showBasicStats() {
 
 	if totalFiles > 0 {
 		avgFileSize := totalOriginalBytes / totalFiles
-		fmt.Printf("Average file size:     %s\n", formatBytes(avgFileSize))
+		fmt.Printf("Average file size:     %s\n", utils.FormatBytes(avgFileSize))
 	}
 }
 
@@ -151,7 +151,7 @@ func showDeduplicationStats() {
 	bytesSavedByDedup := totalBytes - uniqueBytes
 
 	fmt.Printf("Files with duplicates:  %s\n", utils.FormatCommas(duplicateFiles))
-	fmt.Printf("Bytes saved by dedup:   %s\n", formatBytes(bytesSavedByDedup))
+	fmt.Printf("Bytes saved by dedup:   %s\n", utils.FormatBytes(bytesSavedByDedup))
 
 	if totalBytes > 0 {
 		dedupSavingsPercent := float64(bytesSavedByDedup) / float64(totalBytes) * 100
@@ -184,7 +184,7 @@ func showDeduplicationStats() {
 		}
 		saved := size * (count - 1)
 		fmt.Printf("  %s × %d copies = %s saved\n",
-			formatBytes(size), count, formatBytes(saved))
+			utils.FormatBytes(size), count, utils.FormatBytes(saved))
 	}
 	db.Must(rows.Err())
 }
@@ -232,7 +232,7 @@ func showCompressionStats() {
 
 	totalSaved := totalOriginal - totalCompressed
 	fmt.Printf("Total compression savings: %s (%.1f%%)\n",
-		formatBytes(totalSaved),
+		utils.FormatBytes(totalSaved),
 		float64(totalSaved)/float64(totalOriginal)*100)
 	fmt.Println()
 
@@ -242,7 +242,7 @@ func showCompressionStats() {
 			ratio := float64(saved) / float64(cs.OriginalSize) * 100
 			fmt.Printf("%-10s: %s files, %s → %s (%.1f%% savings)\n",
 				cs.Algorithm, utils.FormatCommas(cs.Count),
-				formatBytes(cs.OriginalSize), formatBytes(cs.CompressedSize), ratio)
+				utils.FormatBytes(cs.OriginalSize), utils.FormatBytes(cs.CompressedSize), ratio)
 		}
 	}
 }
@@ -274,7 +274,7 @@ func showTopLargestFiles() {
 		}
 
 		hashStr := fmt.Sprintf("%x", lf.Hash)
-		fmt.Printf("%2d. %s\n", i, formatBytes(lf.Size))
+		fmt.Printf("%2d. %s\n", i, utils.FormatBytes(lf.Size))
 		fmt.Printf("    %s\n", lf.Path)
 		fmt.Printf("    %s\n", hashStr[:16]+"...")
 		fmt.Println()
@@ -335,7 +335,7 @@ func showFileExtensionStats() {
 			break
 		}
 		fmt.Printf("%-15s: %s files, %s\n",
-			es.Extension, utils.FormatCommas(es.Count), formatBytes(es.TotalSize))
+			es.Extension, utils.FormatCommas(es.Count), utils.FormatBytes(es.TotalSize))
 	}
 }
 
@@ -420,32 +420,9 @@ func showStorageStats() {
 		}
 
 		fmt.Printf("%-20s: %s blobs, %s\n",
-			ss.Label, utils.FormatCommas(ss.BlobCount), formatBytes(ss.TotalSize))
+			ss.Label, utils.FormatCommas(ss.BlobCount), utils.FormatBytes(ss.TotalSize))
 	}
 	db.Must(rows.Err())
-}
-
-func formatBytes(bytes int64) string {
-	if bytes == 0 {
-		return "0 B"
-	}
-
-	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
-	size := float64(bytes)
-	unitIndex := 0
-
-	for size >= 1024 && unitIndex < len(units)-1 {
-		size /= 1024
-		unitIndex++
-	}
-
-	if size >= 100 {
-		return fmt.Sprintf("%.0f %s", size, units[unitIndex])
-	} else if size >= 10 {
-		return fmt.Sprintf("%.1f %s", size, units[unitIndex])
-	} else {
-		return fmt.Sprintf("%.2f %s", size, units[unitIndex])
-	}
 }
 
 func formatDuration(d time.Duration) string {

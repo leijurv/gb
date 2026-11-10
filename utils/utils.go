@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"crypto/sha256"
 	"database/sql"
+	"fmt"
 	"hash"
 	"io"
 	"log"
@@ -240,6 +241,29 @@ var commaRegex = regexp.MustCompile("(\\d+)(\\d{3})")
 func FormatCommas(num int64) string {
 	str := strconv.FormatInt(num, 10)
 	return FormatCommasStr(str)
+}
+
+func FormatBytes(bytes int64) string {
+	if bytes == 0 {
+		return "0 B"
+	}
+
+	units := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+	size := float64(bytes)
+	unitIndex := 0
+
+	for size >= 1024 && unitIndex < len(units)-1 {
+		size /= 1024
+		unitIndex++
+	}
+
+	if size >= 100 {
+		return fmt.Sprintf("%.0f %s", size, units[unitIndex])
+	} else if size >= 10 {
+		return fmt.Sprintf("%.1f %s", size, units[unitIndex])
+	} else {
+		return fmt.Sprintf("%.2f %s", size, units[unitIndex])
+	}
 }
 
 func FormatCommasStr(num string) string {

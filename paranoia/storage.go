@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/share"
@@ -17,6 +18,10 @@ type storageAndPath struct { // can be used as a map key
 	storageID [32]byte
 	path      string
 }
+
+// unknown files uploaded more recently than this are never deleted, because they could belong to a backup or repack that is
+// running right now and hasn't committed them to the database yet (repack only commits once it's uploaded everything)
+const unknownFileMinAgeForDeletionDays = 7
 
 func StorageParanoia(deleteUnknownFiles bool) bool {
 	expected := fetchAllExpected()
@@ -43,7 +48,10 @@ func StorageParanoia(deleteUnknownFiles bool) bool {
 	}
 
 	unknownFiles := make([]storageAndPath, 0)
-	var totalBytes int64
+	deletableFiles := make([]storageAndPath, 0)
+	var deletableBytes int64
+	unknownCountPerStorage := make(map[[32]byte]int64)
+	unknownBytesPerStorage := make(map[[32]byte]int64)
 	for k, v := range actual {
 		_, ok := expected[k] // already checked keys that exist in both maps, so this is just keys that aren't present in expected
 		if !ok {
@@ -57,12 +65,36 @@ func StorageParanoia(deleteUnknownFiles bool) bool {
 			log.Println("Blob ID:", hex.EncodeToString(v.BlobID))
 			log.Println("Size (bytes):", utils.FormatCommas(v.Size))
 			unknownFiles = append(unknownFiles, k)
-			totalBytes += v.Size
+			unknownCountPerStorage[k.storageID]++
+			unknownBytesPerStorage[k.storageID] += v.Size
+			if !v.Uploaded.IsZero() && time.Since(v.Uploaded) >= unknownFileMinAgeForDeletionDays*24*time.Hour {
+				deletableFiles = append(deletableFiles, k)
+				deletableBytes += v.Size
+			}
 		}
 	}
 
-	if deleteUnknownFiles && len(unknownFiles) > 0 {
-		log.Printf("Are you sure you want to delete those %d files totaling %d bytes? Type 'yes' to continue: ", len(unknownFiles), totalBytes)
+	if len(unknownFiles) > 0 {
+		log.Println("Summary of unknown / unexpected files per storage:")
+		var totalBytes int64
+		for _, stor := range storage.GetAll() {
+			id := utils.SliceToArr(stor.GetID())
+			count, ok := unknownCountPerStorage[id]
+			if !ok {
+				continue
+			}
+			bytes := unknownBytesPerStorage[id]
+			totalBytes += bytes
+			log.Printf("  %s: %s files, %s bytes (%s)", stor, utils.FormatCommas(count), utils.FormatCommas(bytes), utils.FormatBytes(bytes))
+		}
+		log.Printf("  Total: %s files, %s bytes (%s)", utils.FormatCommas(int64(len(unknownFiles))), utils.FormatCommas(totalBytes), utils.FormatBytes(totalBytes))
+	}
+
+	if deleteUnknownFiles && len(deletableFiles) < len(unknownFiles) {
+		log.Printf("NOT deleting %d of those unknown files, because they were uploaded less than %d days ago (or the storage didn't say when). They could belong to a backup or repack that is still running. Run this again once they're older.", len(unknownFiles)-len(deletableFiles), unknownFileMinAgeForDeletionDays)
+	}
+	if deleteUnknownFiles && len(deletableFiles) > 0 {
+		log.Printf("Are you sure you want to delete the %d unknown files that are older than %d days, totaling %d bytes? Type 'yes' to continue: ", len(deletableFiles), unknownFileMinAgeForDeletionDays, deletableBytes)
 		var response string
 		_, err := fmt.Scanln(&response)
 		if err != nil || response != "yes" {
@@ -70,14 +102,14 @@ func StorageParanoia(deleteUnknownFiles bool) bool {
 			return false
 		}
 
-		log.Println("Deleting", len(unknownFiles), "unknown files...")
+		log.Println("Deleting", len(deletableFiles), "unknown files...")
 
-		for _, k := range unknownFiles {
+		for _, k := range deletableFiles {
 			stor := storage.GetByID(k.storageID[:])
 			stor.DeleteBlob(k.path)
 		}
 
-		log.Printf("Deletion complete: %d files deleted", len(unknownFiles))
+		log.Printf("Deletion complete: %d files deleted", len(deletableFiles))
 	}
 	if anyErrors {
 		panic("Storage paranoia found errors (see above)")

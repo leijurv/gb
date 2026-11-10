@@ -247,6 +247,7 @@ func (remote *S3) ListBlobs() []storage_base.UploadedBlob {
 						Checksum:  etag,
 						Size:      *obj.Size,
 						BlobID:    blobID,
+						Uploaded:  aws.ToTime(obj.LastModified),
 					})
 				}
 			}

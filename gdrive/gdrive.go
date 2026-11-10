@@ -110,7 +110,7 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 	log.Println("Requesting pages of size 1000, which is the maximum. This can take 20+ seconds per page because their API is super slow :(")
 	// increasing pagesize made this *slower*
 	// also 100 gives enough progress that people will realize it's working
-	query := gds.srv.Files.List().PageSize(1000).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size, name)")
+	query := gds.srv.Files.List().PageSize(1000).Q("'" + gds.root /* inb4 gdrive query injection */ + "' in parents and trashed = false").Fields("nextPageToken, files(id, md5Checksum, size, name, createdTime)")
 	files := make([]storage_base.UploadedBlob, 0)
 	for {
 		r, err := query.Do()
@@ -125,12 +125,17 @@ func (gds *gDriveStorage) ListBlobs() []storage_base.UploadedBlob {
 			if err != nil || len(blobID) != 32 {
 				panic("Unexpected file not following GB naming convention \"" + i.Name + "\" Google Drive file ID: " + i.Id)
 			}
+			uploaded, err := time.Parse(time.RFC3339, i.CreatedTime)
+			if err != nil {
+				uploaded = time.Time{} // unknown, which paranoia treats as too new to delete
+			}
 			files = append(files, storage_base.UploadedBlob{
 				StorageID: gds.storageID,
 				Path:      i.Id,
 				Checksum:  i.Md5Checksum,
 				Size:      i.Size,
 				BlobID:    blobID,
+				Uploaded:  uploaded,
 			})
 		}
 		if r.NextPageToken == "" {

@@ -48,6 +48,7 @@ type UploadedBlob struct {
 	Path      string
 	Checksum  string
 	Size      int64
+	Uploaded  time.Time // when the storage says this was uploaded. only set by ListBlobs, and zero if the storage didn't say
 }
 
 // an upload in progress

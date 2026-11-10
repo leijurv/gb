@@ -13,6 +13,7 @@ import (
 type mockBlobData struct {
 	data     []byte
 	checksum string
+	uploaded time.Time
 }
 
 type MockStorage struct {
@@ -70,6 +71,7 @@ func (m *MockStorage) ListBlobs() []UploadedBlob {
 			Path:      path,
 			Checksum:  blob.checksum,
 			Size:      int64(len(blob.data)),
+			Uploaded:  blob.uploaded,
 		})
 	}
 	return result
@@ -123,7 +125,7 @@ func (m *MockStorage) PresignedURL(path string, expiry time.Duration) (string, e
 func (m *MockStorage) storeBlob(path string, data []byte, checksum string) {
 	m.blobLock.Lock()
 	defer m.blobLock.Unlock()
-	m.blobs[path] = mockBlobData{data: data, checksum: checksum}
+	m.blobs[path] = mockBlobData{data: data, checksum: checksum, uploaded: time.Now()}
 }
 
 func blobIDToPath(blobID []byte) string {
@@ -149,7 +151,20 @@ func (m *MockStorage) CorruptByte(blobID []byte, offset int) {
 	copy(corrupted, blob.data)
 	corrupted[offset] ^= 0xFF
 
-	m.blobs[path] = mockBlobData{data: corrupted, checksum: blob.checksum}
+	m.blobs[path] = mockBlobData{data: corrupted, checksum: blob.checksum, uploaded: blob.uploaded}
+}
+
+// SetUploadTime overrides when the blob at path appears to have been uploaded. Used for testing.
+func (m *MockStorage) SetUploadTime(path string, uploaded time.Time) {
+	m.blobLock.Lock()
+	defer m.blobLock.Unlock()
+
+	blob, ok := m.blobs[path]
+	if !ok {
+		panic("blob not found: " + path)
+	}
+	blob.uploaded = uploaded
+	m.blobs[path] = blob
 }
 
 type mockUpload struct {

@@ -130,7 +130,7 @@ func main() {
 					Flags: []cli.Flag{
 						&cli.BoolFlag{
 							Name:  "delete-unknown-files",
-							Usage: "delete any files found in storage that are not in the local database",
+							Usage: "delete any files found in storage that are not in the local database (only ones uploaded over 7 days ago, since newer ones could belong to a backup or repack that is still running)",
 						},
 					},
 					Action: func(c *cli.Context) error {

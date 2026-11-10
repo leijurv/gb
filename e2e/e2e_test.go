@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/leijurv/gb/backup"
 	"github.com/leijurv/gb/config"
@@ -192,6 +194,92 @@ func TestMultipleBackupsAndRestore(t *testing.T) {
 	env.restore()
 
 	env.verifyRestored("changing.txt", sha256.Sum256(content2))
+}
+
+// Restore in place to before a logrotate-style rename chain. Every file's old contents are still on disk, just one name over,
+// and restoring each file overwrites the place that the previous one's old contents are now sitting in.
+// The order restorations run in is random, so this used to sometimes read a source after it had already been overwritten.
+func TestRestoreAfterRenameChain(t *testing.T) {
+	for run := 0; run < 5; run++ {
+		func() {
+			env := setupTestEnv(t, "rename-chain")
+			defer env.cleanup()
+
+			const n = 5
+			name := func(i int) string { return "log." + strconv.Itoa(i) }
+			contents := make([][]byte, n)
+			for i := range contents {
+				// distinct sizes, otherwise the second backup sees the same size and mtime at each path and doesn't notice the renames
+				contents[i] = []byte("contents of " + name(i) + " before rotation" + strings.Repeat("!", i))
+				env.writeFile(name(i), contents[i])
+			}
+			env.backup()
+			beforeRotation := backup.GetLastSessionTimestamp()
+
+			for i := n - 1; i >= 0; i-- {
+				if err := os.Rename(filepath.Join(env.srcDir, name(i)), filepath.Join(env.srcDir, name(i+1))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			env.writeFile(name(0), []byte("fresh log after rotation"))
+			env.backup()
+
+			download.RestoreNonInteractive(env.srcDir, env.srcDir, beforeRotation, env.mockStor)
+
+			for i := range contents {
+				content, err := os.ReadFile(filepath.Join(env.srcDir, name(i)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(content, contents[i]) {
+					t.Fatalf("%s has %q, expected %q", name(i), content, contents[i])
+				}
+			}
+		}()
+	}
+}
+
+// A restore that fails partway through must leave whatever was already at the destination alone.
+func TestFailedRestoreLeavesExistingFileAlone(t *testing.T) {
+	env := setupTestEnv(t, "failed-restore")
+	defer env.cleanup()
+
+	env.writeFile("file.zip", makeBinaryData(2000)) // .zip so it isn't compressed, and the corruption is caught by our hash check rather than by zstd
+	env.backup()
+	backedUp := backup.GetLastSessionTimestamp()
+
+	current := []byte("newer contents that were never backed up")
+	env.writeFile("file.zip", current)
+
+	var blobID []byte
+	if err := db.DB.QueryRow("SELECT blob_id FROM blob_entries").Scan(&blobID); err != nil {
+		t.Fatal(err)
+	}
+	env.mockStor.CorruptByte(blobID, 0)
+
+	panicked := false
+	func() {
+		defer func() {
+			if recover() != nil {
+				panicked = true
+			}
+		}()
+		download.RestoreNonInteractive(env.srcDir, env.srcDir, backedUp, env.mockStor)
+	}()
+	if !panicked {
+		t.Fatal("expected restore to panic due to corrupted blob")
+	}
+
+	content, err := os.ReadFile(filepath.Join(env.srcDir, "file.zip"))
+	if err != nil {
+		t.Fatalf("existing file is gone after failed restore: %v", err)
+	}
+	if !bytes.Equal(content, current) {
+		t.Errorf("existing file was modified by failed restore")
+	}
+	if entries, err := os.ReadDir(env.srcDir); err != nil || len(entries) != 1 {
+		t.Errorf("expected only file.zip to be left, with no temporary files, got %d entries", len(entries))
+	}
 }
 
 func makeBinaryData(size int) []byte {
@@ -555,4 +643,54 @@ func TestRepackSharedFile(t *testing.T) {
 	env.removeFile("shared.bin")
 	env.restore()
 	env.verifyRestored("shared.bin", sha256.Sum256(content))
+}
+
+// Blobs the database doesn't know about are only deleted once they're old enough that they can't belong to a backup or repack
+// that is still running (which uploads blobs before it commits them to the database).
+func TestDeleteUnknownFilesSkipsRecentUploads(t *testing.T) {
+	env := setupTestEnv(t, "delete-unknown")
+	defer env.cleanup()
+
+	env.writeFile("known.txt", []byte("this one is in the database"))
+	env.backup()
+
+	uploadUnknown := func() string {
+		upload := env.mockStor.BeginBlobUpload(crypto.RandBytes(32))
+		upload.Writer().Write([]byte("this one is not in the database"))
+		return upload.End().Path
+	}
+	oldUnknown := uploadUnknown()    // e.g. left behind by a repack a while ago
+	recentUnknown := uploadUnknown() // e.g. just uploaded by a backup that hasn't committed it yet
+	env.mockStor.SetUploadTime(oldUnknown, time.Now().Add(-30*24*time.Hour))
+
+	// answer "yes" to the confirmation prompt
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdinW.WriteString("yes\n")
+	stdinW.Close()
+	origStdin := os.Stdin
+	os.Stdin = stdinR
+	defer func() { os.Stdin = origStdin }()
+
+	if paranoia.StorageParanoia(true) {
+		t.Error("expected unknown files to be reported")
+	}
+
+	if _, size := env.mockStor.Metadata(oldUnknown); size != 0 {
+		t.Error("old unknown blob should have been deleted")
+	}
+	if _, size := env.mockStor.Metadata(recentUnknown); size == 0 {
+		t.Error("recently uploaded unknown blob must not be deleted")
+	}
+
+	// and nothing that the database knows about was touched
+	env.mockStor.DeleteBlob(recentUnknown)
+	if !paranoia.StorageParanoia(false) {
+		t.Error("storage should match the database exactly now")
+	}
+	env.removeFile("known.txt")
+	env.restore()
+	env.verifyRestored("known.txt", sha256.Sum256([]byte("this one is in the database")))
 }

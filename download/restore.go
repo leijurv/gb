@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/leijurv/gb/config"
+	"github.com/leijurv/gb/crypto"
 	"github.com/leijurv/gb/db"
 	"github.com/leijurv/gb/storage_base"
 	"github.com/leijurv/gb/utils"
@@ -286,19 +287,24 @@ func execute(rest Restoration, stor storage_base.Storage) {
 }
 
 func executeChunk(chunk []string, rest Restoration, diskSource *string, stor storage_base.Storage) *string {
-	handles := make([]*os.File, 0)
-	chunkDest := make([]Item, 0, len(chunk))
+	// everything is written to a temporary file next to its destination, and only renamed into place once the contents have been verified
+	// that way a failed restore never truncates or deletes whatever was at the destination before
+	type tmpDest struct {
+		item    Item
+		tmpPath string
+		f       *os.File
+	}
+	tmps := make([]tmpDest, 0, len(chunk))
 	success := false
 	defer func() {
-		for _, f := range handles {
-			f.Close()
+		if success {
+			return
 		}
-		if !success {
-			for _, item := range chunkDest {
-				err := os.Remove(item.destPath)
-				if err != nil && !os.IsNotExist(err) {
-					log.Println("Failed to delete file after error:", item.destPath, err)
-				}
+		for _, tmp := range tmps {
+			tmp.f.Close() // might already be closed, that's fine
+			err := os.Remove(tmp.tmpPath)
+			if err != nil && !os.IsNotExist(err) { // it won't exist if it was already renamed into place
+				log.Println("Failed to delete temporary file after error:", tmp.tmpPath, err)
 			}
 		}
 	}()
@@ -320,14 +326,15 @@ func executeChunk(chunk []string, rest Restoration, diskSource *string, stor sto
 			panic(err)
 		}
 
-		log.Println("open", path, "for write")
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		// not derived from the destination's name, so that a long filename can't push this over the length limit
+		tmpPath := filepath.Join(dir, ".gbrestore-"+hex.EncodeToString(crypto.RandBytes(8)))
+		log.Println("open", tmpPath, "for write, to be renamed to", path)
+		f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 		if err != nil {
 			panic(err)
 		}
-		handles = append(handles, f)
+		tmps = append(tmps, tmpDest{item, tmpPath, f})
 		writers = append(writers, f)
-		chunkDest = append(chunkDest, item)
 	}
 
 	out := io.MultiWriter(writers...)
@@ -356,15 +363,25 @@ func executeChunk(chunk []string, rest Restoration, diskSource *string, stor sto
 		panic("hash verification failed in restore")
 	}
 	log.Println("Success")
-	success = true
 
-	for _, item := range chunkDest {
-		modTime := time.Unix(item.fsModified, 0)
-		err := os.Chtimes(item.destPath, modTime, modTime)
+	for _, tmp := range tmps {
+		err := tmp.f.Close()
+		if err != nil {
+			panic(err)
+		}
+		modTime := time.Unix(tmp.item.fsModified, 0)
+		err = os.Chtimes(tmp.tmpPath, modTime, modTime)
 		if err != nil {
 			panic(err)
 		}
 	}
+	for _, tmp := range tmps {
+		err := os.Rename(tmp.tmpPath, tmp.item.destPath)
+		if err != nil {
+			panic(err)
+		}
+	}
+	success = true
 	return &chunk[0]
 }
 
@@ -407,6 +424,13 @@ func statSources(plan map[[32]byte]*Restoration) {
 			}
 		}
 		restoration := plan[key]
+		if destKey, ok := destinations[path]; ok && destKey != key {
+			// this path currently has the data we want, but another restoration is going to overwrite it with something else, and might do so before we get to read from it
+			// e.g. after a logrotate, log.1 holds what used to be in log, but restoring log.1 to its old contents overwrites it
+			log.Println(path, "is going to be overwritten by this restore, so it cannot be used as a source")
+			delete(restoration.sourcesOnDisk, path)
+			continue
+		}
 		stat, err := os.Stat(path)
 		if err == nil && utils.NormalFile(stat) && stat.Size() == restoration.size && stat.ModTime().Unix() == restoration.sourcesOnDisk[path] {
 			sourceVerified[key] = struct{}{}
@@ -431,7 +455,7 @@ func statSources(plan map[[32]byte]*Restoration) {
 			delete(restoration.sourcesOnDisk, path)
 		}
 	}
-	// at this point, there is no overlap between sourcesOndisk and destinations for any restoration
+	// at this point, there is no overlap between sourcesOndisk and destinations, within or across restorations
 	for _, hash := range completedRestorationDestinations(plan) {
 		delete(plan, hash)
 	}
